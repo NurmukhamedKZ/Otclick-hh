@@ -1,0 +1,55 @@
+# Full local stack: backend API + worker + frontend.
+# Run from repo root:  docker compose up -d --build
+#
+# Needs backend/.env (see backend/.env.example) with real Supabase/OpenAI/etc values.
+# Frontend NEXT_PUBLIC_* vars are baked at build time — set them in a root .env
+# (see frontend/.env.local.example for the three keys), docker compose auto-loads it.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: aiautoclicker-backend:latest
+    container_name: aiautoclicker-api
+    restart: unless-stopped
+    env_file:
+      - backend/.env
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  worker:
+    # Reuse the API image — same code, different entrypoint.
+    image: aiautoclicker-backend:latest
+    container_name: aiautoclicker-worker
+    restart: unless-stopped
+    env_file:
+      - backend/.env
+    command: ["python", "worker_main.py"]
+    depends_on:
+      api:
+        condition: service_healthy
+    # Playwright Chromium needs more shared memory than the 64 MB default.
+    shm_size: "1gb"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    image: aiautoclicker-frontend:latest
+    container_name: aiautoclicker-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
