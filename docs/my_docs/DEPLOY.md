@@ -4,7 +4,7 @@ Three pieces deploy independently:
 
 | Piece     | Where                     |
 |-----------|---------------------------|
-| Database  | Supabase (managed, already live) |
+| Database  | Self-hosted Supabase (root docker-compose.yml) or managed Supabase |
 | Frontend  | Vercel                    |
 | Backend + worker | Contabo VPS via Docker Compose |
 
@@ -21,7 +21,7 @@ cd /home/app/app
 
 **Docker rebuild**
 ```bash
-docker compose -f infra/docker-compose.yml up -d --build
+docker compose -f docker-compose.yml up -d --build
 ```
 ---
 
@@ -59,12 +59,26 @@ sudo -iu app git clone <your-repo> ~/app
 
 ### `~/app/backend/.env`
 
-Copy `backend/.env.example` and fill in. Critical vars:
+Copy `backend/.env.example` and fill in. For the local Supabase stack,
+generate keys first:
+
+```bash
+python3 infra/supabase/gen-keys.py
+# Paste output into backend/.env — see backend/.env.example comments
+```
+
+Critical vars:
 
 ```
+# Local stack (default): set SUPABASE_URL=http://kong:8000, paste keys from gen-keys.py
+# Cloud: set SUPABASE_URL=https://xxxx.supabase.co with cloud project keys
 SUPABASE_URL=
 SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
+JWT_SECRET=
+ANON_KEY=
+SERVICE_ROLE_KEY=
+POSTGRES_PASSWORD=
 FERNET_KEY=                  # ⚠ back this up offline — losing it bricks all stored hh tokens
 OPENAI_API_KEY=
 CLOUDPAYMENTS_PUBLIC_ID=
@@ -77,9 +91,9 @@ CORS_ORIGINS=https://otclick.org,https://www.otclick.org
 
 ```bash
 cd ~/app
-docker compose -f infra/docker-compose.yml up -d --build
-docker compose -f infra/docker-compose.yml ps
-docker compose -f infra/docker-compose.yml logs -f api worker
+docker compose -f docker-compose.yml up -d --build
+docker compose -f docker-compose.yml ps
+docker compose -f docker-compose.yml logs -f api worker
 ```
 
 First build pulls Chromium (~1 GB) — ~5–10 min on Contabo.
@@ -130,7 +144,7 @@ Then on the frontend: signup → onboarding → connect hh → start worker → 
 
 ```bash
 cd ~/app && git pull
-docker compose -f infra/docker-compose.yml up -d --build
+docker compose -f docker-compose.yml up -d --build
 ```
 
 The worker restarts cleanly — `worker_main.py` traps `SIGTERM` and drains in-flight jobs.
@@ -138,15 +152,15 @@ The worker restarts cleanly — `worker_main.py` traps `SIGTERM` and drains in-f
 ### Logs
 
 ```bash
-docker compose -f infra/docker-compose.yml logs -f --tail=200 api
-docker compose -f infra/docker-compose.yml logs -f --tail=200 worker
+docker compose -f docker-compose.yml logs -f --tail=200 api
+docker compose -f docker-compose.yml logs -f --tail=200 worker
 ```
 
 ### Rollback
 
 ```bash
 git checkout <previous-sha>
-docker compose -f infra/docker-compose.yml up -d --build
+docker compose -f docker-compose.yml up -d --build
 ```
 
 (Or tag images per release and `docker compose up` with the old tag — recommended once you have a real release cadence.)
@@ -156,7 +170,7 @@ docker compose -f infra/docker-compose.yml up -d --build
 Chromium leaks. If `docker stats` shows worker creeping past ~3 GB, restart it:
 
 ```bash
-docker compose -f infra/docker-compose.yml restart worker
+docker compose -f docker-compose.yml restart worker
 ```
 
 Add Sentry + a memory alert before public launch.
