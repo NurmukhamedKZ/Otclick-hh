@@ -494,7 +494,8 @@ html { scroll-behavior: smooth; }
   .oc-app-main { padding: 4px 2px 24px !important; }
 
   /* sidebar -> fixed bottom tab bar */
-  .oc-sidebar {
+  .oc-sidebar,
+  .oc-sidebar--collapsed {
     position: fixed !important;
     inset: auto 0 0 0 !important;
     top: auto !important;
@@ -524,6 +525,8 @@ html { scroll-behavior: smooth; }
     gap: 2px !important;
   }
 
+  .oc-sidebar--collapsed .oc-nav-item { justify-content: center; padding: 6px 4px; }
+  .oc-sidebar--collapsed .oc-nav-item__label { display: block; }
   .oc-nav-item {
     flex-direction: column;
     gap: 2px;
