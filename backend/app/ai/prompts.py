@@ -59,10 +59,11 @@ RECRUITER_RULES = """\
 RECRUITER_SYSTEM_PROMPT = RECRUITER_RULES
 
 
-def build_recruiter_prompt(resume_summary: str) -> str:
-    """Recruiter system prompt grounded in candidate resume."""
+def build_recruiter_prompt(resume_summary: str, qa_block: str = "") -> str:
+    """Recruiter system prompt grounded in candidate resume + saved Q&A."""
     resume = resume_summary.strip() or "(резюме недоступно)"
-    return f"{RECRUITER_RULES}\n\nРезюме кандидата:\n{resume}\n"
+    qa = f"\n{qa_block.strip()}\n" if qa_block.strip() else ""
+    return f"{RECRUITER_RULES}\n\nРезюме кандидата:\n{resume}\n{qa}"
 
 
 # --- cover letter ------------------------------------------------------------
@@ -83,7 +84,7 @@ def build_form_choice_prompt(question: str, options_block: str, resume_ctx: str)
     return (
         "Ты отвечаешь на вопрос теста вакансии от имени кандидата, "
         "правдиво и на основе его резюме.\n"
-        f"Резюме кандидата:\n{resume_ctx or '(нет данных)'}\n\n"
+        f"Данные кандидата:\n{resume_ctx or '(нет данных)'}\n\n"
         f"Вопрос: {question}\n"
         f"Варианты:\n{options_block}\n"
         "Выбери ID самого подходящего и правдивого ответа. Пришли ТОЛЬКО ID, ничего больше."
@@ -99,7 +100,7 @@ def build_form_text_prompt(question: str, resume_ctx: str) -> str:
     """
     return (
         "Ты отвечаешь на вопрос теста вакансии от имени кандидата, на основе резюме.\n"
-        f"Резюме кандидата:\n{resume_ctx or '(нет данных)'}\n\n"
+        f"Данные кандидата:\n{resume_ctx or '(нет данных)'}\n\n"
         f"Вопрос: {question}\n\n"
         "ТРЕБОВАНИЯ К ОТВЕТУ:\n"
         "- МАКСИМАЛЬНО КРАТКО: одна строка, идеально 3-10 слов.\n"

@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api import auth, billing, blacklist, captcha, chats, filters, forms, internal, recruiter, resumes, webhooks, worker
+from app.api import auth, billing, blacklist, captcha, chats, filters, forms, internal, qa, recruiter, resumes, webhooks, worker
 from app.api import _debug
 from app.config import settings
 
@@ -17,6 +17,7 @@ api_router.include_router(webhooks.router)
 api_router.include_router(recruiter.router)
 api_router.include_router(chats.router)
 api_router.include_router(forms.router)
+api_router.include_router(qa.router)
 
 if settings.DEBUG_ENDPOINTS:
     api_router.include_router(_debug.router)

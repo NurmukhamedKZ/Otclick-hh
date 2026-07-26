@@ -19,6 +19,7 @@ from app.ai.prompts import (
 )
 from app.config import settings
 from app.db.supabase import service_client
+from app.services import qa_memory
 from app.services.hh_auth import decrypt_token
 from app.services.hh_credentials import load_api_client, persist_if_refreshed
 
@@ -446,6 +447,9 @@ async def prepare_form_answers(
             logger.warning(
                 "fill: resume load failed — answers ungrounded", exc_info=True
             )
+        # User-confirmed Q&A outranks the resume for repeat questions.
+        if qa := await qa_memory.prompt_block(user_id):
+            resume_ctx = f"{resume_ctx}\n\n{qa}" if resume_ctx else qa
 
     try:
         answers = await loop.run_in_executor(

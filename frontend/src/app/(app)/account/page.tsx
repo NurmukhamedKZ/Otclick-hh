@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { apiFetch } from "@/lib/api";
 import { Btn, Card, Field, LinkBtn, PageHeader, Tag } from "@/components/otclick/ui";
 import { ILink, IPower, IRefresh, ITelegram } from "@/components/otclick/icons";
+import { QAMemoryCard } from "@/components/otclick/qa-memory";
 
 type Tab = "profile" | "integrations" | "danger";
 
@@ -196,6 +197,7 @@ export default function AccountPage() {
               <li>ошибки worker&apos;а</li>
             </ul>
           </Card>
+          <QAMemoryCard />
         </div>
       )}
 

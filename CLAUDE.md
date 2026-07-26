@@ -210,6 +210,7 @@ Migrations live in `infra/supabase/migrations/` (numbered SQL files).
 - `recruiter_todos` — agent-created todos for the user
 - `worker_runtime` — runner heartbeat (state/queued/today_count/next_run_at/last_error), read by API
 - `relevance_cache` — AI vacancy relevance verdicts, unique on `(resume_id, vacancy_id)`; service_role only. Migration 015 also adds `filters.ai_filter_enabled`
+- `qa_memory` — user-curated Q&A (only answers the user EDITED when approving a form draft, plus manual entries), unique on `(user_id, question)`; service_role only. `services/qa_memory.prompt_block` injects it into form-test and recruiter prompts (migration 022)
 - `captcha-screenshots` — Supabase Storage bucket for captcha images
 
 Migrations 010–015 add the recruiter tables, `worker_enabled`, `form_drafts`, recruiter `question_text`, `worker_runtime`, and the relevance cache + `filters.ai_filter_enabled`.

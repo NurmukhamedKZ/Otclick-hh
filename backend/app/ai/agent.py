@@ -17,6 +17,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from app.ai.prompts import build_recruiter_prompt
 from app.ai.recruiter_tools import RECRUITER_TOOLS, RecruiterContext
 from app.config import settings
+from app.services import qa_memory
 from app.services.cover_letter import generate as _generate_cover_letter
 from app.services.form_filler import FillStatus, prepare_form_answers
 from app.services.relevance import Verdict, filter_relevant
@@ -151,7 +152,12 @@ class HHAgent:
             return
         if self._recruiter_agent is None:
             summary = await self._load_resume_summary()
-            self._recruiter_agent = self._build_recruiter_agent(build_recruiter_prompt(summary))
+            qa = await qa_memory.prompt_block(self.user_id)
+            # ponytail: prompt frozen for the agent's lifetime — Q&A edits land
+            # on the next runner restart; rebuild per message if that's too slow.
+            self._recruiter_agent = self._build_recruiter_agent(
+                build_recruiter_prompt(summary, qa)
+            )
         ctx = RecruiterContext(
             self.user_id, negotiation_id, message_id, client,
             question_text=question_text,
@@ -181,7 +187,12 @@ class HHAgent:
             return
         if self._recruiter_agent is None:
             summary = await self._load_resume_summary()
-            self._recruiter_agent = self._build_recruiter_agent(build_recruiter_prompt(summary))
+            qa = await qa_memory.prompt_block(self.user_id)
+            # ponytail: prompt frozen for the agent's lifetime — Q&A edits land
+            # on the next runner restart; rebuild per message if that's too slow.
+            self._recruiter_agent = self._build_recruiter_agent(
+                build_recruiter_prompt(summary, qa)
+            )
         ctx = RecruiterContext(
             self.user_id, negotiation_id, message_id, client,
             question_text=question, quick_reply_labels=labels,

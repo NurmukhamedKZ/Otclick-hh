@@ -12,7 +12,7 @@ import logging
 from datetime import datetime, timezone
 
 from app.db.supabase import service_client
-from app.services import form_filler
+from app.services import form_filler, qa_memory
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +109,13 @@ async def approve(
 
     final_answers = answers if answers is not None else draft["answers"]
     final_letter = letter if letter is not None else (draft.get("letter") or "")
+
+    # Remember only what the user actually edited — those corrections are the
+    # source of truth for future forms and recruiter replies.
+    if answers is not None:
+        await qa_memory.save_edited(
+            user_id, draft["answers"], final_answers, vacancy_id=draft["vacancy_id"]
+        )
 
     status, error = await form_filler.submit_prepared_form(
         user_id=user_id,
