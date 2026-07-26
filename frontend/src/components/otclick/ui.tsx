@@ -1,93 +1,175 @@
 "use client";
 
 import { ButtonHTMLAttributes, CSSProperties, ReactNode, forwardRef } from "react";
+import Link from "next/link";
 
 // ============ Card ============
 export type CardTone = "light" | "dark" | "cream";
 
-const CARD_BASE: CSSProperties = { borderRadius: 22, padding: 22, position: "relative" };
 const CARD_TONE: Record<CardTone, CSSProperties> = {
   light: { background: "var(--surface)", color: "var(--ink)" },
   dark: { background: "var(--ink)", color: "#F5F1E6" },
   cream: { background: "var(--bg-deep)", color: "var(--ink)" },
 };
 
-export function Card({
-  tone = "light",
-  style,
-  children,
-  className,
-  ...rest
-}: {
+type CardProps = {
   tone?: CardTone;
   style?: CSSProperties;
   children: ReactNode;
   className?: string;
-} & React.HTMLAttributes<HTMLDivElement>) {
+  /** makes the whole card a single click target */
+  interactive?: { href: string } | { onClick: () => void };
+} & React.HTMLAttributes<HTMLDivElement>;
+
+export function Card({ tone = "light", style, children, className, interactive, ...rest }: CardProps) {
+  const cls = ["oc-card", interactive && "oc-card--interactive", className].filter(Boolean).join(" ");
+  const css = { ...CARD_TONE[tone], ...style };
+
+  if (interactive && "href" in interactive) {
+    return (
+      <Link href={interactive.href} className={cls} style={css}>
+        {children}
+      </Link>
+    );
+  }
+  if (interactive) {
+    return (
+      <button type="button" onClick={interactive.onClick} className={cls} style={css}>
+        {children}
+      </button>
+    );
+  }
   return (
-    <div className={className} style={{ ...CARD_BASE, ...CARD_TONE[tone], ...style }} {...rest}>
+    <div className={cls} style={css} {...rest}>
       {children}
     </div>
   );
 }
 
 // ============ Btn ============
-export type BtnKind =
-  | "primary"
-  | "yellow"
-  | "coral"
-  | "ghost"
-  | "ghostDark"
-  | "soft"
-  | "white";
+export type BtnKind = "primary" | "yellow" | "coral" | "ghost" | "ghostDark" | "soft" | "white";
 export type BtnSize = "sm" | "md" | "lg";
 
-const KIND: Record<BtnKind, CSSProperties> = {
-  primary: { background: "var(--ink)", color: "#fff", border: "1px solid var(--ink)" },
-  yellow: { background: "var(--yellow)", color: "var(--ink)", border: "1px solid var(--yellow)" },
-  coral: { background: "var(--coral)", color: "#fff", border: "1px solid var(--coral)" },
-  ghost: { background: "transparent", color: "var(--ink)", border: "1px solid var(--line)" },
-  ghostDark: { background: "transparent", color: "#F5F1E6", border: "1px solid #ffffff22" },
-  soft: { background: "var(--bg-deep)", color: "var(--ink)", border: "1px solid transparent" },
-  white: { background: "#fff", color: "var(--ink)", border: "1px solid var(--line)" },
-};
+function btnClass(kind: BtnKind, size: BtnSize, className?: string) {
+  return ["oc-btn", `oc-btn--${kind}`, `oc-btn--${size}`, className].filter(Boolean).join(" ");
+}
 
 type BtnProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   kind?: BtnKind;
   size?: BtnSize;
   icon?: ReactNode;
+  loading?: boolean;
 };
 
 export const Btn = forwardRef<HTMLButtonElement, BtnProps>(function Btn(
-  { kind = "ghost", size = "md", icon, children, style, ...rest },
+  { kind = "ghost", size = "md", icon, loading, children, className, disabled, ...rest },
   ref,
 ) {
-  const pad = size === "sm" ? "7px 12px" : size === "lg" ? "14px 22px" : "10px 16px";
-  const fs = size === "sm" ? 13 : size === "lg" ? 15 : 14;
   return (
     <button
       ref={ref}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 8,
-        padding: pad,
-        borderRadius: 999,
-        fontSize: fs,
-        fontWeight: 600,
-        lineHeight: 1,
-        cursor: "pointer",
-        transition: "transform .15s ease, opacity .15s ease",
-        ...KIND[kind],
-        ...style,
-      }}
+      className={btnClass(kind, size, className)}
+      aria-busy={loading || undefined}
+      disabled={disabled || loading}
       {...rest}
     >
-      {icon}
+      {loading ? <span className="oc-spinner" /> : icon}
       {children}
     </button>
   );
 });
+
+// ============ LinkBtn ============
+// Replaces every <Link><Btn/></Link>: a <button> inside an <a> is invalid DOM,
+// produces two tab stops, and breaks keyboard activation.
+export function LinkBtn({
+  href,
+  kind = "ghost",
+  size = "md",
+  icon,
+  children,
+  external,
+  className,
+  style,
+}: {
+  href: string;
+  kind?: BtnKind;
+  size?: BtnSize;
+  icon?: ReactNode;
+  children: ReactNode;
+  external?: boolean;
+  className?: string;
+  style?: CSSProperties;
+}) {
+  const cls = btnClass(kind, size, className);
+  if (external) {
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer" className={cls} style={style}>
+        {icon}
+        {children}
+      </a>
+    );
+  }
+  return (
+    <Link href={href} className={cls} style={style}>
+      {icon}
+      {children}
+    </Link>
+  );
+}
+
+// ============ IconBtn ============
+// `label` is required: it is both the accessible name and the tooltip.
+export function IconBtn({
+  label,
+  icon,
+  onClick,
+  href,
+  size = "md",
+  onDark,
+  disabled,
+  style,
+}: {
+  label: string;
+  icon: ReactNode;
+  onClick?: () => void;
+  href?: string;
+  size?: "md" | "lg";
+  onDark?: boolean;
+  disabled?: boolean;
+  style?: CSSProperties;
+}) {
+  const cls = ["oc-icon-btn", `oc-icon-btn--${size}`, onDark && "oc-icon-btn--onDark"]
+    .filter(Boolean)
+    .join(" ");
+  const inner = href ? (
+    <Link href={href} aria-label={label} className={cls} style={style}>
+      {icon}
+    </Link>
+  ) : (
+    <button type="button" aria-label={label} onClick={onClick} disabled={disabled} className={cls} style={style}>
+      {icon}
+    </button>
+  );
+  return (
+    <span className="oc-tip" data-tip={label}>
+      {inner}
+    </span>
+  );
+}
+
+// ============ Tooltip / KeyHint ============
+export function Tooltip({ text, children }: { text: string; children: ReactNode }) {
+  return (
+    <span className="oc-tip" data-tip={text}>
+      {children}
+    </span>
+  );
+}
+
+export function KeyHint({ children }: { children: ReactNode }) {
+  return <kbd className="oc-kbd">{children}</kbd>;
+}
 
 // ============ Tag ============
 export type TagTone = "neutral" | "ok" | "warn" | "err" | "yellow" | "coral" | "dark";
