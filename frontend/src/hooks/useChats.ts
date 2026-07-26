@@ -37,8 +37,10 @@ type ListResponse = {
 export const chatsQueryKey = (unreadOnly: boolean) => ["chats", unreadOnly] as const;
 
 /** Shared across the chats page and the sidebar badge — `/api/chats` proxies to
- *  chatik.hh.ru upstream, so it must not be fetched once per mounting component. */
-export function useChats(unreadOnly: boolean) {
+ *  chatik.hh.ru upstream, so it must not be fetched once per mounting component.
+ *  Pass `enabled: false` to skip it entirely (the endpoint 409s without an hh session). */
+export function useChats(unreadOnly: boolean, options?: { enabled?: boolean }) {
+  const enabled = options?.enabled ?? true;
   const qc = useQueryClient();
   const { data, error, isFetching } = useQuery({
     queryKey: chatsQueryKey(unreadOnly),
@@ -47,6 +49,7 @@ export function useChats(unreadOnly: boolean) {
         `/api/chats?per_page=50&unread_only=${unreadOnly ? "true" : "false"}`,
       ),
     staleTime: 60_000,
+    enabled,
   });
 
   const refresh = useCallback(

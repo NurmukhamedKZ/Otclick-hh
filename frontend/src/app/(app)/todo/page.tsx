@@ -306,9 +306,16 @@ export default function RecruiterPage() {
 
   const [active, setActive] = useState<SectionId>("forms");
 
+  // also on hashchange, not just on mount: navigating between #anchors — including
+  // via back/forward — stays in the same document and never remounts this component
   useEffect(() => {
-    const hash = window.location.hash.replace("#", "");
-    if (isSectionId(hash)) setActive(hash);
+    function sync() {
+      const hash = window.location.hash.replace("#", "");
+      if (isSectionId(hash)) setActive(hash);
+    }
+    sync();
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
   }, []);
 
   return (

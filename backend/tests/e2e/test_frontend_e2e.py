@@ -10,150 +10,21 @@ Chief target: the cloud→local regression where the frontend was built with
 NEXT_PUBLIC_API_URL pointing at Kong (54321) instead of the backend (8000), so every
 /api/* call 404'd and hh features died. Only a browser sees that — the baked-in URL
 lives in the JS bundle, not in any server-side config a unit test can read.
+
+Fixtures live in conftest.py; shared helpers in _harness.py.
+UI behaviour is covered by test_frontend_ui_e2e.py.
 """
 
-import uuid
-from pathlib import Path
-
-import pytest
-import requests
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
-FRONTEND_URL = "http://localhost:3000"
-API_URL = "http://localhost:8000"
-KONG_URL = "http://localhost:54321"
-NAV_TIMEOUT = 30_000
-
-
-def _load_root_env() -> dict[str, str]:
-    path = REPO_ROOT / ".env"
-    if not path.exists():
-        return {}
-    env = {}
-    for line in path.read_text().splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            key, value = line.split("=", 1)
-            env[key.strip()] = value.strip()
-    return env
-
-
-ENV = _load_root_env()
-SERVICE_ROLE_KEY = ENV.get("SERVICE_ROLE_KEY", "")
-
-
-def _reachable(url: str) -> bool:
-    try:
-        requests.get(url, timeout=3)
-        return True
-    except requests.RequestException:
-        return False
-
-
-def _chromium_available() -> bool:
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        return False
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            browser.close()
-        return True
-    except Exception:
-        return False
-
-
-pytestmark = pytest.mark.skipif(
-    not SERVICE_ROLE_KEY
-    or not _reachable(FRONTEND_URL)
-    or not _reachable(f"{API_URL}/health")
-    or not _chromium_available(),
-    reason="needs the local stack up (docker compose up -d) + playwright install chromium",
+from ._harness import (
+    API_URL,
+    FRONTEND_URL,
+    KONG_URL,
+    NAV_TIMEOUT,
+    requires_stack,
+    sign_up as _sign_up,
 )
 
-
-def _delete_user_by_email(email: str) -> None:
-    headers = {"apikey": SERVICE_ROLE_KEY, "Authorization": f"Bearer {SERVICE_ROLE_KEY}"}
-    res = requests.get(
-        f"{KONG_URL}/auth/v1/admin/users", headers=headers, params={"per_page": 200}, timeout=10
-    )
-    if res.status_code != 200:
-        return
-    for user in res.json().get("users", []):
-        if user.get("email") == email:
-            requests.delete(
-                f"{KONG_URL}/auth/v1/admin/users/{user['id']}", headers=headers, timeout=10
-            )
-
-
-@pytest.fixture(scope="module")
-def browser():
-    from playwright.sync_api import sync_playwright
-
-    with sync_playwright() as p:
-        b = p.chromium.launch(headless=True)
-        yield b
-        b.close()
-
-
-class Traffic:
-    """Records every request/response the page made, so tests can assert on wiring."""
-
-    def __init__(self):
-        self.requests: list[str] = []
-        self.failures: list[tuple[str, int]] = []
-        self.console_errors: list[str] = []
-
-    def attach(self, page) -> None:
-        page.on("request", lambda r: self.requests.append(r.url))
-        page.on(
-            "response",
-            lambda r: self.failures.append((r.url, r.status)) if r.status >= 400 else None,
-        )
-        page.on(
-            "console",
-            lambda m: self.console_errors.append(m.text) if m.type == "error" else None,
-        )
-
-    def to(self, prefix: str) -> list[str]:
-        return [u for u in self.requests if u.startswith(prefix)]
-
-
-@pytest.fixture
-def page(browser):
-    context = browser.new_context(viewport={"width": 1280, "height": 900})
-    p = context.new_page()
-    p.set_default_timeout(NAV_TIMEOUT)
-    traffic = Traffic()
-    traffic.attach(p)
-    p.traffic = traffic  # type: ignore[attr-defined]
-    yield p
-    context.close()
-
-
-@pytest.fixture
-def credentials():
-    email = f"e2e-{uuid.uuid4().hex[:12]}@example.com"
-    yield {"email": email, "password": f"Pw-{uuid.uuid4().hex[:16]}"}
-    _delete_user_by_email(email)
-
-
-def _sign_up(page, creds: dict) -> None:
-    page.goto(f"{FRONTEND_URL}/auth", wait_until="domcontentloaded")
-    page.get_by_role("button", name="регистрация").click()
-    page.locator('input[type="email"]').fill(creds["email"])
-    page.locator('input[type="password"]').fill(creds["password"])
-    page.get_by_role("button", name="зарегистрироваться").click()
-    page.wait_for_url(f"{FRONTEND_URL}/dashboard", timeout=NAV_TIMEOUT)
-
-
-@pytest.fixture
-def signed_in_page(page, credentials):
-    _sign_up(page, credentials)
-    # HHBanner fires /api/hh/status on mount — wait for the app to settle.
-    page.wait_for_load_state("networkidle")
-    return page
+pytestmark = requires_stack
 
 
 # --- public pages ------------------------------------------------------------------

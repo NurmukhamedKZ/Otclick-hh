@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { createClient } from "@/lib/supabase/client";
+import { apiFetch } from "@/lib/api";
 import { computeNavCounts, type NavCounts } from "@/lib/nav-counts";
 import { useChats } from "@/hooks/useChats";
 import { useFormDrafts } from "@/hooks/useFormDrafts";
@@ -11,8 +13,18 @@ import { useRecruiter } from "@/hooks/useRecruiter";
  *  mounting this next to the pages that use the same hooks costs no extra request. */
 export function useNavCounts(): NavCounts {
   const supabase = useMemo(() => createClient(), []);
+
+  // /api/chats 409s without an hh web session, so an unconnected account would
+  // otherwise hit a guaranteed-failing upstream call on every navigation.
+  // Key matches the onboarding modal's, so this shares one request.
+  const { data: hh } = useQuery({
+    queryKey: ["hh-status"],
+    queryFn: () => apiFetch<{ connected: boolean }>("/api/hh/status"),
+    staleTime: 60_000,
+  });
+
   // must match the chats page's default so both share one cache entry
-  const { chats } = useChats(false);
+  const { chats } = useChats(false, { enabled: !!hh?.connected });
   const { drafts: formDrafts } = useFormDrafts();
   const { drafts: recruiterDrafts, todos } = useRecruiter();
   const [unreadNotifications, setUnread] = useState(0);
