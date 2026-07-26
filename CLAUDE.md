@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Otclick** (public repo: `NurmukhamedKZ/Otclick`, MIT license) — open-source AI agent for hh.ru/hh.kz job application automation. Self-hostable, privacy-first. See `README.md` for the public-facing pitch, feature list, and roadmap. Sub-projects:
+**Otclick** (public repo: **https://github.com/NurmukhamedKZ/Otclick-hh**, MIT license — this is the canonical URL for clones, badges and README links; the older `NurmukhamedKZ/Otclick` name is stale) — open-source AI agent for hh.ru/hh.kz job application automation. Self-hostable, privacy-first. See `README.md` for the public-facing pitch, feature list, and roadmap. Sub-projects:
 
 - **`backend/`** — FastAPI service (active build) + standalone worker (`worker_main.py`)
 - **`frontend/`** — Next.js 16 + React 19 + Tailwind v4 (Supabase SSR auth)

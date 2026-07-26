@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/NurmukhamedKZ/Otclick/main/docs/assets/banner.svg" alt="Otclick" width="100%"/>
+  <img src="https://raw.githubusercontent.com/NurmukhamedKZ/Otclick-hh/main/docs/assets/banner.svg" alt="Otclick" width="100%"/>
 </p>
 
 <h1 align="center">Otclick 🤖</h1>
@@ -25,9 +25,9 @@
   <img src="https://img.shields.io/badge/Playwright-45ba4b?style=for-the-badge&logo=playwright&logoColor=white" />
   <img src="https://img.shields.io/badge/Supabase-3FCF8E?style=for-the-badge&logo=supabase&logoColor=white" />
   <br/>
-  <img src="https://img.shields.io/github/license/NurmukhamedKZ/Otclick?style=for-the-badge" />
-  <img src="https://img.shields.io/github/stars/NurmukhamedKZ/Otclick?style=for-the-badge" />
-  <img src="https://img.shields.io/github/issues/NurmukhamedKZ/Otclick?style=for-the-badge" />
+  <img src="https://img.shields.io/github/license/NurmukhamedKZ/Otclick-hh?style=for-the-badge" />
+  <img src="https://img.shields.io/github/stars/NurmukhamedKZ/Otclick-hh?style=for-the-badge" />
+  <img src="https://img.shields.io/github/issues/NurmukhamedKZ/Otclick-hh?style=for-the-badge" />
 </p>
 
 <p align="center">
@@ -57,7 +57,7 @@
     <td width="50%">
       <h3>📝 Auto-Apply Engine</h3>
       Background worker with human-like behavior: log-normal delays (3–30s), session clustering (15–30 applications),
-      1–2h breaks, daily caps (~25–30). No pattern detection risk.
+      1–2h breaks, and a daily cap (100 by default, counted atomically in Postgres).
     </td>
     <td width="50%">
       <h3>🧪 Vacancy Test Solver</h3>
@@ -68,8 +68,8 @@
   <tr>
     <td width="50%">
       <h3>💬 Recruiter Chat Agent</h3>
-      Autonomous AI agent monitors recruiter messages, drafts responses, can escalate to you, or create todos.
-      Never misses a follow-up.
+      A separate loop (its own on/off switch) watches recruiter and hh-bot messages, and prepares an answer,
+      an escalation, or a todo. <strong>It never sends anything to hh on its own</strong> — you approve every reply.
     </td>
     <td width="50%">
       <h3>🛡️ Captcha Handling</h3>
@@ -91,8 +91,8 @@
   <tr>
     <td width="50%">
       <h3>🔐 Privacy-first Auth</h3>
-      OAuth via Playwright (browser automation — hh.ru's password grant is broken).
-      Tokens encrypted with Fernet symmetric encryption.
+      OAuth via Playwright (browser automation — hh.ru's password grant is broken), with password
+      or passwordless email-code login. Tokens encrypted with Fernet symmetric encryption.
     </td>
     <td width="50%">
       <h3>⚡ Self-hostable</h3>
@@ -132,15 +132,16 @@
 
 ### Application Flow
 
-1. **Connect** — OAuth via headless Chromium (Playwright). Authenticate once.
+1. **Connect** — OAuth via headless Chromium (Playwright), password or emailed code. Authenticate once.
 2. **Configure** — Create search filters. Optionally enable AI relevance filtering.
-3. **Start Worker** — Flip the switch. The background worker:
-   - Searches hh.ru for matching vacancies per filter
+3. **Start Worker** — Flip the switch. The auto-apply loop:
+   - Searches hh.ru for matching vacancies per filter (backing off when there's nothing new, to stay under hh's radar)
    - Deduplicates, checks blacklist, filters by AI relevance (optional)
    - Generates cover letters (cached, no duplicates)
    - Applies with human-like timing
    - Handles captcha → pauses → notifies → waits for you to solve
-4. **Recruiter Chat** — The AI agent monitors incoming recruiter messages and responds autonomously, escalates, or creates todos.
+4. **Recruiter Chat** — A second, independently switchable loop reads new recruiter/bot messages and prepares a reply,
+   an escalation, or a todo. Nothing is sent until you press send.
 5. **Review** — Track everything in the dashboard. Approve form-draft test answers before submission.
 
 ---
@@ -206,8 +207,8 @@ landed before trusting it.
 
 ```bash
 # Clone the repository
-git clone https://github.com/NurmukhamedKZ/Otclick.git
-cd otclick
+git clone https://github.com/NurmukhamedKZ/Otclick-hh.git
+cd Otclick-hh
 
 # Create virtual environment and install dependencies
 uv sync
@@ -272,9 +273,9 @@ FERNET_KEY=your-fernet-key
 # AI — all fields optional. Empty → fallback templates.
 OPENAI_API_KEY=sk-...
 OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_MODEL=gpt-4o
+OPENAI_MODEL=gpt-5.4-nano
 
-# Internal auth for cron
+# Shared secret for the /internal/cron/* endpoints (token refresh, notification pruning)
 INTERNAL_CRON_TOKEN=your-cron-token
 
 # CloudPayments billing — optional for self-hosted
@@ -289,6 +290,21 @@ NEXT_PUBLIC_SUPABASE_URL=http://localhost:54321
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<paste ANON_KEY from gen-keys.py>
 NEXT_PUBLIC_API_URL=http://localhost:8000
 NEXT_PUBLIC_GOOGLE_AUTH_ENABLED=false
+```
+
+### Scheduled jobs (self-hosted)
+
+Two maintenance endpoints are meant to be called from your own cron, authenticated with
+`INTERNAL_CRON_TOKEN` (no user JWT):
+
+```bash
+# daily — refresh hh tokens that are about to expire (hh refresh tokens are single-use)
+curl -fsS -X POST http://127.0.0.1:8000/internal/cron/refresh-tokens \
+  -H "X-Internal-Token: $INTERNAL_CRON_TOKEN"
+
+# weekly — drop old notifications (read >14 days, anything >90 days)
+curl -fsS -X POST http://127.0.0.1:8000/internal/cron/prune-notifications \
+  -H "X-Internal-Token: $INTERNAL_CRON_TOKEN"
 ```
 
 ---
@@ -328,13 +344,14 @@ otclick/
 │   │   │   ├── analytics.py     # Funnel/KPI analytics
 │   │   │   ├── billing.py       # Subscription management
 │   │   │   ├── webhooks.py      # CloudPayments webhook
-│   │   │   └── internal.py      # Cron job endpoints
+│   │   │   ├── qa.py            # User-curated Q&A memory
+│   │   │   └── internal.py      # Cron endpoints (token refresh, retention)
 │   │   ├── ai/
 │   │   │   ├── agent.py         # Centralized HHAgent (ChatOpenAI)
 │   │   │   ├── prompts.py       # System prompts + text sanitizer
 │   │   │   └── recruiter_tools.py  # LangChain tools for chats
 │   │   ├── worker/
-│   │   │   ├── runner.py        # Per-user apply loop + registry
+│   │   │   ├── runner.py        # Per-user apply loop + recruiter loop + registry
 │   │   │   ├── recruiter_poll.py # Recruiter chat polling
 │   │   │   ├── queue.py         # In-memory ApplyJob queue
 │   │   │   ├── limiter.py       # Daily/hourly apply caps
@@ -350,6 +367,8 @@ otclick/
 │   │   │   ├── negotiation_sync.py # Mirror hh negotiation state for analytics
 │   │   │   ├── analytics.py     # Funnel/KPI computation
 │   │   │   ├── token_refresh.py # hh token refresh cron
+│   │   │   ├── qa_memory.py     # User-confirmed answers reused in AI prompts
+│   │   │   ├── retention.py     # Notification pruning
 │   │   │   └── ...              # More services
 │   │   ├── hh/                  # hh.ru API client
 │   │   │   ├── client.py        # ApiClient + OAuthClient
@@ -375,7 +394,11 @@ otclick/
 │   └── package.json
 ├── infra/
 │   ├── nginx.conf               # Reverse proxy
-│   └── supabase/migrations/     # 23 SQL migrations (apply with psql, see Quick Start)
+│   └── supabase/
+│       ├── migrate.sh           # Migration runner (ledger: public.schema_migrations)
+│       ├── gen-keys.py          # JWT/anon/service keys for the local stack
+│       └── migrations/          # 25 SQL migrations, applied by the `migrate` service
+├── .github/workflows/ci.yml     # CI: ruff + pytest, tsc + frontend unit tests
 ├── docs/                        # Documentation
 ├── hh-applicant-tool/           # Reference CLI tool (read-only)
 ├── docker-compose.yml           # Backend + worker + frontend
@@ -403,8 +426,8 @@ We welcome contributions of all sizes! Otclick is a community-driven open-source
 
 ```bash
 # Fork and clone
-git clone https://github.com/NurmukhamedKZ/Otclick.git
-cd otclick
+git clone https://github.com/NurmukhamedKZ/Otclick-hh.git
+cd Otclick-hh
 
 # Set up backend
 uv sync
@@ -414,12 +437,17 @@ playwright install chromium
 # Set up frontend
 cd frontend && npm install
 
-# Run tests
+# Run tests (integration/e2e auto-skip unless the local stack is running)
 cd backend && python -m pytest tests/ -v
 
 # Run linter
-ruff check .
+ruff check backend
+
+# Frontend checks
+cd frontend && npx tsc --noEmit && npm test
 ```
+
+CI (`.github/workflows/ci.yml`) runs exactly these on every PR — green locally, green there.
 
 ### Guidelines
 
@@ -442,10 +470,10 @@ ruff check .
 Here are the priority tasks and future plans. Want to help? Pick one up!
 
 ### 🔥 Immediate Priority
-- [ ] **Update UI/UX** — Redesign the dashboard for better usability and modern look
-- [ ] **Fix Form Filling** — Debug and stabilize the vacancy form-filling pipeline
+- [x] **Update UI/UX** — Dashboard redesigned for better usability and a modern look
+- [x] **Fix Form Filling** — Vacancy form-filling pipeline debugged and stabilized (AI-filled drafts you approve before submission)
 - [ ] **Google, MS Teams, Yandex forms autofilling** — Extend autofill support beyond hh.ru built-in tests to external Google Forms, Microsoft Forms, and Yandex Forms used by employers
-- [ ] **Fix AI agent session persistence** — Resolve bug where AI agent and autofilling stop working the next day (token/session expiry issue)
+- [ ] **Fix AI agent session persistence** — The hh web session (cookies captured at login) still expires and can only be restored by reconnecting. Expiry is now *detected* and you get a notification + banner instead of silent failure, but automatic renewal is not implemented
 - [x] **Unified Docker setup** — Single `docker compose` file that runs backend, worker, and frontend together for one-command deployment
 
 ### 📋 Future
