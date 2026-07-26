@@ -18,6 +18,7 @@ const ICON: Record<string, React.ReactNode> = {
   recruiter_draft: <ICheck size={14} />,
   form_approval: <ICheck size={14} />,
   cover_letter_written: <ICheck size={14} />,
+  web_session_expired: <IShield size={14} />,
 };
 
 const BG: Record<string, string> = {
@@ -31,6 +32,7 @@ const BG: Record<string, string> = {
   recruiter_draft: "var(--ok)",
   form_approval: "var(--yellow)",
   cover_letter_written: "var(--ok)",
+  web_session_expired: "var(--err)",
 };
 
 const TITLE: Record<string, string> = {
@@ -44,6 +46,7 @@ const TITLE: Record<string, string> = {
   recruiter_draft: "Черновик ответа рекрутёру",
   form_approval: "Анкета ждёт подтверждения",
   cover_letter_written: "ИИ написал сопроводительное",
+  web_session_expired: "Сессия hh истекла - переподключите аккаунт",
 };
 
 function timeAgo(iso: string): string {

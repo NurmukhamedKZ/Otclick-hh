@@ -33,10 +33,14 @@ from app.worker.recruiter_poll import poll_recruiter_chats
 
 logger = logging.getLogger(__name__)
 
-State = Literal["runningы", "paused_captcha", "paused_limit", "stopped"]
+State = Literal["running", "paused_captcha", "paused_limit", "stopped"]
 
-# Sleep when producer found 0 jobs and we're idle.
+# Sleep when producer found 0 jobs and we're idle. Backs off exponentially:
+# each empty producer run scans up to MAX_PAGES_PER_FILTER pages *per filter*,
+# so retrying every 10s in the steady state is a continuous flood of
+# GET /vacancies at hh — the fastest way to get a user's account flagged.
 IDLE_REFILL_SLEEP_S = 10
+IDLE_REFILL_MAX_SLEEP_S = 15 * 60
 
 # Plan-B captcha poll interval (seconds) — re-probe GET /me while paused.
 CAPTCHA_POLL_S = 5
@@ -149,6 +153,7 @@ async def _run_loop(handle: RunnerHandle) -> None:
     user_id = handle.user_id
     queue = get_user_queue(user_id)
     rng = random.Random()
+    idle_sleep = IDLE_REFILL_SLEEP_S
     logger.info("runner: user=%s loop START", user_id)
 
     async def _hb() -> None:
@@ -241,16 +246,16 @@ async def _run_loop(handle: RunnerHandle) -> None:
             await _hb()
             if pushed == 0:
                 handle.next_run_at = datetime.now(timezone.utc) + timedelta(
-                    seconds=IDLE_REFILL_SLEEP_S
+                    seconds=idle_sleep
                 )
                 logger.info(
-                    "user %s: no new vacancies, sleeping %ds",
-                    user_id,
-                    IDLE_REFILL_SLEEP_S,
+                    "user %s: no new vacancies, sleeping %ds", user_id, idle_sleep
                 )
                 await _hb()
-                await asyncio.sleep(IDLE_REFILL_SLEEP_S)
+                await asyncio.sleep(idle_sleep)
+                idle_sleep = min(idle_sleep * 2, IDLE_REFILL_MAX_SLEEP_S)
                 continue
+            idle_sleep = IDLE_REFILL_SLEEP_S
 
         # Session cluster break.
         if handle.cluster.should_break():

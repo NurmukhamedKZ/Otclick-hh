@@ -16,6 +16,7 @@ const TYPE_KIND: Record<string, ToastKind> = {
   recruiter_draft: "info",
   form_approval: "info",
   cover_letter_written: "success",
+  web_session_expired: "error",
 };
 
 const TYPE_TITLE: Record<string, string> = {
@@ -29,6 +30,7 @@ const TYPE_TITLE: Record<string, string> = {
   recruiter_draft: "Черновик ответа рекрутёру",
   form_approval: "Анкета ждёт подтверждения",
   cover_letter_written: "ИИ написал сопроводительное",
+  web_session_expired: "Сессия hh истекла - переподключите аккаунт",
 };
 
 function formatBody(n: NotificationRow): string | undefined {
