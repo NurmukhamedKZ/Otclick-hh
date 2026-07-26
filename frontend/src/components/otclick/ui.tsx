@@ -270,6 +270,8 @@ export function Toggle({
   return (
     <button
       type="button"
+      role="switch"
+      aria-checked={on}
       onClick={() => !disabled && onChange?.(!on)}
       disabled={disabled}
       style={{
@@ -365,6 +367,7 @@ export function TextInput({
       )}
       <input
         {...rest}
+        className="oc-input"
         style={{
           width: "100%",
           padding: "10px 14px",
@@ -404,6 +407,7 @@ export function Select({
       )}
       <select
         {...rest}
+        className="oc-input"
         style={{
           width: "100%",
           padding: "10px 14px",
@@ -420,5 +424,209 @@ export function Select({
         {children}
       </select>
     </label>
+  );
+}
+
+// ============ Skeleton ============
+export function Skeleton({
+  h = 14,
+  w = "100%",
+  radius = "var(--r-sm)",
+  count = 1,
+}: {
+  h?: number;
+  w?: number | string;
+  radius?: string;
+  count?: number;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }} aria-hidden="true">
+      {Array.from({ length: count }, (_, i) => (
+        <div key={i} className="oc-skeleton" style={{ height: h, width: w, borderRadius: radius }} />
+      ))}
+    </div>
+  );
+}
+
+// ============ EmptyState ============
+export type EmptyAction = { label: string; href: string } | { label: string; onClick: () => void };
+
+export function EmptyState({
+  icon,
+  title,
+  description,
+  action,
+}: {
+  icon: ReactNode;
+  title: string;
+  description?: string;
+  action?: EmptyAction;
+}) {
+  return (
+    <div className="oc-empty">
+      <div className="oc-empty__icon">{icon}</div>
+      <div className="oc-empty__title">{title}</div>
+      {description && <div className="oc-empty__desc">{description}</div>}
+      {action &&
+        ("href" in action ? (
+          <LinkBtn href={action.href} kind="primary" size="sm">
+            {action.label}
+          </LinkBtn>
+        ) : (
+          <Btn kind="primary" size="sm" onClick={action.onClick}>
+            {action.label}
+          </Btn>
+        ))}
+    </div>
+  );
+}
+
+// ============ Banner ============
+export function Banner({
+  tone,
+  title,
+  description,
+  action,
+  onDismiss,
+}: {
+  tone: "ok" | "warn" | "err" | "info";
+  title: string;
+  description?: string;
+  action?: EmptyAction;
+  onDismiss?: () => void;
+}) {
+  const dotTone = tone === "info" ? "muted" : tone;
+  return (
+    <div className={`oc-banner oc-banner--${tone}`} role={tone === "err" ? "alert" : "status"}>
+      <StatusDot tone={dotTone as StatusTone} size={10} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 700, fontSize: 14 }}>{title}</div>
+        {description && <div style={{ fontSize: 12, opacity: 0.85 }}>{description}</div>}
+      </div>
+      {action &&
+        ("href" in action ? (
+          <LinkBtn href={action.href} kind="primary" size="sm">
+            {action.label}
+          </LinkBtn>
+        ) : (
+          <Btn kind="primary" size="sm" onClick={action.onClick}>
+            {action.label}
+          </Btn>
+        ))}
+      {onDismiss && (
+        <IconBtn label="скрыть" icon={<span style={{ fontSize: 16, lineHeight: 1 }}>×</span>} onClick={onDismiss} />
+      )}
+    </div>
+  );
+}
+
+// ============ Breadcrumbs / PageHeader ============
+export type Crumb = { label: string; href?: string };
+
+export function Breadcrumbs({ items }: { items: Crumb[] }) {
+  return (
+    <nav className="oc-crumbs" aria-label="Хлебные крошки">
+      {items.map((c, i) => (
+        <span key={`${c.label}-${i}`} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          {i > 0 && <span aria-hidden="true">/</span>}
+          {c.href && i < items.length - 1 ? (
+            <Link href={c.href}>{c.label}</Link>
+          ) : (
+            <span aria-current="page">{c.label}</span>
+          )}
+        </span>
+      ))}
+    </nav>
+  );
+}
+
+export function PageHeader({
+  title,
+  subtitle,
+  crumbs,
+  actions,
+}: {
+  title: string;
+  subtitle?: string;
+  crumbs?: Crumb[];
+  actions?: ReactNode;
+}) {
+  return (
+    <header className="oc-page-header">
+      <div style={{ minWidth: 0 }}>
+        {crumbs && crumbs.length > 0 && <Breadcrumbs items={crumbs} />}
+        <h1 className="oc-page-header__title">{title}</h1>
+        {subtitle && <p className="oc-page-header__sub">{subtitle}</p>}
+      </div>
+      {actions && <div className="oc-page-header__actions">{actions}</div>}
+    </header>
+  );
+}
+
+// ============ SegmentedTabs ============
+export function SegmentedTabs({
+  items,
+  value,
+  onChange,
+  label = "Фильтр",
+}: {
+  items: { id: string; label: string; count?: number }[];
+  value: string;
+  onChange: (id: string) => void;
+  label?: string;
+}) {
+  return (
+    <div className="oc-seg" role="tablist" aria-label={label}>
+      {items.map((it) => (
+        <button
+          key={it.id}
+          type="button"
+          role="tab"
+          aria-selected={value === it.id}
+          className="oc-seg__item"
+          onClick={() => onChange(it.id)}
+        >
+          {it.label}
+          {it.count !== undefined && <span className="oc-seg__count">{it.count}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ============ Pager ============
+export function Pager({
+  page,
+  pages,
+  onChange,
+}: {
+  page: number;
+  pages: number;
+  onChange: (next: number) => void;
+}) {
+  return (
+    <div className="oc-pager">
+      <button
+        type="button"
+        className="oc-pager__btn"
+        onClick={() => onChange(Math.max(0, page - 1))}
+        disabled={page === 0}
+        aria-label="предыдущая страница"
+      >
+        ‹
+      </button>
+      <button type="button" className="oc-pager__btn" aria-current="page">
+        {page + 1}
+      </button>
+      <button
+        type="button"
+        className="oc-pager__btn"
+        onClick={() => onChange(Math.min(pages - 1, page + 1))}
+        disabled={page + 1 >= pages}
+        aria-label="следующая страница"
+      >
+        ›
+      </button>
+    </div>
   );
 }

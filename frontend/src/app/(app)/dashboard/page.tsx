@@ -1,3 +1,4 @@
+import { PageHeader } from "@/components/otclick/ui";
 import HHBanner from "@/components/otclick/hh-banner";
 import LimitRing from "./limit-ring";
 import WeeklyPlan from "./weekly-plan";
@@ -9,6 +10,7 @@ import NotificationsCard from "./notifications-card";
 export default async function DashboardPage() {
   return (
     <>
+      <PageHeader title="Главная" subtitle="обзор автоотклика и последних событий" crumbs={[{ label: "Главная" }]} />
       <HHBanner />
       <div
         style={{

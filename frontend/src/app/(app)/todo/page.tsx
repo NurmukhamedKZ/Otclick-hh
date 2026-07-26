@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Btn, Card } from "@/components/otclick/ui";
+import { Btn, Card, PageHeader } from "@/components/otclick/ui";
 import { useRecruiter, type Draft } from "@/hooks/useRecruiter";
 import { useFormDrafts, type FormAnswer, type FormDraft } from "@/hooks/useFormDrafts";
 
@@ -286,6 +286,7 @@ export default function RecruiterPage() {
 
   return (
     <>
+      <PageHeader title="Todo" subtitle="что ждёт твоего решения" crumbs={[{ label: "Главная", href: "/dashboard" }, { label: "Todo" }]} />
       {error && <div style={{ color: "var(--err)", padding: 16 }}>{error}</div>}
       {formError && <div style={{ color: "var(--err)", padding: 16 }}>{formError}</div>}
       {loading || formLoading ? (

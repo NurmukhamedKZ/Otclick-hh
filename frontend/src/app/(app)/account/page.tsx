@@ -1,11 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { apiFetch } from "@/lib/api";
-import { Btn, Card, Field, Tag } from "@/components/otclick/ui";
+import { Btn, Card, Field, LinkBtn, PageHeader, Tag } from "@/components/otclick/ui";
 import { ILink, IPower, IRefresh, ITelegram } from "@/components/otclick/icons";
 
 type Tab = "profile" | "integrations" | "danger";
@@ -97,6 +96,7 @@ export default function AccountPage() {
 
   return (
     <>
+      <PageHeader title="Аккаунт" subtitle="подключение hh и настройки" crumbs={[{ label: "Главная", href: "/dashboard" }, { label: "Аккаунт" }]} />
       <div style={{ display: "flex", alignItems: "center", gap: 18, marginBottom: 18, flexWrap: "wrap" }}>
         <div
           style={{
@@ -247,21 +247,17 @@ export default function AccountPage() {
                   <Btn kind="yellow" size="sm" icon={<IRefresh size={14} />} onClick={refreshHH}>
                     refresh token
                   </Btn>
-                  <Link href="/onboarding">
-                    <Btn kind="ghostDark" size="sm" icon={<ILink size={14} />}>
-                      переподключить
-                    </Btn>
-                  </Link>
+                  <LinkBtn href="/onboarding" kind="ghostDark" size="sm" icon={<ILink size={14} />}>
+                    переподключить
+                  </LinkBtn>
                   <Btn kind="ghostDark" size="sm" icon={<IPower size={14} />} onClick={disconnectHH}>
                     отключить
                   </Btn>
                 </>
               ) : (
-                <Link href="/onboarding">
-                  <Btn kind="yellow" size="sm">
-                    подключить
-                  </Btn>
-                </Link>
+                <LinkBtn href="/onboarding" kind="yellow" size="sm">
+                  подключить
+                </LinkBtn>
               )}
             </div>
           </Card>

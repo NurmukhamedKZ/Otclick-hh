@@ -249,6 +249,130 @@ html { scroll-behavior: smooth; }
   border-radius: 6px;
 }
 
+.oc-skeleton {
+  background: linear-gradient(90deg, var(--line-2) 25%, var(--bg-deep) 37%, var(--line-2) 63%);
+  background-size: 400% 100%;
+  animation: oc-shimmer 1.4s ease infinite;
+  border-radius: var(--r-sm);
+}
+@keyframes oc-shimmer {
+  from { background-position: 100% 50%; }
+  to   { background-position: 0 50%; }
+}
+
+.oc-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--s-2);
+  padding: var(--s-6) var(--s-4);
+  color: var(--muted);
+}
+.oc-empty__icon {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--r-md);
+  display: grid;
+  place-items: center;
+  background: var(--bg-deep);
+  color: var(--muted);
+}
+.oc-empty__title { font-size: 15px; font-weight: 700; color: var(--ink); }
+.oc-empty__desc { font-size: 13px; max-width: 340px; }
+
+.oc-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  border-radius: var(--r-md);
+  padding: var(--s-3) var(--s-4);
+  margin-bottom: var(--s-4);
+}
+.oc-banner--ok   { background: var(--sage-soft);   color: var(--ink); }
+.oc-banner--warn { background: var(--yellow-soft); color: var(--ink); }
+.oc-banner--err  { background: var(--coral-soft);  color: #7C2A1E; }
+.oc-banner--info { background: var(--bg-deep);     color: var(--ink); }
+
+.oc-crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: var(--s-1);
+  flex-wrap: wrap;
+}
+.oc-crumbs a { color: var(--muted); text-decoration: none; }
+.oc-crumbs a:hover { color: var(--ink); text-decoration: underline; }
+.oc-crumbs [aria-current="page"] { color: var(--ink); font-weight: 600; }
+
+.oc-seg { display: flex; gap: var(--s-1); flex-wrap: wrap; }
+.oc-seg__item {
+  border: none;
+  font-family: inherit;
+  background: var(--bg-deep);
+  color: var(--ink);
+  padding: 8px 14px;
+  border-radius: var(--r-pill);
+  font-size: 13px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.oc-seg__item:hover { background: var(--line-2); }
+.oc-seg__item[aria-selected="true"] { background: var(--ink); color: #F5F1E6; }
+.oc-seg__item[aria-selected="true"]:hover { background: var(--ink-soft); }
+.oc-seg__count {
+  font-family: 'JetBrains Mono', monospace;
+  background: #fff;
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+  font-size: 11px;
+}
+.oc-seg__item[aria-selected="true"] .oc-seg__count { background: #ffffff20; }
+
+.oc-pager { display: inline-flex; align-items: center; gap: var(--s-1); }
+.oc-pager__btn {
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+.oc-pager__btn:hover:not([disabled]) { background: var(--bg-deep); }
+.oc-pager__btn[disabled] { opacity: .4; cursor: not-allowed; }
+.oc-pager__btn[aria-current="page"] { background: var(--ink); color: #F5F1E6; border-color: var(--ink); }
+
+.oc-page-header {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--s-4);
+  padding: var(--s-1) 0 var(--s-4);
+  flex-wrap: wrap;
+}
+.oc-page-header__title { font-size: 28px; font-weight: 700; letter-spacing: -.5px; }
+.oc-page-header__sub { color: var(--muted); margin-top: 2px; font-size: 14px; }
+.oc-page-header__actions { display: flex; align-items: center; gap: var(--s-2); margin-left: auto; }
+
+.oc-input {
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.oc-input:focus { border-color: var(--ink); }
+.oc-input:disabled { background: var(--bg-deep); color: var(--muted); cursor: not-allowed; }
+.oc-input::placeholder { color: var(--muted-2); }
+
+.oc-row { transition: background var(--dur) var(--ease); }
+.oc-row:hover { background: var(--bg-deep); }
+
 /* ============ responsive (mobile) ============ */
 .oc-mobile-only { display: none; }
 

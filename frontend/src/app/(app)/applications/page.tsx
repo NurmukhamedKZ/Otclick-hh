@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Application } from "@/lib/types";
-import { Btn, Card, Tag } from "@/components/otclick/ui";
+import { Btn, Card, PageHeader, Tag } from "@/components/otclick/ui";
 import { IExternal, IRefresh, ISearch } from "@/components/otclick/icons";
 
 const PAGE_SIZE = 25;
@@ -142,6 +142,7 @@ export default function ApplicationsPage() {
 
   return (
     <>
+      <PageHeader title="Отклики" subtitle="все попытки отклика и их результат" crumbs={[{ label: "Главная", href: "/dashboard" }, { label: "Отклики" }]} />
       <Card style={{ marginBottom: 18 }}>
         <div
           style={{
