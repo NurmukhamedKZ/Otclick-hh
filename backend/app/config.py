@@ -5,7 +5,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # One env file for the whole repo (repo-root .env, same one compose reads).
+    # "../.env" covers `cd backend && uvicorn`, ".env" covers running from root;
+    # later entries win, so a backend-local .env still overrides if you keep one.
+    model_config = SettingsConfigDict(env_file=("../.env", ".env"), extra="ignore")
 
     SUPABASE_URL: str
     # Browser-reachable base URL of the same Supabase stack. In the local

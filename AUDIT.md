@@ -8,13 +8,18 @@
 Базовое состояние на момент аудита: `pytest` — 275 passed, `ruff check backend` — чисто,
 `tsc --noEmit` — чисто. То есть проблемы ниже — это не «сломанная сборка», а дыры, которые тесты не покрывают.
 
-> **Статус:** блокеры 1, 3, 4 и весь раздел «Высокий приоритет» — **исправлены** (помечены ✅ ниже),
-> регрессии закрыты в `backend/tests/test_hardening.py`. После правок: **294 passed**, ruff и tsc чисты.
-> Миграция `024_profiles_column_grants.sql` применена к локальному стенду и проверена вручную
-> (эскалация плана из роли `authenticated` → `permission denied`, запись `onboarded` работает).
+> **Статус:** блокеры 1, 3, 4, весь раздел «Высокий приоритет» и пункты 13-17, 20, 21 —
+> **исправлены** (помечены ✅ ниже). Пункт 18 пропущен по запросу, пункт 19 оказался ложным
+> срабатыванием и снят. Регрессии: `backend/tests/test_hardening.py` + `test_hardening2.py`.
+> После правок: **307 passed** (backend), 31 passed (frontend), ruff и tsc чисты.
+> Миграции `024_profiles_column_grants.sql` и `025_atomic_counters_and_retention.sql` применены
+> к локальному стенду и проверены вручную (эскалация плана из роли `authenticated` →
+> `permission denied`, запись `onboarded` работает; `increment_apply_counter` даёт ровно 50 из 50,
+> `prune_notifications` сносит старое и оставляет свежее).
 > Контейнеры `api`/`worker` крутят запечённый код — нужен `docker compose build api && docker compose up -d api worker`.
 > Не тронуты: блокеры **2** (TestMode/сумма в вебхуке) и **5** (отмена подписки у CloudPayments),
-> средний приоритет и раздел с расхождениями документации.
+> пункт **18**, раздел «Инфраструктура» (частично закрыт вами параллельно: CI, раннер миграций,
+> единый `.env.example`, `HH_CLIENT_ID`/`SECRET` из env) и раздел с расхождениями документации.
 
 ---
 
@@ -186,7 +191,7 @@ assert self.access_token.startswith("USER")
 
 ## 🟡 Средний приоритет — логика и корректность
 
-### 13. `_already_applied` для `form_required` — мёртвый код
+### 13. ✅ `_already_applied` для `form_required` — мёртвый код
 `backend/app/services/apply.py:98-111` vs `vacancy_producer.py:37-47`
 
 `apply._already_applied` специально пропускает строки со статусом `form_required`, «чтобы дать
@@ -194,18 +199,17 @@ assert self.access_token.startswith("USER")
 наличия строки в `applications`, без учёта статуса. Вакансия никогда не вернётся в очередь.
 Либо чинить producer, либо убрать ветку в `apply`.
 
-### 14. Опечатка в `State` — `"runningы"` (кириллическая «ы»)
+### 14. ✅ Опечатка в `State` — `"runningы"` (кириллическая «ы»)
 `backend/app/worker/runner.py:36`
 
 ```python
 State = Literal["runningы", "paused_captcha", "paused_limit", "stopped"]
 ```
 
-Присваивается везде `"running"` — то есть тип-аннотация не описывает ни одно реальное значение.
-Для рантайма безвредно (Literal не проверяется), но mypy/pyright это молча пропускает,
-потому что типизация здесь и так не гоняется в CI. Симптом отсутствия статической проверки.
+Присваивается везде `"running"` — то есть тип-аннотация не описывала ни одно реальное значение.
+Исправлено попутно в предыдущем раунде (вместе с backoff'ом, п. 6).
 
-### 15. `resume_sync` удаляет резюме → фильтры молча обнуляются, воркер перестаёт работать
+### 15. ✅ `resume_sync` удаляет резюме → фильтры молча обнуляются, воркер перестаёт работать
 `backend/app/services/resume_sync.py:37-66` + миграция `021_filters_resume_set_null.sql`
 
 При реконнекте другого hh-аккаунта старые резюме удаляются, `filters.resume_id` становится `NULL`
@@ -214,7 +218,7 @@ State = Literal["runningы", "paused_captcha", "paused_limit", "stopped"]
 
 **Фикс:** при обнулении `resume_id` выключать фильтр (`enabled=false`) и слать уведомление.
 
-### 16. Гонка в счётчике лимитов (read-modify-write)
+### 16. ✅ Гонка в счётчике лимитов (read-modify-write)
 `backend/app/worker/limiter.py:68-75`
 
 `_increment_sync` = SELECT count → +1 → UPSERT. Сейчас раннер на пользователя один, поэтому
@@ -222,7 +226,7 @@ State = Literal["runningы", "paused_captcha", "paused_limit", "stopped"]
 
 **Фикс:** атомарный инкремент через RPC/`ON CONFLICT DO UPDATE SET count = apply_counters.count + 1`.
 
-### 17. Heartbeat не обновляется во время долгого сна
+### 17. ✅ Heartbeat не обновляется во время долгого сна
 `backend/app/worker/runner.py:294-308`
 
 При `status == "limit_day"` состояние ставится `paused_limit`, но `_hb()` не вызывается перед
@@ -236,19 +240,22 @@ State = Literal["runningы", "paused_captcha", "paused_limit", "stopped"]
 всё равно ушли в «подтверждённые ответы кандидата» и будут подставляться во все будущие промпты.
 Мелочь, но эта таблица объявлена «приоритетным источником правды».
 
-### 19. `_mirror_application` теряет атрибуцию аналитики
+### 19. ❌ СНЯТО (ложное срабатывание) — `_mirror_application` НЕ теряет атрибуцию
 `backend/app/services/form_drafts.py:156-168`
 
-Upsert по `(user_id, vacancy_id)` не выставляет `filter_id` / `employer_name`. Отклики, ушедшие
-через одобрение формы, попадают в аналитику как «без фильтра». Данные в
-`analytics_summary.by_filter` перекошены.
+Первоначальный вывод был неверным. Проверено экспериментом на живом стенде: PostgREST при
+`Prefer: resolution=merge-duplicates` генерит `ON CONFLICT DO UPDATE SET` **только для колонок,
+присутствующих в payload** — отсутствующие сохраняют старые значения. А строка `applications`
+к моменту одобрения формы уже создана в `apply_one` вызовом `_record_application(...,
+employer_name=..., filter_id=...)`. Значит атрибуция переживает `_mirror_application`.
+Правок не вносил — чинить было нечего.
 
-### 20. Сравнение internal-токена не константное по времени
+### 20. ✅ Сравнение internal-токена не константное по времени
 `backend/app/api/internal.py:18-24`
 
 `x_internal_token != expected` — обычное сравнение строк. `hmac.compare_digest` стоит одну строчку.
 
-### 21. `notifications` растут без ограничений
+### 21. ✅ `notifications` растут без ограничений
 `backend/app/services/notifications.py` + миграция 001
 
 Каждый успешный отклик, каждое написанное письмо — строка в `notifications` (до 100/день/пользователь).
@@ -260,12 +267,12 @@ Upsert по `(user_id, vacancy_id)` не выставляет `filter_id` / `emp
 
 ## 🟡 Инфраструктура и эксплуатация
 
-### 22. Нет CI
+### 22. ✅ Нет CI
 Каталога `.github/` нет. 275 тестов, ruff и tsc проходят локально — но ничто не мешает
 влить PR, который их ломает. Для публичного репозитория с внешними контрибьюторами это первое,
 что нужно завести.
 
-### 23. Миграции применяются руками, без таблицы версий
+### 23. ✅ Миграции применяются руками, без таблицы версий
 `infra/supabase/init/zz2-run-app-migrations.sh` прогоняет весь каталог **только на пустом томе**.
 На существующей БД новую миграцию надо применять `psql` вручную (описано в CLAUDE.md).
 Нет `schema_migrations`, нет проверки «что уже применено», нет отката. `007_trial_plan.sql`
@@ -276,11 +283,11 @@ Upsert по `(user_id, vacancy_id)` не выставляет `filter_id` / `emp
 **Фикс:** любой минимальный раннер миграций (`sqlx`/`dbmate`/самописный на 20 строк с таблицей
 `applied_migrations`), запускаемый на старте `api`.
 
-### 24. `handle_new_user` — `SECURITY DEFINER` без `SET search_path`
+### 24. ✅ `handle_new_user` — `SECURITY DEFINER` без `SET search_path`
 `001_init.sql:6-14`, переопределяется в `007`. Классическая рекомендация Supabase-адвайзора:
 добавить `SET search_path = public, pg_temp`.
 
-### 25. `.env.example` рассинхронизирован с `config.py`
+### 25. ✅ `.env.example` рассинхронизирован с `config.py`
 `backend/.env.example`
 
 - `OPENAI_BASE_URL=https://api.openai.com/v1/chat/completions` — **неверно**. `langchain_openai`
@@ -296,19 +303,19 @@ Upsert по `(user_id, vacancy_id)` не выставляет `filter_id` / `emp
   `OPENAI_RATE_LIMIT` описан, а `CORS_ORIGINS` для прода — нет.
 - `HH_LOGIN` / `HH_PASSWORD` в примере — приглашение положить реальный пароль в файл.
 
-### 26. Два разных `.env` без объяснения
+### 26. ✅ Два разных `.env` без объяснения
 `docker-compose.yml` для `api`/`worker` читает `backend/.env`, а `${...}`-подстановки
 (`POSTGRES_PASSWORD`, `JWT_SECRET`, `ANON_KEY`, `NEXT_PUBLIC_*`) compose берёт из **корневого** `.env`.
 Пример один — `backend/.env.example`. Развернуть с первого раза по README не получится.
 
-### 27. Публичный репозиторий содержит извлечённые ключи Android-приложения hh
+### 27. ✅ Публичный репозиторий содержит извлечённые ключи Android-приложения hh
 `backend/app/hh/client_keys.py` — `ANDROID_CLIENT_ID` / `ANDROID_CLIENT_SECRET` официального
 клиента hh.ru. Это не наша уязвимость (наследие `hh-applicant-tool`), но для публичного MIT-репо
 это юридический риск и повод для блокировки: hh может отозвать ключи в любой момент, и продукт
 перестанет работать у всех пользователей сразу. Как минимум — вынести в конфиг с явным
 дисклеймером, чтобы не быть точкой отказа.
 
-### 28. Мусор в репозитории
+### 28. ✅ Мусор в репозитории
 - `frontend/Otclick/` — дизайн-макет на JSX (`app.jsx`, `screens.jsx`, `uploads/*.jpg`), закоммичен,
   не собирается, не используется.
 - `backend/recon_chat.py`, `backend/scripts/smoke_cover_letter.py` — исследовательские скрипты.
@@ -379,13 +386,28 @@ CLAUDE.md — основной онбординг-документ, и он вр
 | 11 | `assert` в HTTP-клиенте | Заменены на `ValueError`/`BadResponse`; префикс токена — `warning`, а не падение. |
 | 12 | Проверка JWT по сети на каждый запрос | Кэш проверенных токенов на 60 с по SHA-256 ключу; `detail` больше не отдаёт внутренности исключения. |
 
-Регрессии: `backend/tests/test_hardening.py` (19 тестов) + `backend/tests/conftest.py` чистит
-process-local кэши между тестами.
+| 22 | Нет CI | `.github/workflows/ci.yml`: backend (ruff + pytest через `uv`) и frontend (`tsc --noEmit` + `npm test`) на каждый PR. |
+| 23 | Миграции руками, без версий | `infra/supabase/migrate.sh` + реестр `public.schema_migrations` + one-shot сервис `migrate` (от него зависит `api`). Тот же скрипт вызывает init-хук на пустом томе. БД без реестра — разовый baseline. Проверено: свежий том применил 25 миграций с записью, повторный прогон — no-op, baseline-ветка на тестовой БД. |
+| 24 | `handle_new_user` без `search_path` | Уже закрыто миграцией `024` (`SET search_path = public, pg_temp`). |
+| 25 | `.env.example` врёт | Единый корневой `.env.example`: `OPENAI_BASE_URL` = `/v1`, модель `gpt-5.4-nano`, `LANGSMITH_TRACING=false` с пояснением про приватность, добавлены `LOG_LEVEL`/`DEBUG_ENDPOINTS`/`CORS_ORIGINS`/`SUPABASE_PUBLIC_URL`, убраны мёртвые `PLAN_*` и приглашение хранить пароль от hh. |
+| 26 | Два `.env` без объяснения | Один файл — корневой `.env`. `api`/`worker` читают его через `env_file`, compose — через `${...}`, `config.py` — через `env_file=("../.env", ".env")`. `backend/.env.example` удалён. |
+| 27 | Ключи Android-клиента hh | `client_keys.py` читает `HH_CLIENT_ID`/`HH_CLIENT_SECRET` из окружения, зашитые значения — дефолт с дисклеймером и ссылкой на dev.hh.ru. |
+| 28 | Мусор в репозитории | Удалены `frontend/Otclick/`, `backend/recon_chat.py`, `backend/scripts/`, мёртвая `worker_control.enabled_active_user_ids` (+ 2 её теста); ссылки в CLAUDE.md исправлены на `active_user_flags`. |
+
+| 13 | Producer и apply расходились в том, что считать «уже потрачено» | Общий `apply.RETRYABLE_STATUSES`; `_existing_vacancy_ids` теперь тянет `status` и не хоронит `form_required`. |
+| 14 | `Literal["runningы"]` | Исправлено в предыдущем раунде. |
+| 15 | Удалённое резюме → тихо мёртвый воркер | `resume_sync._disable_orphaned_filters` гасит `enabled` у фильтров с `resume_id IS NULL` + уведомление `resume_missing`. |
+| 16 | Гонка в дневном счётчике | `increment_apply_counter()` (миграция 025) — один `INSERT ... ON CONFLICT DO UPDATE ... RETURNING`. |
+| 17 | Долгий сон без heartbeat | `_hb()` до и после кластерного перерыва и hh-лимита; `last_error` выставляется и снимается. |
+| 20 | Сравнение cron-секрета по `!=` | `hmac.compare_digest` + лог вызова. |
+| 21 | `notifications` без ретенции | `prune_notifications()` (миграция 025) + `services/retention.py` + `POST /internal/cron/prune-notifications`; прочитанные живут 14 дней, любые — 90. Индекс по `created_at`. |
+
+Регрессии: `backend/tests/test_hardening.py` (19 тестов) и `backend/tests/test_hardening2.py`
+(20 тестов); `backend/tests/conftest.py` чистит process-local кэши между тестами.
 
 ## Что осталось (по порядку)
 
 1. Блокер **2** — проверки `TestMode`/`Currency`/суммы в вебхуке CloudPayments.
 2. Блокер **5** — реальная отмена подписки через CP Subscriptions API (или отказ от recurrent).
-3. CI (#22) и раннер миграций (#23) — без них всё остальное будет отъезжать обратно.
-4. Разобраться с пунктом «AI отвечает рекрутёрам» (раздел расхождений, п. 2) — понять,
+3. Разобраться с пунктом «AI отвечает рекрутёрам» (раздел расхождений, п. 2) — понять,
    фича потеряна или намеренно переведена в режим черновиков, и привести README в соответствие.

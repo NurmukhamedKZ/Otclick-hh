@@ -42,29 +42,6 @@ async def test_is_enabled_reads_flag():
         assert await worker_control.is_enabled("u1") is False
 
 
-def test_enabled_active_user_ids_intersects_creds_and_flag():
-    from app.services import worker_control
-
-    creds = _chain([{"user_id": "a"}, {"user_id": "b"}, {"user_id": "c"}])
-    # Only a and b have worker_enabled=true (the .eq filter is applied server-side).
-    profiles = _chain([{"id": "a"}, {"id": "b"}])
-
-    def _table(name):
-        return creds if name == "hh_credentials" else profiles
-
-    with patch.object(worker_control.service_client, "table", side_effect=_table):
-        out = worker_control.enabled_active_user_ids()
-    assert sorted(out) == ["a", "b"]
-
-
-def test_enabled_active_user_ids_empty_when_no_active_creds():
-    from app.services import worker_control
-
-    creds = _chain([])
-    with patch.object(worker_control.service_client, "table", return_value=creds):
-        assert worker_control.enabled_active_user_ids() == []
-
-
 @pytest.mark.asyncio
 async def test_set_agent_enabled_updates_flag():
     from app.services import worker_control

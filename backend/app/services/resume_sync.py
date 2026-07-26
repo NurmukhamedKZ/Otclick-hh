@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from app.db.supabase import service_client
 from app.services.hh_credentials import load_api_client, persist_if_refreshed
+from app.services.notifications import notify
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,22 @@ def _upsert_resumes(user_id: str, items: list[dict]) -> list[dict]:
     return res.data or []
 
 
+def _disable_orphaned_filters(user_id: str) -> list[str]:
+    """Filters whose resume was deleted on hh keep enabled=true with a NULL
+    resume_id (migration 021's ON DELETE SET NULL), and the producer silently
+    drops those — the worker looks "running" while doing nothing. Turn them off
+    so the state is visible. Returns the ids that were disabled."""
+    res = (
+        service_client.table("filters")
+        .update({"enabled": False})
+        .eq("user_id", user_id)
+        .eq("enabled", True)
+        .is_("resume_id", "null")
+        .execute()
+    )
+    return [r["id"] for r in (res.data or []) if r.get("id")]
+
+
 async def sync_resumes(user_id: str) -> list[dict]:
     """Pull /resumes/mine → upsert rows. Returns stored rows."""
     client = await load_api_client(user_id)
@@ -76,7 +93,23 @@ async def sync_resumes(user_id: str) -> list[dict]:
     finally:
         await persist_if_refreshed(user_id, client, original_access)
     items = payload.get("items", []) if isinstance(payload, dict) else []
-    return await loop.run_in_executor(None, _upsert_resumes, user_id, items)
+    rows = await loop.run_in_executor(None, _upsert_resumes, user_id, items)
+
+    try:
+        orphaned = await loop.run_in_executor(None, _disable_orphaned_filters, user_id)
+    except Exception:
+        logger.exception("resume_sync: failed to disable orphaned filters")
+        orphaned = []
+    if orphaned:
+        logger.warning(
+            "resume_sync: user=%s disabled %d filter(s) left without a resume",
+            user_id, len(orphaned),
+        )
+        await notify(
+            user_id, "resume_missing",
+            {"disabled_filters": len(orphaned), "reason": "resume deleted on hh"},
+        )
+    return rows
 
 
 async def list_resumes(user_id: str) -> list[dict]:

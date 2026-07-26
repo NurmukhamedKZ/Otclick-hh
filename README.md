@@ -166,11 +166,12 @@ Docker Compose:
 # 1. Generate JWT/API keys for the local Supabase stack
 python3 infra/supabase/gen-keys.py
 
-# 2. Copy the output into backend/.env (see backend/.env.example for all vars)
-cp backend/.env.example backend/.env
+# 2. One env file for everything — copy and fill it in (see .env.example)
+cp .env.example .env
 # Paste JWT_SECRET/ANON_KEY/SERVICE_ROLE_KEY into the matching vars,
-# copy ANON_KEY → SUPABASE_ANON_KEY, SERVICE_ROLE_KEY → SUPABASE_SERVICE_ROLE_KEY
-# Set POSTGRES_PASSWORD to any strong secret
+# copy ANON_KEY → SUPABASE_ANON_KEY + NEXT_PUBLIC_SUPABASE_ANON_KEY,
+# SERVICE_ROLE_KEY → SUPABASE_SERVICE_ROLE_KEY
+# Set POSTGRES_PASSWORD and FERNET_KEY
 
 # 3. Build and start everything
 docker compose up -d --build
@@ -179,17 +180,27 @@ docker compose up -d --build
 ```
 
 No cloud account needed. Everything runs locally — there is no hosted Supabase
-project, this stack is the only environment.
+project, this stack is the only environment. There is exactly **one** env file:
+the repo-root `.env`. Compose reads it for its own `${...}` substitutions, the
+`api`/`worker` containers get it as `env_file`, and `cd backend && uvicorn`
+picks up the same file. (`frontend/.env.local` is only for running `npm run dev`
+outside Docker.)
 
-Database schema: on the **first** start, every file in
-`infra/supabase/migrations/` is replayed into the fresh Postgres volume
-automatically. When you pull a new migration later, apply it yourself — the
-init hook only runs once per volume:
+Database schema: the one-shot `migrate` service applies every
+`infra/supabase/migrations/*.sql` that isn't recorded in `public.schema_migrations`
+yet, on every `docker compose up` — fresh volume or existing one. Nothing to run
+by hand; check what it did with:
 
 ```bash
-docker exec -i aiautoclicker-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
-  < infra/supabase/migrations/023_analytics.sql
+docker compose logs migrate
+docker exec -it aiautoclicker-db psql -U postgres -d postgres -c \
+  "select version, applied_at from schema_migrations order by version"
 ```
+
+If your database predates the ledger, the first run **baselines** it: every
+migration currently on disk is recorded as applied without being replayed
+(replaying them into a live DB would fail). Verify the newest ones really
+landed before trusting it.
 
 ### Backend-only dev
 
@@ -205,11 +216,11 @@ source .venv/bin/activate
 # Install Playwright browser
 playwright install chromium
 
-# Generate keys and configure environment
+# Generate keys and configure environment (single root .env)
 python3 infra/supabase/gen-keys.py
-cp backend/.env.example backend/.env
+cp .env.example .env
 # Fill in the generated keys and start the local Supabase stack:
-docker compose up -d db auth rest realtime storage kong
+docker compose up -d db migrate auth rest realtime storage kong
 
 # Start the development server
 cd backend && uvicorn app.main:app --reload
@@ -242,7 +253,7 @@ python worker_main.py
 
 ## Configuration
 
-### Backend (`backend/.env`)
+### Everything (`.env` in the repo root — see `.env.example` for the full list)
 
 ```env
 # Local Supabase stack — generate keys with: python3 infra/supabase/gen-keys.py

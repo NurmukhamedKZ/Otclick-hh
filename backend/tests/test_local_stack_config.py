@@ -126,13 +126,14 @@ def test_compose_publishes_both_ports():
 
 
 def test_backend_env_example_uses_in_network_supabase_url():
-    text = _read("backend/.env.example")
+    # Single repo-root template — backend/.env.example was folded into it.
+    text = _read(".env.example")
 
     assert _env_value(text, "SUPABASE_URL") == "http://kong:8000"
     assert _env_value(text, "SUPABASE_PUBLIC_URL") == f"http://localhost:{KONG_PORT}"
 
 
 def test_no_cloud_supabase_leftovers_in_templates():
-    for rel in ("backend/.env.example", "frontend/.env.local.example", "README.md"):
+    for rel in (".env.example", "frontend/.env.local.example", "README.md"):
         text = _read(rel)
         assert ".supabase.co" not in text, f"{rel} still references a cloud Supabase project"

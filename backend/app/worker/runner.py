@@ -257,12 +257,16 @@ async def _run_loop(handle: RunnerHandle) -> None:
                 continue
             idle_sleep = IDLE_REFILL_SLEEP_S
 
-        # Session cluster break.
+        # Session cluster break — up to 2h, so publish it before sleeping or the
+        # UI shows "работает" for the whole break.
         if handle.cluster.should_break():
             break_s = handle.cluster.next_break_seconds()
             handle.next_run_at = datetime.now(timezone.utc) + timedelta(seconds=break_s)
             logger.info("user %s: cluster break %.0fs", user_id, break_s)
+            await _hb()
             await asyncio.sleep(break_s)
+            handle.next_run_at = None
+            await _hb()
 
         # Pull next job.
         try:
@@ -303,14 +307,18 @@ async def _run_loop(handle: RunnerHandle) -> None:
                 None, _seconds_until_next_local_midnight, user_id
             )
             handle.next_run_at = datetime.now(timezone.utc) + timedelta(seconds=sleep_s)
+            handle.last_error = "hh daily limit"
             await notify(
                 user_id, "limit_reached", {"source": "hh", "sleep_s": int(sleep_s)}
             )
+            await _hb()
             logger.info(
                 "user %s: hh LimitExceeded, sleeping %.0fs", user_id, sleep_s
             )
             await asyncio.sleep(sleep_s)
             handle.state = "running"
+            handle.last_error = None
+            await _hb()
         elif status == "token_dead":
             handle.state = "stopped"
             handle.last_error = "hh token dead — reconnect required"

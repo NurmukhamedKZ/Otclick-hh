@@ -1,9 +1,10 @@
 # Full local stack: backend API + worker + frontend + self-hosted Supabase.
 # Run from repo root:  docker compose up -d --build
 #
-# Needs backend/.env (see backend/.env.example) with generated keys.
-# Frontend NEXT_PUBLIC_* vars are baked at build time — set them in a root .env
-# (see frontend/.env.local.example), docker compose auto-loads it.
+# ONE env file: the repo-root .env (see .env.example). It feeds all three
+# consumers — compose's own ${...} substitutions (stack keys, frontend build
+# args) and the api/worker containers (app settings). `cd backend && uvicorn`
+# reads the same file (config.py looks at ../.env too).
 
 services:
   db:
@@ -18,12 +19,34 @@ services:
       - supabase-db-data:/var/lib/postgresql/data
       - ./infra/supabase/init/zz1-set-role-passwords.sh:/docker-entrypoint-initdb.d/zz1-set-role-passwords.sh:ro
       - ./infra/supabase/init/zz2-run-app-migrations.sh:/docker-entrypoint-initdb.d/zz2-run-app-migrations.sh:ro
+      - ./infra/supabase/migrate.sh:/migrate.sh:ro
       - ./infra/supabase/migrations:/migrations-src:ro
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "postgres"]
       interval: 5s
       timeout: 5s
       retries: 10
+
+  migrate:
+    # One-shot: applies any infra/supabase/migrations/*.sql not yet recorded in
+    # public.schema_migrations. On a fresh volume the db init hook already ran
+    # the same script, so this is a no-op; on an existing volume it's the only
+    # thing that applies new migrations (init hooks never fire twice).
+    image: supabase/postgres:15.1.1.78
+    container_name: aiautoclicker-migrate
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: postgres
+      PGDATABASE: postgres
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./infra/supabase/migrate.sh:/migrate.sh:ro
+      - ./infra/supabase/migrations:/migrations-src:ro
+    entrypoint: ["sh", "/migrate.sh"]
 
   auth:
     image: supabase/gotrue:v2.170.0
@@ -178,13 +201,15 @@ services:
     container_name: aiautoclicker-api
     restart: unless-stopped
     env_file:
-      - backend/.env
+      - .env
     ports:
       - "8000:8000"
     depends_on:
       kong:
         condition: service_healthy
       storage-init:
+        condition: service_completed_successfully
+      migrate:
         condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
@@ -199,7 +224,7 @@ services:
     container_name: aiautoclicker-worker
     restart: unless-stopped
     env_file:
-      - backend/.env
+      - .env
     command: ["python", "worker_main.py"]
     depends_on:
       api:

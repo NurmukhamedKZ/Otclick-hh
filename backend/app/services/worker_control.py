@@ -1,7 +1,7 @@
 """Persisted worker on/off intent (profiles.worker_enabled).
 
 Dashboard Start/Stop flips the flag; the standalone worker container polls
-`enabled_active_user_ids` and starts/stops a runner per user. This decouples
+`active_user_flags` and starts/stops a runner per user. This decouples
 "user wants the worker running" from any single process's in-memory state, so
 the worker no longer auto-applies for every connected user at container boot.
 """
@@ -61,30 +61,6 @@ async def is_agent_enabled(user_id: str) -> bool:
     )
     data = res.data if res else None
     return bool(data and data.get("agent_enabled"))
-
-
-def enabled_active_user_ids() -> list[str]:
-    """Sync — user_ids with worker_enabled=true AND valid hh creds.
-
-    Plan gating (filter_accessible) is applied separately by the caller.
-    """
-    creds = (
-        service_client.table("hh_credentials")
-        .select("user_id,invalid_at")
-        .is_("invalid_at", None)
-        .execute()
-    )
-    active = {r["user_id"] for r in (creds.data or []) if r.get("user_id")}
-    if not active:
-        return []
-    prof = (
-        service_client.table("profiles")
-        .select("id,worker_enabled")
-        .in_("id", list(active))
-        .eq("worker_enabled", True)
-        .execute()
-    )
-    return [r["id"] for r in (prof.data or []) if r.get("id")]
 
 
 def active_user_flags() -> dict[str, tuple[bool, bool]]:

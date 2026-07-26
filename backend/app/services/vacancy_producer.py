@@ -8,6 +8,7 @@ import re
 
 from app.db.supabase import service_client
 from app.services import relevance
+from app.services.apply import RETRYABLE_STATUSES
 from app.services.blacklist import bulk_auto_blacklist
 from app.services.filters_service import _filter_to_search_params
 from app.services.hh_credentials import load_api_client, persist_if_refreshed
@@ -35,16 +36,23 @@ def _load_enabled_filters(user_id: str) -> list[dict]:
 
 
 def _existing_vacancy_ids(user_id: str, vacancy_ids: list[str]) -> set[str]:
+    """Vacancies already spent for this user. Rows in a RETRYABLE status never
+    reached hh, so they stay eligible — matching apply._already_applied, which
+    would otherwise let them through only for the producer to filter them out."""
     if not vacancy_ids:
         return set()
     res = (
         service_client.table("applications")
-        .select("vacancy_id")
+        .select("vacancy_id,status")
         .eq("user_id", user_id)
         .in_("vacancy_id", vacancy_ids)
         .execute()
     )
-    return {r["vacancy_id"] for r in (res.data or [])}
+    return {
+        r["vacancy_id"]
+        for r in (res.data or [])
+        if r.get("status") not in RETRYABLE_STATUSES
+    }
 
 
 def _blacklisted_employer_ids(user_id: str, employer_ids: list[str]) -> set[str]:
