@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
-import { Btn, StatusDot } from "@/components/otclick/ui";
+import { Banner, Skeleton } from "@/components/otclick/ui";
 
 type HHStatus = {
   connected: boolean;
@@ -23,7 +22,6 @@ function classify(s: HHStatus | null): "ok" | "warn" | "err" | null {
 }
 
 export default function HHBanner() {
-  const router = useRouter();
   const [status, setStatus] = useState<HHStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,73 +33,32 @@ export default function HHBanner() {
 
   if (error) {
     return (
-      <div
-        style={{
-          background: "var(--coral-soft)",
-          color: "#7C2A1E",
-          borderRadius: 18,
-          padding: "14px 18px",
-          marginBottom: 18,
-          fontSize: 13,
-        }}
-      >
-        hh status: {error}
-      </div>
+      <Banner tone="err" title="hh status" description={error} />
     );
   }
 
   const kind = classify(status);
   if (!kind || kind === "ok") {
     if (kind === "ok") return null;
+    return <Skeleton h={50} radius="var(--r-md)" />;
+  }
+
+  if (kind === "warn") {
     return (
-      <div
-        style={{
-          background: "var(--bg-deep)",
-          borderRadius: 18,
-          padding: "14px 18px",
-          marginBottom: 18,
-          height: 50,
-          opacity: 0.6,
-        }}
+      <Banner
+        tone="warn"
+        title="токен скоро истечёт"
+        description="мы обновим его автоматически"
       />
     );
   }
 
-  const map = {
-    warn: {
-      bg: "var(--yellow-soft)",
-      label: "токен скоро истечёт",
-      sub: "мы обновим его автоматически",
-      dot: "warn" as const,
-    },
-    err: {
-      bg: "var(--coral-soft)",
-      label: "нет связи с hh",
-      sub: "переподключи аккаунт, чтобы продолжить",
-      dot: "err" as const,
-    },
-  }[kind];
-
   return (
-    <div
-      style={{
-        background: map.bg,
-        borderRadius: 18,
-        padding: "14px 18px",
-        display: "flex",
-        alignItems: "center",
-        gap: 14,
-        marginBottom: 18,
-      }}
-    >
-      <StatusDot tone={map.dot} size={10} />
-      <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: 700, fontSize: 14 }}>{map.label}</div>
-        <div style={{ fontSize: 12, color: "var(--ink-soft)", opacity: 0.8 }}>{map.sub}</div>
-      </div>
-      <Btn kind="primary" size="sm" onClick={() => router.push("/onboarding")}>
-        переподключить
-      </Btn>
-    </div>
+    <Banner
+      tone="err"
+      title="нет связи с hh"
+      description="переподключи аккаунт, чтобы продолжить"
+      action={{ label: "Переподключить", href: "/onboarding" }}
+    />
   );
 }

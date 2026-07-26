@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import type {
@@ -10,7 +11,7 @@ import type {
   WorkerStatus,
   WorkerStopResponse,
 } from "@/lib/types";
-import { StatusDot } from "@/components/otclick/ui";
+import { IconBtn, StatusDot, Tooltip } from "@/components/otclick/ui";
 import { IFilter, IPause, IPlay, IRefresh, ISpark } from "@/components/otclick/icons";
 import { pushToast } from "@/components/toaster";
 import { openFiltersDrawer } from "@/components/filters-drawer";
@@ -107,6 +108,8 @@ export default function WorkerBar() {
   const busy = startM.isPending || stopM.isPending;
   const agentRunning = (status?.agent_state ?? "stopped") === "running";
   const agentBusy = agentStartM.isPending || agentStopM.isPending;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   return (
     <div
@@ -122,7 +125,7 @@ export default function WorkerBar() {
         flexWrap: "wrap",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div role="status" aria-live="polite" style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <span style={{ position: "relative", display: "inline-flex" }}>
           <StatusDot tone={dot as "ok" | "warn" | "err" | "muted"} size={9} />
           {isRunning && (
@@ -148,17 +151,19 @@ export default function WorkerBar() {
         </span>
       </div>
       <div style={{ height: 18, width: 1, background: "#ffffff15" }} />
-      <div style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 13 }}>
+      <Link href="/applications" style={{ textDecoration: "none", color: "inherit", display: "flex", alignItems: "baseline", gap: 6, fontSize: 13 }}>
         <span style={{ color: "#ffffff80" }}>сегодня</span>
         <span className="mono" style={{ fontWeight: 600 }}>
           {status?.today_count ?? 0}
           <span style={{ color: "#ffffff50" }}>/{status?.daily_limit ?? "—"}</span>
         </span>
-      </div>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 13 }}>
-        <span style={{ color: "#ffffff80" }}>в очереди</span>
-        <span className="mono" style={{ fontWeight: 600 }}>{status?.queued ?? 0}</span>
-      </div>
+      </Link>
+      <Tooltip text="вакансии, найденные фильтрами и ждущие отклика">
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 13 }}>
+          <span style={{ color: "#ffffff80" }}>в очереди</span>
+          <span className="mono" style={{ fontWeight: 600 }}>{status?.queued ?? 0}</span>
+        </div>
+      </Tooltip>
       <div style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 13 }}>
         <span style={{ color: "#ffffff80" }}>след. запуск</span>
         <span className="mono" style={{ fontWeight: 600 }}>{nextRunText(status?.next_run_at ?? null)}</span>
@@ -180,25 +185,6 @@ export default function WorkerBar() {
         </div>
       )}
       <div style={{ flex: 1 }} />
-      <button
-        type="button"
-        onClick={openFiltersDrawer}
-        style={{
-          border: "none",
-          background: "#ffffff15",
-          color: "#F5F1E6",
-          borderRadius: 999,
-          padding: "8px 14px",
-          fontWeight: 600,
-          fontSize: 13,
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 6,
-          cursor: "pointer",
-        }}
-      >
-        <IFilter size={14} /> Фильтры
-      </button>
 
       <button
         type="button"
@@ -258,24 +244,38 @@ export default function WorkerBar() {
           </>
         )}
       </button>
-      <button
-        type="button"
-        onClick={refresh}
-        title="обновить (⌘⇧R)"
-        style={{
-          border: "none",
-          background: "#ffffff15",
-          color: "#F5F1E6",
-          borderRadius: 999,
-          width: 34,
-          height: 34,
-          display: "grid",
-          placeItems: "center",
-          cursor: "pointer",
-        }}
-      >
-        <IRefresh size={15} style={refreshing ? { animation: "oc-spin 0.6s linear infinite" } : undefined} />
-      </button>
+      <div ref={menuRef} style={{ position: "relative" }}>
+        <IconBtn label="ещё" icon={<span style={{ fontSize: 18, lineHeight: 1 }}>⋯</span>} onDark onClick={() => setMenuOpen((v) => !v)} />
+        {menuOpen && (
+          <div
+            style={{
+              position: "absolute",
+              right: 0,
+              top: "calc(100% + 8px)",
+              background: "var(--surface)",
+              color: "var(--ink)",
+              borderRadius: "var(--r-md)",
+              boxShadow: "var(--sh-2)",
+              padding: 6,
+              display: "flex",
+              flexDirection: "column",
+              gap: 2,
+              zIndex: "var(--z-nav)",
+              minWidth: 180,
+            }}
+            onMouseLeave={() => setMenuOpen(false)}
+          >
+            <button type="button" className="oc-nav-item" onClick={() => { setMenuOpen(false); openFiltersDrawer(); }}>
+              <span className="oc-nav-item__icon"><IFilter size={16} /></span>
+              <span className="oc-nav-item__label">Фильтры</span>
+            </button>
+            <button type="button" className="oc-nav-item" onClick={() => { setMenuOpen(false); refresh(); }}>
+              <span className="oc-nav-item__icon"><IRefresh size={16} /></span>
+              <span className="oc-nav-item__label">Обновить</span>
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

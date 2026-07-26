@@ -1,6 +1,7 @@
 import { Btn, KeyHint, PageHeader } from "@/components/otclick/ui";
 import { ISearch } from "@/components/otclick/icons";
 import { openCommandPalette } from "@/components/otclick/command-palette";
+import CaptchaBanner from "@/components/otclick/captcha-banner";
 import HHBanner from "@/components/otclick/hh-banner";
 import LimitRing from "./limit-ring";
 import WeeklyPlan from "./weekly-plan";
@@ -16,6 +17,7 @@ export default async function DashboardPage() {
         actions={<Btn kind="ghost" size="sm" icon={<ISearch size={15} />} onClick={openCommandPalette}>поиск <KeyHint>⌘K</KeyHint></Btn>}
       />
       <HHBanner />
+      <CaptchaBanner />
       <div
         style={{
           display: "grid",

@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { NotificationRow } from "@/lib/types";
-import { Card } from "@/components/otclick/ui";
-import { IBolt, ICheck, ILink, IShield } from "@/components/otclick/icons";
+import { Card, EmptyState, Skeleton } from "@/components/otclick/ui";
+import { IBell, IBolt, ICheck, ILink, IShield } from "@/components/otclick/icons";
 
 const ICON: Record<string, React.ReactNode> = {
   captcha: <IShield size={14} />,
@@ -133,9 +133,9 @@ export default function NotificationsCard() {
         <p style={{ fontSize: 12, color: "var(--err)", marginBottom: 8 }}>{error}</p>
       )}
       {rows === null ? (
-        <p style={{ color: "var(--muted)", fontSize: 13 }}>загрузка…</p>
+        <Skeleton h={40} count={4} />
       ) : rows.length === 0 ? (
-        <p style={{ color: "var(--muted)", fontSize: 13 }}>пусто</p>
+        <EmptyState icon={<IBell size={22} />} title="Тихо" description="Здесь появятся события воркера и ИИ-агента." />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           {rows.map((n, i) => {
@@ -145,8 +145,12 @@ export default function NotificationsCard() {
               n.type === "worker_stop" ||
               n.type === "form_approval";
             return (
-              <div
+              <Link
                 key={n.id}
+                href="/notifications"
+                style={{ textDecoration: "none", color: "inherit" }}
+              >
+              <div
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -185,7 +189,7 @@ export default function NotificationsCard() {
                     {timeAgo(n.created_at)} назад
                   </div>
                 </div>
-                {!n.read && (
+                  {!n.read && (
                   <span
                     style={{
                       width: 7,
@@ -197,6 +201,7 @@ export default function NotificationsCard() {
                   />
                 )}
               </div>
+              </Link>
             );
           })}
         </div>

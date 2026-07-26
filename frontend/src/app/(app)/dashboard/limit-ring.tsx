@@ -4,7 +4,6 @@ import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import type { WorkerStatus } from "@/lib/types";
 import { Card } from "@/components/otclick/ui";
-import { IArrow } from "@/components/otclick/icons";
 
 export default function LimitRing() {
   const { data: status } = useQuery({
@@ -19,37 +18,14 @@ export default function LimitRing() {
   const C = 2 * Math.PI * 52;
 
   return (
-    <Card tone="light" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+    <Card tone="light" interactive={{ href: "/billing" }} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
       <div>
         <div style={{ fontSize: 17, fontWeight: 700 }}>Лимит на сегодня</div>
         <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 4, maxWidth: 160 }}>
           Бот сам остановится при достижении лимита
         </div>
-        <div
-          style={{
-            marginTop: 18,
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            color: "var(--ink)",
-            fontSize: 13,
-            fontWeight: 600,
-          }}
-        >
-          цель / факт
-          <span
-            style={{
-              width: 22,
-              height: 22,
-              borderRadius: 999,
-              background: "var(--ink)",
-              color: "#F5F1E6",
-              display: "grid",
-              placeItems: "center",
-            }}
-          >
-            <IArrow size={11} />
-          </span>
+        <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>
+          нужно больше — открыть тарифы →
         </div>
       </div>
       <div style={{ position: "relative", width: 130, height: 130 }}>

@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Btn, Card, KeyHint, PageHeader } from "@/components/otclick/ui";
-import { ISearch } from "@/components/otclick/icons";
+import { Btn, Card, EmptyState, KeyHint, PageHeader, SegmentedTabs, Skeleton } from "@/components/otclick/ui";
+import { ICheck, IDoc, IMail, ISearch } from "@/components/otclick/icons";
 import { openCommandPalette } from "@/components/otclick/command-palette";
 import { useRecruiter, type Draft } from "@/hooks/useRecruiter";
 import { useFormDrafts, type FormAnswer, type FormDraft } from "@/hooks/useFormDrafts";
@@ -286,25 +286,52 @@ export default function RecruiterPage() {
     discard: discardForm,
   } = useFormDrafts();
 
+  const SECTIONS = [
+    { id: "forms", label: "Анкеты" },
+    { id: "drafts", label: "Черновики" },
+    { id: "tasks", label: "Задачи" },
+  ] as const;
+
+  const [active, setActive] = useState<string>("forms");
+
+  useEffect(() => {
+    const hash = window.location.hash.replace("#", "");
+    if (SECTIONS.some((s) => s.id === hash)) setActive(hash);
+  }, []);
+
+  function goto(id: string) {
+    setActive(id);
+    window.history.replaceState(null, "", `#${id}`);
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   return (
     <>
       <PageHeader title="Todo" subtitle="что ждёт твоего решения" crumbs={[{ label: "Главная", href: "/dashboard" }, { label: "Todo" }]}
         actions={<Btn kind="ghost" size="sm" icon={<ISearch size={15} />} onClick={openCommandPalette}>поиск <KeyHint>⌘K</KeyHint></Btn>}
       />
+      <SegmentedTabs
+        items={[
+          { id: "forms", label: "Анкеты", count: formDrafts.length },
+          { id: "drafts", label: "Черновики", count: drafts.length },
+          { id: "tasks", label: "Задачи", count: todos.length },
+        ]}
+        value={active}
+        onChange={goto}
+        label="Разделы Todo"
+      />
       {error && <div style={{ color: "var(--err)", padding: 16 }}>{error}</div>}
       {formError && <div style={{ color: "var(--err)", padding: 16 }}>{formError}</div>}
       {loading || formLoading ? (
-        <div style={{ padding: 16, color: "var(--muted)" }}>Загрузка…</div>
+        <Skeleton h={120} count={3} />
       ) : (
         <div style={{ display: "grid", gap: 28, padding: 16, gridTemplateColumns: "minmax(0, 1fr)" }}>
-          <section style={{ display: "grid", gap: 12, minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}>
+          <section id="forms" style={{ display: "grid", gap: 12, minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}>
             <h2 style={{ fontSize: 16, fontWeight: 700 }}>
               Тесты вакансий на аппрув ({formDrafts.length})
             </h2>
             {formDrafts.length === 0 && (
-              <div style={{ fontSize: 14, color: "var(--muted)" }}>
-                Нет тестов на проверку.
-              </div>
+              <EmptyState icon={<IDoc size={22} />} title="Анкет нет" description="Когда вакансия попросит пройти тест, ИИ заполнит его и покажет здесь на проверку." />
             )}
             {formDrafts.map((f) => (
               <FormDraftCard
@@ -316,20 +343,20 @@ export default function RecruiterPage() {
             ))}
           </section>
 
-          <section style={{ display: "grid", gap: 12, minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}>
+          <section id="drafts" style={{ display: "grid", gap: 12, minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}>
             <h2 style={{ fontSize: 16, fontWeight: 700 }}>Черновики ответов ({drafts.length})</h2>
             {drafts.length === 0 && (
-              <div style={{ fontSize: 14, color: "var(--muted)" }}>Нет черновиков.</div>
+              <EmptyState icon={<IMail size={22} />} title="Черновиков нет" description="Если ИИ не уверен в ответе рекрутёру, черновик появится здесь." action={{ label: "Открыть чаты", href: "/chats" }} />
             )}
             {drafts.map((d) => (
               <DraftCard key={d.id} draft={d} onSend={sendDraft} onDiscard={discardDraft} />
             ))}
           </section>
 
-          <section style={{ display: "grid", gap: 12, minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}>
+          <section id="tasks" style={{ display: "grid", gap: 12, minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}>
             <h2 style={{ fontSize: 16, fontWeight: 700 }}>Задачи ({todos.length})</h2>
             {todos.length === 0 && (
-              <div style={{ fontSize: 14, color: "var(--muted)" }}>Нет задач.</div>
+              <EmptyState icon={<ICheck size={22} />} title="Задач нет" description="ИИ-агент создаёт задачи, когда рекрутёр просит что-то сделать вне переписки." />
             )}
             {todos.map((t) => (
               <Card key={t.id} style={{ display: "grid", gap: 6, gridTemplateColumns: "minmax(0, 1fr)" }}>
