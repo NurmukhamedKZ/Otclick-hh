@@ -1,5 +1,34 @@
 _format_version: "2.1"
 
+plugins:
+  - name: cors
+    config:
+      origins:
+        - "*"
+      methods:
+        - GET
+        - HEAD
+        - PUT
+        - PATCH
+        - POST
+        - DELETE
+        - OPTIONS
+      headers:
+        - Accept
+        - Accept-Version
+        - Content-Length
+        - Content-MD5
+        - Content-Type
+        - Date
+        - X-Auth-Token
+        - Authorization
+        - apikey
+        - x-client-info
+      exposed_headers:
+        - X-Auth-Token
+      credentials: true
+      max_age: 3600
+
 services:
   - name: auth-v1
     url: http://auth:9999/

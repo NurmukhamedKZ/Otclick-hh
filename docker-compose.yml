@@ -16,9 +16,9 @@ services:
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
     volumes:
       - supabase-db-data:/var/lib/postgresql/data
-      - ./infra/supabase/init/00-storage-buckets.sql:/docker-entrypoint-initdb.d/00-storage-buckets.sql:ro
-      - ./infra/supabase/migrations:/docker-entrypoint-initdb.d/migrations-src:ro
-      - ./infra/supabase/flatten-migrations.sh:/docker-entrypoint-initdb.d/01-flatten-migrations.sh:ro
+      - ./infra/supabase/init/zz1-set-role-passwords.sh:/docker-entrypoint-initdb.d/zz1-set-role-passwords.sh:ro
+      - ./infra/supabase/init/zz2-run-app-migrations.sh:/docker-entrypoint-initdb.d/zz2-run-app-migrations.sh:ro
+      - ./infra/supabase/migrations:/migrations-src:ro
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "postgres"]
       interval: 5s
@@ -35,6 +35,7 @@ services:
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: http://localhost:54321/auth/v1
       GOTRUE_DB_DRIVER: postgres
       GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/postgres
       GOTRUE_SITE_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
@@ -115,6 +116,21 @@ services:
     volumes:
       - supabase-storage-data:/var/lib/storage
 
+  storage-init:
+    # One-shot: creates the captcha-screenshots bucket after storage-api has
+    # finished its own internal migrations (see create-captcha-bucket.sh).
+    image: supabase/postgres:15.1.1.78
+    container_name: aiautoclicker-storage-init
+    restart: "no"
+    depends_on:
+      storage:
+        condition: service_started
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./infra/supabase/init/create-captcha-bucket.sh:/create-captcha-bucket.sh:ro
+    entrypoint: ["sh", "/create-captcha-bucket.sh"]
+
   kong:
     image: kong:2.8.1
     container_name: aiautoclicker-kong
@@ -126,17 +142,21 @@ services:
       - storage
     environment:
       KONG_DATABASE: "off"
-      KONG_DECLARATIVE_CONFIG: /kong.yml
+      KONG_DECLARATIVE_CONFIG: /tmp/kong.yml
       KONG_DNS_ORDER: LAST,A,CNAME
-      KONG_PLUGINS: request-transformer,key-auth
+      KONG_PLUGINS: request-transformer,key-auth,cors
       ANON_KEY: ${ANON_KEY}
       SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
     volumes:
       - ./infra/supabase/kong.yml:/kong.yml.tpl:ro
     # Kong's declarative config doesn't do env substitution natively for
-    # $ANON_KEY/$SERVICE_ROLE_KEY placeholders — render kong.yml.tpl into
-    # /kong.yml with envsubst on start.
-    entrypoint: ["sh", "-c", "apk add --no-cache gettext >/dev/null 2>&1 || true; envsubst < /kong.yml.tpl > /kong.yml; exec /docker-entrypoint.sh kong docker-start"]
+    # $ANON_KEY/$SERVICE_ROLE_KEY placeholders — replace them inline with
+    # sed (available in the base image, no root needed).
+    # NOTE: "$$" (not "\$") is required here — Compose's own interpolation
+    # runs on this string first, and "$$" is Compose's escape for a literal
+    # "$"; "\$" is not special to Compose and still gets substituted with
+    # the real key value, breaking the sed search pattern.
+    entrypoint: ["sh", "-c", "sed 's|$$ANON_KEY|'\"${ANON_KEY}\"'|g; s|$$SERVICE_ROLE_KEY|'\"${SERVICE_ROLE_KEY}\"'|g' /kong.yml.tpl > /tmp/kong.yml; exec /docker-entrypoint.sh kong docker-start"]
     ports:
       - "54321:8000"
     healthcheck:
@@ -160,6 +180,8 @@ services:
     depends_on:
       kong:
         condition: service_healthy
+      storage-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
       interval: 30s
@@ -195,6 +217,12 @@ services:
     image: aiautoclicker-frontend:latest
     container_name: aiautoclicker-frontend
     restart: unless-stopped
+    environment:
+      # Server-side Supabase calls (middleware, server components) run inside
+      # this container, where NEXT_PUBLIC_SUPABASE_URL's "localhost" points at
+      # itself, not the kong container. Route server-side calls over the
+      # docker network instead; the browser keeps using the public URL.
+      SUPABASE_URL: http://kong:8000
     ports:
       - "3000:3000"
     depends_on:

@@ -18,7 +18,7 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-RUN useradd -m -u 1000 app && chown -R app:app /app
+RUN useradd -m app && chown -R app:app /app
 USER app
 
 EXPOSE 3000
