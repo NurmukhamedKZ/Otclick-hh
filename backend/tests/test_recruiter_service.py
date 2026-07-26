@@ -5,7 +5,7 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service")
 os.environ.setdefault("FERNET_KEY", "kPpDeJjFqDppkMm6QHzqFkkSgFwsKtGzh4WeZ5dKZHc=")
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -183,3 +183,47 @@ async def test_send_draft_posts_to_hh_and_marks_sent():
     assert body == {"message": "edited reply"}
     update = draft_chain.update.call_args[0][0]
     assert update["status"] == "sent"
+
+
+@pytest.mark.asyncio
+async def test_send_draft_saves_qa_memory_only_when_edited():
+    from app.services import recruiter
+
+    row = {
+        "id": "d1", "negotiation_id": "n9", "draft_text": "orig",
+        "question_text": "Готовы к переезду?", "status": "pending",
+    }
+    draft_chain = _fluent([row])
+    draft_chain.maybe_single.return_value = draft_chain
+    draft_chain.execute.return_value = SimpleNamespace(data=row)
+    fake_client = MagicMock()
+    fake_client.access_token = "tok"
+    with patch.object(recruiter.service_client, "table", return_value=draft_chain), \
+         patch.object(recruiter, "load_api_client", new=_async_return(fake_client)), \
+         patch.object(recruiter, "persist_if_refreshed", new=_async_noop()), \
+         patch.object(recruiter.qa_memory, "upsert", new=AsyncMock()) as up:
+        await recruiter.send_draft("u1", "d1", message="edited reply")
+    up.assert_awaited_once_with(
+        "u1", "Готовы к переезду?", "edited reply", source="recruiter", vacancy_id="n9"
+    )
+
+
+@pytest.mark.asyncio
+async def test_send_draft_skips_qa_memory_when_unchanged():
+    from app.services import recruiter
+
+    row = {
+        "id": "d1", "negotiation_id": "n9", "draft_text": "orig",
+        "question_text": "Готовы к переезду?", "status": "pending",
+    }
+    draft_chain = _fluent([row])
+    draft_chain.maybe_single.return_value = draft_chain
+    draft_chain.execute.return_value = SimpleNamespace(data=row)
+    fake_client = MagicMock()
+    fake_client.access_token = "tok"
+    with patch.object(recruiter.service_client, "table", return_value=draft_chain), \
+         patch.object(recruiter, "load_api_client", new=_async_return(fake_client)), \
+         patch.object(recruiter, "persist_if_refreshed", new=_async_noop()), \
+         patch.object(recruiter.qa_memory, "upsert", new=AsyncMock()) as up:
+        await recruiter.send_draft("u1", "d1", message="orig")
+    up.assert_not_awaited()

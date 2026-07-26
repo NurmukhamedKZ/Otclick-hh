@@ -1,10 +1,19 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { Application } from "@/lib/types";
-import { Btn, Card, Tag } from "@/components/otclick/ui";
-import { IExternal, IRefresh, ISearch } from "@/components/otclick/icons";
+import { Btn, Card, EmptyState, PageHeader, Pager, SegmentedTabs, Skeleton, Tag } from "@/components/otclick/ui";
+import { IExternal, IList, IRefresh, ISearch } from "@/components/otclick/icons";
+import {
+  DEFAULT_VIEW,
+  parseView,
+  sanitizeSearch,
+  serializeView,
+  type ApplicationsView,
+} from "@/lib/applications-url";
+import { openFiltersDrawer } from "@/components/filters-drawer";
 
 const PAGE_SIZE = 25;
 
@@ -38,22 +47,64 @@ function timeAgo(iso: string): string {
 }
 
 export default function ApplicationsPage() {
+  return (
+    <Suspense fallback={<div style={{ padding: 22 }}><Skeleton h={44} count={6} /></div>}>
+      <ApplicationsView />
+    </Suspense>
+  );
+}
+
+function ApplicationsView() {
   const supabase = useMemo(() => createClient(), []);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const view = useMemo(() => parseView(new URLSearchParams(searchParams.toString())), [searchParams]);
+  const { status, page } = view;
+
   const [rows, setRows] = useState<Application[] | null>(null);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [total, setTotal] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [page, setPage] = useState(0);
-  const [status, setStatus] = useState<string>("all");
-  const [search, setSearch] = useState("");
-  const [searchDebounced, setSearchDebounced] = useState("");
+  const [search, setSearch] = useState(view.q);
   const [spinning, setSpinning] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
 
+  const setView = useCallback(
+    // "push" for discrete choices (a tab, a page) so the back button steps through
+    // them; "replace" for debounced typing, which would otherwise flood the history
+    // with one entry per keystroke.
+    (patch: Partial<ApplicationsView>, history: "push" | "replace" = "push") => {
+      const next = { ...view, ...patch };
+      const url = `${pathname}${serializeView(next)}`;
+      if (history === "push") router.push(url, { scroll: false });
+      else router.replace(url, { scroll: false });
+    },
+    [view, pathname, router],
+  );
+
+  // Last query this component pushed into the URL. Without it the debounce below
+  // cannot tell "the user typed" from "the URL changed underneath us", and would
+  // push the stale input back — breaking the back button and the reset action.
+  const pushedQ = useRef(view.q);
+
+  // URL changed externally (back/forward, reset button, shared link) → input follows
   useEffect(() => {
-    const t = setTimeout(() => setSearchDebounced(search.trim()), 300);
+    if (view.q !== pushedQ.current) {
+      pushedQ.current = view.q;
+      setSearch(view.q);
+    }
+  }, [view.q]);
+
+  // local typing → URL, debounced
+  useEffect(() => {
+    if (search.trim() === pushedQ.current) return;
+    const t = setTimeout(() => {
+      pushedQ.current = search.trim();
+      setView({ q: search.trim(), page: 0 }, "replace");
+    }, 300);
     return () => clearTimeout(t);
-  }, [search]);
+  }, [search, setView]);
 
   const load = useCallback(async () => {
     setRows(null);
@@ -64,10 +115,9 @@ export default function ApplicationsPage() {
       .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
 
     if (status !== "all") q = q.eq("status", status);
-    if (searchDebounced) {
-      q = q.or(
-        `vacancy_id.ilike.%${searchDebounced}%,employer_id.ilike.%${searchDebounced}%`,
-      );
+    const term = sanitizeSearch(view.q);
+    if (term) {
+      q = q.or(`vacancy_id.ilike.%${term}%,employer_id.ilike.%${term}%`);
     }
 
     const { data, count, error } = await q;
@@ -78,7 +128,7 @@ export default function ApplicationsPage() {
     setRows((data ?? []) as Application[]);
     setTotal(count ?? 0);
     setError(null);
-  }, [supabase, page, status, searchDebounced]);
+  }, [supabase, page, status, view.q]);
 
   const loadCounts = useCallback(async () => {
     const next: Record<string, number> = {};
@@ -142,6 +192,7 @@ export default function ApplicationsPage() {
 
   return (
     <>
+      <PageHeader title="Отклики" subtitle="все попытки отклика и их результат" crumbs={[{ label: "Главная", href: "/dashboard" }, { label: "Отклики" }]} />
       <Card style={{ marginBottom: 18 }}>
         <div
           style={{
@@ -172,10 +223,7 @@ export default function ApplicationsPage() {
             <input
               placeholder="vacancy_id, employer_id…"
               value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(0);
-              }}
+              onChange={(e) => setSearch(e.target.value)}
               style={{
                 flex: 1,
                 border: "none",
@@ -202,45 +250,12 @@ export default function ApplicationsPage() {
             обновить
           </Btn>
         </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {STATUSES.map((f) => (
-            <button
-              type="button"
-              key={f.id}
-              onClick={() => {
-                setStatus(f.id);
-                setPage(0);
-              }}
-              style={{
-                border: "none",
-                background: status === f.id ? "var(--ink)" : "var(--bg-deep)",
-                color: status === f.id ? "#F5F1E6" : "var(--ink)",
-                padding: "8px 14px",
-                borderRadius: 999,
-                fontSize: 13,
-                fontWeight: 600,
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 8,
-                cursor: "pointer",
-                fontFamily: "inherit",
-              }}
-            >
-              {f.label}
-              <span
-                className="mono"
-                style={{
-                  background: status === f.id ? "#ffffff15" : "#ffffff",
-                  padding: "2px 7px",
-                  borderRadius: 999,
-                  fontSize: 11,
-                }}
-              >
-                {counts[f.id] ?? 0}
-              </span>
-            </button>
-          ))}
-        </div>
+        <SegmentedTabs
+          items={STATUSES.map((s) => ({ id: s.id, label: s.label, count: counts[s.id] ?? 0 }))}
+          value={status}
+          onChange={(id) => setView({ status: id, page: 0 })}
+          label="Статус отклика"
+        />
       </Card>
 
       <Card className="oc-scroll-x" style={{ padding: 0, overflow: "hidden" }}>
@@ -269,20 +284,37 @@ export default function ApplicationsPage() {
           <p style={{ fontSize: 13, color: "var(--err)", padding: "12px 22px" }}>{error}</p>
         )}
         {rows === null ? (
-          <p style={{ fontSize: 13, color: "var(--muted)", padding: "22px" }}>загрузка…</p>
+          <div style={{ padding: 22 }}><Skeleton h={44} count={6} /></div>
         ) : rows.length === 0 ? (
-          <p style={{ fontSize: 13, color: "var(--muted)", padding: "22px" }}>
-            откликов нет
-          </p>
+          <EmptyState
+            icon={<IList size={22} />}
+            title={status === "all" && !view.q ? "Откликов пока нет" : "Ничего не найдено"}
+            description={
+              status === "all" && !view.q
+                ? "Запусти автоотклик — результаты появятся здесь в реальном времени."
+                : "Попробуй сбросить фильтр или изменить запрос."
+            }
+            action={
+              status === "all" && !view.q
+                ? { label: "Настроить фильтры", onClick: openFiltersDrawer }
+                : { label: "Сбросить фильтры", onClick: () => setView(DEFAULT_VIEW) }
+            }
+          />
         ) : (
           rows.map((a, i) => {
             const s = STATUS_TAG[a.status] ?? { tone: "neutral" as const, label: a.status };
             const qa = a.form_answers ?? [];
             const letter = (a.cover_letter ?? "").trim();
             const open = openId === a.id;
+            const expandable = qa.length > 0 || !!letter;
+            const toggle = () => setOpenId(open ? null : a.id);
             return (
               <Fragment key={a.id}>
               <div
+                className="oc-row"
+                // mouse convenience only — the keyboard path is the button below,
+                // because role="button" may not contain the hh.ru link.
+                onClick={expandable ? toggle : undefined}
                 style={{
                   display: "grid",
                   gridTemplateColumns: "120px minmax(160px, 1fr) 160px minmax(140px, 1fr) 100px 60px",
@@ -291,14 +323,8 @@ export default function ApplicationsPage() {
                   alignItems: "center",
                   fontSize: 13,
                   borderBottom: i < rows.length - 1 ? "1px solid var(--line-2)" : "none",
-                  transition: "background .15s",
+                  cursor: expandable ? "pointer" : "default",
                 }}
-                onMouseEnter={(e) =>
-                  ((e.currentTarget as HTMLDivElement).style.background = "var(--bg-deep)")
-                }
-                onMouseLeave={(e) =>
-                  ((e.currentTarget as HTMLDivElement).style.background = "transparent")
-                }
               >
                 <Tag tone={s.tone} dot>
                   {s.label}
@@ -319,10 +345,14 @@ export default function ApplicationsPage() {
                       резюме {a.resume_id.slice(0, 8)}
                     </div>
                   )}
-                  {qa.length > 0 && (
+                  {expandable && (
                     <button
                       type="button"
-                      onClick={() => setOpenId(open ? null : a.id)}
+                      aria-expanded={open}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggle();
+                      }}
                       style={{
                         marginTop: 4,
                         border: "none",
@@ -333,34 +363,9 @@ export default function ApplicationsPage() {
                         fontSize: 11,
                         fontWeight: 600,
                         color: "var(--coral)",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 4,
                       }}
                     >
-                      {open ? "▾" : "▸"} тест · {qa.length} вопр.
-                    </button>
-                  )}
-                  {qa.length === 0 && letter && (
-                    <button
-                      type="button"
-                      onClick={() => setOpenId(open ? null : a.id)}
-                      style={{
-                        marginTop: 4,
-                        border: "none",
-                        background: "transparent",
-                        padding: 0,
-                        cursor: "pointer",
-                        fontFamily: "inherit",
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color: "var(--coral)",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: 4,
-                      }}
-                    >
-                      {open ? "▾" : "▸"} AI письмо
+                      {open ? "▾" : "▸"} {qa.length > 0 ? `тест · ${qa.length} вопр.` : "AI письмо"}
                     </button>
                   )}
                 </div>
@@ -408,6 +413,8 @@ export default function ApplicationsPage() {
                   href={`https://hh.ru/vacancy/${a.vacancy_id}`}
                   target="_blank"
                   rel="noreferrer"
+                  aria-label="открыть вакансию на hh.ru"
+                  onClick={(e) => e.stopPropagation()}
                   style={{ color: "var(--ink)", display: "inline-flex" }}
                 >
                   <IExternal size={15} />
@@ -480,42 +487,10 @@ export default function ApplicationsPage() {
             <span>
               стр. {page + 1} из {pages}
             </span>
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <button
-                type="button"
-                onClick={() => setPage((p) => Math.max(0, p - 1))}
-                disabled={page === 0}
-                style={pagerBtn(false)}
-              >
-                ‹
-              </button>
-              <button type="button" style={pagerBtn(true)}>{page + 1}</button>
-              <button
-                type="button"
-                onClick={() => setPage((p) => Math.min(pages - 1, p + 1))}
-                disabled={page + 1 >= pages}
-                style={pagerBtn(false)}
-              >
-                ›
-              </button>
-            </div>
+            <Pager page={page} pages={pages} onChange={(p) => setView({ page: p })} />
           </div>
         )}
       </Card>
     </>
   );
-}
-
-function pagerBtn(active: boolean): React.CSSProperties {
-  return {
-    padding: "6px 12px",
-    border: active ? "none" : "1px solid var(--line)",
-    background: active ? "var(--ink)" : "transparent",
-    color: active ? "#F5F1E6" : "var(--ink)",
-    borderRadius: 8,
-    fontWeight: 600,
-    cursor: "pointer",
-    fontFamily: "inherit",
-    fontSize: 13,
-  };
 }

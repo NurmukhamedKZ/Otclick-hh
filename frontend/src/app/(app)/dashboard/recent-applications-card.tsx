@@ -1,11 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Application } from "@/lib/types";
-import { Card, Tag } from "@/components/otclick/ui";
-import { IPlus } from "@/components/otclick/icons";
+import { Card, EmptyState, LinkBtn, Skeleton, Tag } from "@/components/otclick/ui";
+import { IList, IPlus } from "@/components/otclick/icons";
+import { openFiltersDrawer } from "@/components/filters-drawer";
 
 const LIMIT = 8;
 
@@ -101,33 +101,22 @@ export default function RecentApplicationsCard() {
             обновляется в реальном времени
           </div>
         </div>
-        <Link href="/applications" style={{ textDecoration: "none" }}>
-          <span
-            style={{
-              background: "var(--ink)",
-              color: "#F5F1E6",
-              padding: "7px 14px",
-              borderRadius: 999,
-              fontSize: 13,
-              fontWeight: 600,
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-            }}
-          >
-            все отклики <IPlus size={13} />
-          </span>
-        </Link>
+        <LinkBtn href="/applications" kind="primary" size="sm" icon={<IPlus size={13} />}>
+          все отклики
+        </LinkBtn>
       </div>
       {error && (
         <p style={{ fontSize: 12, color: "var(--err)", marginBottom: 8 }}>{error}</p>
       )}
       {rows === null ? (
-        <p style={{ color: "var(--muted)", fontSize: 13 }}>загрузка…</p>
+        <Skeleton h={60} count={4} />
       ) : rows.length === 0 ? (
-        <p style={{ color: "var(--muted)", fontSize: 13 }}>
-          пусто — запусти worker сверху
-        </p>
+        <EmptyState
+          icon={<IList size={22} />}
+          title="Откликов пока нет"
+          description="Настрой фильтры и запусти автоотклик — первые отклики появятся здесь."
+          action={{ label: "Настроить фильтры", onClick: openFiltersDrawer }}
+        />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {rows.map((a) => {

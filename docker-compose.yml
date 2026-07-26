@@ -89,6 +89,10 @@ services:
       DNS_NODES: "''"
       RLIMIT_NOFILE: 10000
       APP_NAME: realtime
+      # Kong proxies to http://realtime:4000/socket/ → Host header is "realtime",
+      # and Realtime resolves the tenant from that host. The self-host seed
+      # defaults to "realtime-dev", which would 404 as TenantNotFound.
+      SELF_HOST_TENANT_NAME: realtime
       SEED_SELF_HOST: "true"
       RUN_JANITOR: "true"
 
@@ -212,7 +216,8 @@ services:
       args:
         NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:54321}
+        # Backend FastAPI, not the Supabase gateway (54321) — /api/* lives here.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
         NEXT_PUBLIC_GOOGLE_AUTH_ENABLED: ${NEXT_PUBLIC_GOOGLE_AUTH_ENABLED:-false}
     image: aiautoclicker-frontend:latest
     container_name: aiautoclicker-frontend

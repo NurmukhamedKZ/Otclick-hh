@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 
 export type ChatSummary = {
@@ -33,34 +34,37 @@ type ListResponse = {
   found: number;
 };
 
-export function useChats(unreadOnly: boolean) {
-  const [chats, setChats] = useState<ChatSummary[] | null>(null);
-  const [found, setFound] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+export const chatsQueryKey = (unreadOnly: boolean) => ["chats", unreadOnly] as const;
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await apiFetch<ListResponse>(
+/** Shared across the chats page and the sidebar badge — `/api/chats` proxies to
+ *  chatik.hh.ru upstream, so it must not be fetched once per mounting component.
+ *  Pass `enabled: false` to skip it entirely (the endpoint 409s without an hh session). */
+export function useChats(unreadOnly: boolean, options?: { enabled?: boolean }) {
+  const enabled = options?.enabled ?? true;
+  const qc = useQueryClient();
+  const { data, error, isFetching } = useQuery({
+    queryKey: chatsQueryKey(unreadOnly),
+    queryFn: () =>
+      apiFetch<ListResponse>(
         `/api/chats?per_page=50&unread_only=${unreadOnly ? "true" : "false"}`,
-      );
-      setChats(res.items);
-      setFound(res.found);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
-      setChats([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [unreadOnly]);
+      ),
+    staleTime: 60_000,
+    enabled,
+  });
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  const refresh = useCallback(
+    () => qc.invalidateQueries({ queryKey: chatsQueryKey(unreadOnly) }),
+    [qc, unreadOnly],
+  );
 
-  return { chats, found, error, loading, refresh };
+  return {
+    // on failure report "no chats" rather than a permanent loading state
+    chats: error ? [] : (data?.items ?? null),
+    found: data?.found ?? 0,
+    error: error instanceof Error ? error.message : null,
+    loading: isFetching,
+    refresh,
+  };
 }
 
 export function useChatMessages(

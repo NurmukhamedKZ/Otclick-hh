@@ -141,6 +141,8 @@ def _record_application(
     error: str | None,
     employer_id: str | None = None,
     form_answers: list[dict] | None = None,
+    employer_name: str | None = None,
+    filter_id: str | None = None,
 ) -> None:
     row = {
         "user_id": user_id,
@@ -151,6 +153,12 @@ def _record_application(
         "cover_letter": cover_letter,
         "error": error,
     }
+    # Analytics attribution — only set when known, never overwrite with null
+    # (this is an upsert; a later row must not blank an earlier attribution).
+    if employer_name:
+        row["employer_name"] = employer_name
+    if filter_id:
+        row["filter_id"] = filter_id
     if status in ("sent", "form_sent"):
         row["applied_at"] = datetime.now(timezone.utc).isoformat()
     if form_answers:
@@ -185,7 +193,11 @@ def _extract_employer_id(vacancy: dict) -> str | None:
 
 
 async def apply_one(
-    user_id: str, resume_uuid: str, vacancy_id: str, agent: HHAgent
+    user_id: str,
+    resume_uuid: str,
+    vacancy_id: str,
+    agent: HHAgent,
+    filter_id: str | None = None,
 ) -> ApplyStatus:
     loop = asyncio.get_running_loop()
     logger.info(
@@ -241,6 +253,7 @@ async def apply_one(
             return "token_dead"
 
         employer_id = _extract_employer_id(vacancy)
+        employer_name = (vacancy.get("employer") or {}).get("name")
 
         # Has-test check survives the producer race: vacancy may have flipped
         # has_test=true between search and apply. AI generates answers but the
@@ -254,11 +267,27 @@ async def apply_one(
                 vacancy_id, fill_status,
             )
             if fill_status == "form_pending":
+                # Test vacancies can also require a letter — prefill it, else
+                # hh rejects the submit at approval time. Editable in the UI.
+                draft_letter = ""
+                if vacancy.get("response_letter_required"):
+                    try:
+                        draft_letter = await agent.write_cover_letter(
+                            user_id=user_id,
+                            vacancy=vacancy,
+                            resume=resume,
+                            resume_uuid=resume_uuid,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "apply: draft cover letter failed vacancy=%s", vacancy_id
+                        )
                 await form_drafts.insert_draft(
                     user_id=user_id,
                     resume_id=resume_uuid,
                     vacancy=vacancy,
                     answers=form_answers,
+                    letter=draft_letter,
                 )
                 await notifications.notify(
                     user_id, "form_approval",
@@ -279,6 +308,8 @@ async def apply_one(
                     error=None if fill_status == "form_pending" else "vacancy.has_test",
                     employer_id=employer_id,
                     form_answers=form_answers or None,
+                    employer_name=employer_name,
+                    filter_id=filter_id,
                 ),
             )
             return fill_status
@@ -453,6 +484,8 @@ async def apply_one(
                 cover_letter=cover_letter or None,
                 error=None,
                 employer_id=employer_id,
+                employer_name=employer_name,
+                filter_id=filter_id,
             ),
         )
         return "sent"

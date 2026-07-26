@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import type { Resume, ResumesList } from "@/lib/types";
-import { Btn, Card, Tag } from "@/components/otclick/ui";
+import { Btn, Card, EmptyState, Skeleton, Tag } from "@/components/otclick/ui";
 import { IDoc, IRefresh } from "@/components/otclick/icons";
 import { pushToast } from "@/components/toaster";
 
@@ -67,11 +67,9 @@ export default function ResumesCard() {
         <p style={{ fontSize: 12, color: "var(--err)", marginBottom: 8 }}>{error}</p>
       )}
       {items === null ? (
-        <p style={{ color: "var(--muted)", fontSize: 13 }}>загрузка…</p>
+        <Skeleton h={62} count={2} />
       ) : items.length === 0 ? (
-        <p style={{ color: "var(--muted)", fontSize: 13 }}>
-          резюме не найдены — нажми синхронизировать
-        </p>
+        <EmptyState icon={<IDoc size={22} />} title="Резюме не найдены" description="Синхронизируй резюме с hh, чтобы автоотклик знал, чем откликаться." action={{ label: "Синхронизировать", onClick: sync }} />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {items.map((r) => {

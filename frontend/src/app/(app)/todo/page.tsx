@@ -1,10 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Btn, Card } from "@/components/otclick/ui";
+import { Btn, Card, EmptyState, PageHeader, Skeleton } from "@/components/otclick/ui";
+import { ICheck, IDoc, IMail } from "@/components/otclick/icons";
 import { useRecruiter, type Draft } from "@/hooks/useRecruiter";
 import { useFormDrafts, type FormAnswer, type FormDraft } from "@/hooks/useFormDrafts";
+
+const SECTIONS = [
+  { id: "forms", label: "Анкеты" },
+  { id: "drafts", label: "Черновики" },
+  { id: "tasks", label: "Задачи" },
+] as const;
+
+type SectionId = (typeof SECTIONS)[number]["id"];
+
+function isSectionId(v: string): v is SectionId {
+  return SECTIONS.some((s) => s.id === v);
+}
 
 function FormDraftCard({
   draft,
@@ -284,22 +297,57 @@ export default function RecruiterPage() {
     discard: discardForm,
   } = useFormDrafts();
 
+  const counts: Record<SectionId, number> = {
+    forms: formDrafts.length,
+    drafts: drafts.length,
+    tasks: todos.length,
+  };
+
+  const [active, setActive] = useState<SectionId>("forms");
+
+  // also on hashchange, not just on mount: navigating between #anchors — including
+  // via back/forward — stays in the same document and never remounts this component
+  useEffect(() => {
+    function sync() {
+      const hash = window.location.hash.replace("#", "");
+      if (isSectionId(hash)) setActive(hash);
+    }
+    sync();
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
+
   return (
     <>
+      <PageHeader title="Todo" subtitle="что ждёт твоего решения" crumbs={[{ label: "Главная", href: "/dashboard" }, { label: "Todo" }]} />
+      {/* jump links, not tabs: all three sections stay on screen, so tab/tabpanel
+          semantics would promise a panel switch that never happens */}
+      <nav className="oc-seg" aria-label="Разделы Todo">
+        {SECTIONS.map((s) => (
+          <a
+            key={s.id}
+            href={`#${s.id}`}
+            className="oc-seg__item"
+            aria-current={active === s.id ? "true" : undefined}
+            onClick={() => setActive(s.id)}
+          >
+            {s.label}
+            <span className="oc-seg__count">{counts[s.id]}</span>
+          </a>
+        ))}
+      </nav>
       {error && <div style={{ color: "var(--err)", padding: 16 }}>{error}</div>}
       {formError && <div style={{ color: "var(--err)", padding: 16 }}>{formError}</div>}
       {loading || formLoading ? (
-        <div style={{ padding: 16, color: "var(--muted)" }}>Загрузка…</div>
+        <Skeleton h={120} count={3} />
       ) : (
         <div style={{ display: "grid", gap: 28, padding: 16, gridTemplateColumns: "minmax(0, 1fr)" }}>
-          <section style={{ display: "grid", gap: 12, minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}>
+          <section id="forms" style={{ display: "grid", gap: 12, minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}>
             <h2 style={{ fontSize: 16, fontWeight: 700 }}>
               Тесты вакансий на аппрув ({formDrafts.length})
             </h2>
             {formDrafts.length === 0 && (
-              <div style={{ fontSize: 14, color: "var(--muted)" }}>
-                Нет тестов на проверку.
-              </div>
+              <EmptyState icon={<IDoc size={22} />} title="Анкет нет" description="Когда вакансия попросит пройти тест, ИИ заполнит его и покажет здесь на проверку." />
             )}
             {formDrafts.map((f) => (
               <FormDraftCard
@@ -311,20 +359,20 @@ export default function RecruiterPage() {
             ))}
           </section>
 
-          <section style={{ display: "grid", gap: 12, minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}>
+          <section id="drafts" style={{ display: "grid", gap: 12, minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}>
             <h2 style={{ fontSize: 16, fontWeight: 700 }}>Черновики ответов ({drafts.length})</h2>
             {drafts.length === 0 && (
-              <div style={{ fontSize: 14, color: "var(--muted)" }}>Нет черновиков.</div>
+              <EmptyState icon={<IMail size={22} />} title="Черновиков нет" description="Если ИИ не уверен в ответе рекрутёру, черновик появится здесь." action={{ label: "Открыть чаты", href: "/chats" }} />
             )}
             {drafts.map((d) => (
               <DraftCard key={d.id} draft={d} onSend={sendDraft} onDiscard={discardDraft} />
             ))}
           </section>
 
-          <section style={{ display: "grid", gap: 12, minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}>
+          <section id="tasks" style={{ display: "grid", gap: 12, minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}>
             <h2 style={{ fontSize: 16, fontWeight: 700 }}>Задачи ({todos.length})</h2>
             {todos.length === 0 && (
-              <div style={{ fontSize: 14, color: "var(--muted)" }}>Нет задач.</div>
+              <EmptyState icon={<ICheck size={22} />} title="Задач нет" description="ИИ-агент создаёт задачи, когда рекрутёр просит что-то сделать вне переписки." />
             )}
             {todos.map((t) => (
               <Card key={t.id} style={{ display: "grid", gap: 6, gridTemplateColumns: "minmax(0, 1fr)" }}>

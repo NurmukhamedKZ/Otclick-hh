@@ -4,7 +4,7 @@ Three pieces deploy independently:
 
 | Piece     | Where                     |
 |-----------|---------------------------|
-| Database  | Self-hosted Supabase (root docker-compose.yml) or managed Supabase |
+| Database  | Self-hosted Supabase (root docker-compose.yml) |
 | Frontend  | Vercel                    |
 | Backend + worker | Contabo VPS via Docker Compose |
 
@@ -70,9 +70,9 @@ python3 infra/supabase/gen-keys.py
 Critical vars:
 
 ```
-# Local stack (default): set SUPABASE_URL=http://kong:8000, paste keys from gen-keys.py
-# Cloud: set SUPABASE_URL=https://xxxx.supabase.co with cloud project keys
+# SUPABASE_URL=http://kong:8000 (in-network), keys from gen-keys.py
 SUPABASE_URL=
+SUPABASE_PUBLIC_URL=       # browser-reachable gateway, e.g. http://localhost:54321
 SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 JWT_SECRET=

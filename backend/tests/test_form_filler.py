@@ -109,6 +109,19 @@ def test_parse_tests_extracts_vacancy_block():
     assert td["required"] is True
 
 
+def test_parse_tests_entity_encoded_page():
+    """hh serves the inline JSON with &#34; instead of " — must still parse."""
+    from app.services.form_filler import _parse_tests, extract_xsrf_token
+
+    page = (
+        'window.state={&#34;foo&#34;:1,&#34;xsrfToken&#34;:&#34;XT&#34;,&#34;vacancyTests&#34;:'
+        '{&#34;999&#34;:{&#34;uidPk&#34;:&#34;u&#34;,&#34;guid&#34;:&#34;g&#34;,'
+        '&#34;startTime&#34;:123,&#34;required&#34;:true,&#34;tasks&#34;:[]}}};'
+    )
+    assert _parse_tests(page, "999")["uidPk"] == "u"
+    assert extract_xsrf_token(page) == "XT"
+
+
 def test_parse_tests_missing_raises():
     from app.services.form_filler import _parse_tests
 
@@ -128,6 +141,14 @@ def test_choose_solution_fallback_middle_when_no_da():
 
     solutions = [{"id": 1, "text": "a"}, {"id": 2, "text": "b"}, {"id": 3, "text": "c"}]
     assert _choose_solution(None, "q?", solutions) == "2"
+
+
+def test_free_text_empty_ai_answer_falls_back():
+    from app.services.form_filler import _free_text
+
+    chat = MagicMock()
+    chat.invoke.return_value = MagicMock(content="   ")
+    assert _free_text(chat, "q?") == "Да"  # never submit an empty field
 
 
 def test_choose_solution_ai_picks_valid_id():

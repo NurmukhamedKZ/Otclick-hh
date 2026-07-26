@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { apiFetch } from "@/lib/api";
 import type { CaptchaRequest } from "@/lib/types";
@@ -9,26 +9,56 @@ import { IClose, IExternal, IShield } from "@/components/otclick/icons";
 
 const SCREENSHOT_BUCKET = "captcha-screenshots";
 
+const EVENT = "oc:open-captcha-modal";
+
+export function openCaptchaModal() {
+  window.dispatchEvent(new CustomEvent(EVENT));
+}
+
 export default function CaptchaModal() {
   const [pending, setPending] = useState<CaptchaRequest | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [forcedOpen, setForcedOpen] = useState(false);
   const supabase = useMemo(() => createClient(), []);
+
+  useEffect(() => {
+    function show() { setForcedOpen(true); }
+    window.addEventListener(EVENT, show);
+    return () => window.removeEventListener(EVENT, show);
+  }, []);
+
+  const refreshImage = useCallback(async (row: CaptchaRequest) => {
+    if (!row.storage_path) {
+      setImageUrl(null);
+      return;
+    }
+    const { data } = await supabase.storage
+      .from(SCREENSHOT_BUCKET)
+      .createSignedUrl(row.storage_path, 300);
+    setImageUrl(data?.signedUrl ?? null);
+  }, [supabase]);
+
+  useEffect(() => {
+    if (!forcedOpen) return;
+    setForcedOpen(false);
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase
+        .from("captcha_requests")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("solved", false)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      const row = (data?.[0] ?? null) as CaptchaRequest | null;
+      if (row) { setPending(row); if (row.storage_path) refreshImage(row); }
+    })();
+  }, [forcedOpen, supabase, refreshImage]);
 
   useEffect(() => {
     let cancelled = false;
     let channel: ReturnType<typeof supabase.channel> | null = null;
-
-    async function refreshImage(row: CaptchaRequest) {
-      if (!row.storage_path) {
-        setImageUrl(null);
-        return;
-      }
-      const { data } = await supabase.storage
-        .from(SCREENSHOT_BUCKET)
-        .createSignedUrl(row.storage_path, 300);
-      if (cancelled) return;
-      setImageUrl(data?.signedUrl ?? null);
-    }
 
     async function loadPending(userId: string) {
       const { data, error } = await supabase
@@ -101,6 +131,7 @@ export default function CaptchaModal() {
     const id = pending?.id;
     setPending(null);
     setImageUrl(null);
+    setForcedOpen(false);
     if (!id) return;
     try {
       await apiFetch(`/api/captcha/${id}/dismiss`, { method: "POST" });

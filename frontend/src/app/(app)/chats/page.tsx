@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Btn, Card, Tag, Toggle, type TagTone } from "@/components/otclick/ui";
+import { Btn, Card, PageHeader, Tag, Toggle, type TagTone } from "@/components/otclick/ui";
 import { IRefresh, ISearch } from "@/components/otclick/icons";
 import {
   useChats,
@@ -560,8 +560,11 @@ export default function ChatsPage() {
       : null;
   const selected = fromList ?? stubForDeepLink;
 
+  const chatName = selected?.employer_name;
+
   return (
     <div style={{ display: "grid", gap: 16 }}>
+      <PageHeader title="Чаты" subtitle="переписка с работодателями" crumbs={[{ label: "Главная", href: "/dashboard" }, { label: "Чаты" }, ...(chatName ? [{ label: chatName }] : [])]} />
       <Card
         className="oc-chat-card"
         style={{

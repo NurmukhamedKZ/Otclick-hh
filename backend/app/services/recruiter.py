@@ -12,6 +12,7 @@ import logging
 from datetime import datetime, timezone
 
 from app.db.supabase import service_client
+from app.services import qa_memory
 from app.services.hh_credentials import load_api_client, persist_if_refreshed
 
 logger = logging.getLogger(__name__)
@@ -263,6 +264,18 @@ async def send_draft(user_id: str, draft_id: str, message: str | None = None) ->
         raise ValueError(f"draft {draft_id} not found")
     text = message if message is not None else draft["draft_text"]
     nid = draft["negotiation_id"]
+
+    # Remember only edits the user actually made — his correction on a recruiter's
+    # verbatim question is the same kind of source-of-truth as an edited form answer.
+    question = (draft.get("question_text") or "").strip()
+    if question and text.strip() != (draft.get("draft_text") or "").strip():
+        try:
+            await qa_memory.upsert(
+                user_id, question, text.strip(),
+                source="recruiter", vacancy_id=draft.get("negotiation_id"),
+            )
+        except Exception:
+            logger.warning("recruiter: qa_memory save failed for draft %s", draft_id, exc_info=True)
 
     client = await load_api_client(user_id)
     original = client.access_token

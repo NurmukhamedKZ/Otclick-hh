@@ -46,6 +46,7 @@ export const IMail = (p: IconProps) => <Base {...p}><rect x="3" y="5" width="18"
 export const ILock = (p: IconProps) => <Base {...p}><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 1 1 8 0v4" /></Base>;
 export const IEye = (p: IconProps) => <Base {...p}><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></Base>;
 export const ITelegram = (p: IconProps) => <Base {...p}><path d="m21 4-9 17-2.5-7.5L2 11z" /><path d="M21 4 9.5 13.5" /></Base>;
+export const IChart = (p: IconProps) => <Base {...p}><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></Base>;
 export const IMenu = (p: IconProps) => <Base {...p}><path d="M4 6h16M4 12h16M4 18h16" /></Base>;
 export const ILogout = (p: IconProps) => <Base {...p}><path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4" /><path d="M10 17l-5-5 5-5" /><path d="M15 12H5" /></Base>;
 

@@ -13,19 +13,34 @@ plugins:
         - POST
         - DELETE
         - OPTIONS
+      # Every header the supabase-js clients send. A missing entry fails the browser
+      # preflight and the call never leaves the page — e.g. supabase-js sends
+      # x-supabase-api-version on auth calls, and without it sign-up/sign-in die with
+      # "Failed to fetch" while curl against the same endpoint works fine.
       headers:
         - Accept
         - Accept-Version
+        - Accept-Profile
         - Content-Length
         - Content-MD5
         - Content-Type
+        - Content-Profile
         - Date
+        - Prefer
+        - Range
         - X-Auth-Token
+        - X-HTTP-Method-Override
         - Authorization
         - apikey
+        - cache-control
         - x-client-info
+        - x-supabase-api-version
+        - x-upsert
       exposed_headers:
         - X-Auth-Token
+        - Content-Range
+        - Content-Encoding
+        - X-Supabase-Api-Version
       credentials: true
       max_age: 3600
 

@@ -1,3 +1,5 @@
+import { PageHeader } from "@/components/otclick/ui";
+import CaptchaBanner from "@/components/otclick/captcha-banner";
 import HHBanner from "@/components/otclick/hh-banner";
 import LimitRing from "./limit-ring";
 import WeeklyPlan from "./weekly-plan";
@@ -5,11 +7,14 @@ import QuickActions from "./quick-actions";
 import RecentApplicationsCard from "./recent-applications-card";
 import ResumesCard from "./resumes-card";
 import NotificationsCard from "./notifications-card";
+import FunnelCard from "./funnel-card";
 
 export default async function DashboardPage() {
   return (
     <>
+      <PageHeader title="Главная" subtitle="обзор автоотклика и последних событий" crumbs={[{ label: "Главная" }]} />
       <HHBanner />
+      <CaptchaBanner />
       <div
         style={{
           display: "grid",
@@ -18,6 +23,7 @@ export default async function DashboardPage() {
         }}
       >
         <LimitRing />
+        <FunnelCard />
         <WeeklyPlan />
         <QuickActions />
       </div>

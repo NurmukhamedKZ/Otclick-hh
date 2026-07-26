@@ -83,19 +83,21 @@ async def test_poll_routes_bot_buttons_to_choice():
 
 
 @pytest.mark.asyncio
-async def test_poll_skips_bot_message_without_buttons_but_advances():
+async def test_poll_handles_bot_message_without_buttons():
+    """The hh bot also asks open questions without buttons — those must reach the
+    agent (it decides reply/escalate/SKIP), not be dropped as a bot notice."""
     from app.worker import recruiter_poll as rp
     recent = [_ref(last_id="m5", last_is_bot=True)]
-    messages = [_msg("m5", "Спасибо! Ваши ответы отправлены.", is_bot=True)]
+    messages = [_msg("m5", "Есть ли у вас опыт интеграции Claude API?", is_bot=True)]
     agent = MagicMock()
     agent.answer_recruiter = AsyncMock()
     agent.answer_recruiter_choice = AsyncMock()
     p = _patches(rp, recent=recent, messages=messages, cursor="old")
     upsert = p[5]
     await _run(rp, agent, p)
-    agent.answer_recruiter.assert_not_awaited()
+    agent.answer_recruiter.assert_awaited_once()
     agent.answer_recruiter_choice.assert_not_awaited()
-    upsert.new.assert_awaited_once()  # marked handled, no reply to a bot notice
+    upsert.new.assert_awaited_once()
     assert upsert.new.await_args.args[2] == "m5"
 
 
