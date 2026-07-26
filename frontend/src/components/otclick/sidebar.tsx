@@ -2,111 +2,61 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useNavCounts } from "@/hooks/useNavCounts";
+import { formatBadge } from "@/lib/nav-counts";
+import { apiFetch } from "@/lib/api";
+import { IconBtn, LinkBtn } from "@/components/otclick/ui";
+import { useQuery } from "@tanstack/react-query";
 import {
-  IHome,
-  IList,
-  IBell,
-  IMail,
-  IDoc,
-  IUser,
-  ISettings,
-  ILogo,
-  ILogout,
-  ITelegram,
+  IHome, IList, IBell, IMail, IDoc, IUser, ISettings, ILogo, ILogout,
+  ITelegram, IBolt, IChevRight,
 } from "@/components/otclick/icons";
 
+const STORAGE_KEY = "oc-sidebar-collapsed";
+
 type Item = {
-  href?: string;
   id: string;
+  href: string;
   icon: React.ReactNode;
   label: string;
-  action?: "signout";
-  external?: boolean;
+  badge?: "chats" | "todo" | "notifications";
 };
 
 const NAV: Item[] = [
   { id: "dashboard", href: "/dashboard", icon: <IHome />, label: "Главная" },
   { id: "applications", href: "/applications", icon: <IList />, label: "Отклики" },
-  { id: "chats", href: "/chats", icon: <IMail />, label: "Чаты" },
-  { id: "todo", href: "/todo", icon: <IDoc />, label: "Todo" },
-  { id: "notifications", href: "/notifications", icon: <IBell />, label: "Уведомления" },
+  { id: "chats", href: "/chats", icon: <IMail />, label: "Чаты", badge: "chats" },
+  { id: "todo", href: "/todo", icon: <IDoc />, label: "Todo", badge: "todo" },
+  { id: "notifications", href: "/notifications", icon: <IBell />, label: "Уведомления", badge: "notifications" },
   { id: "account", href: "/account", icon: <IUser />, label: "Аккаунт" },
 ];
-
-function SidebarBtn({
-  item,
-  active,
-  onClick,
-}: {
-  item: Item;
-  active: boolean;
-  onClick?: () => void;
-}) {
-  const style: React.CSSProperties = {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    border: "none",
-    display: "grid",
-    placeItems: "center",
-    background: active ? "var(--ink)" : "transparent",
-    color: active ? "#F5F1E6" : "var(--ink)",
-    transition: "background .2s",
-    cursor: "pointer",
-  };
-  const onMouseEnter = (e: React.MouseEvent<HTMLElement>) => {
-    if (!active) (e.currentTarget as HTMLElement).style.background = "var(--line-2)";
-  };
-  const onMouseLeave = (e: React.MouseEvent<HTMLElement>) => {
-    if (!active) (e.currentTarget as HTMLElement).style.background = "transparent";
-  };
-  if (item.href && item.external) {
-    return (
-      <a
-        href={item.href}
-        target="_blank"
-        rel="noopener noreferrer"
-        title={item.label}
-        style={style}
-        onMouseEnter={onMouseEnter}
-        onMouseLeave={onMouseLeave}
-      >
-        {item.icon}
-      </a>
-    );
-  }
-  if (item.href) {
-    return (
-      <Link
-        href={item.href}
-        title={item.label}
-        style={style}
-        onMouseEnter={onMouseEnter}
-        onMouseLeave={onMouseLeave}
-      >
-        {item.icon}
-      </Link>
-    );
-  }
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={item.label}
-      style={style}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
-    >
-      {item.icon}
-    </button>
-  );
-}
 
 export default function Sidebar({ email }: { email: string | null }) {
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
+  const counts = useNavCounts();
+  const [collapsed, setCollapsed] = useState(false);
+
+  const { data: billing } = useQuery({
+    queryKey: ["billing-status"],
+    queryFn: () => apiFetch<{ plan: string }>("/api/billing/status"),
+    staleTime: 60_000,
+  });
+
+  useEffect(() => {
+    setCollapsed(window.localStorage.getItem(STORAGE_KEY) === "1");
+  }, []);
+
+  function toggleCollapsed() {
+    setCollapsed((prev) => {
+      const next = !prev;
+      window.localStorage.setItem(STORAGE_KEY, next ? "1" : "0");
+      return next;
+    });
+  }
 
   async function signOut() {
     await supabase.auth.signOut();
@@ -114,84 +64,128 @@ export default function Sidebar({ email }: { email: string | null }) {
     router.refresh();
   }
 
-  const initials = email
-    ? email
-        .split(/[@.]/)[0]
-        .slice(0, 2)
-        .toUpperCase()
-    : "ME";
+  const initials = email ? email.split(/[@.]/)[0].slice(0, 2).toUpperCase() : "ME";
+  const showPro = billing?.plan !== "active";
 
   return (
     <aside
-      className="oc-sidebar"
+      className={`oc-sidebar${collapsed ? " oc-sidebar--collapsed" : ""}`}
       style={{
-        width: 76,
+        width: collapsed ? 76 : 216,
         flexShrink: 0,
         display: "flex",
         flexDirection: "column",
-        alignItems: "center",
-        padding: "20px 0 24px",
+        alignItems: "stretch",
+        padding: "20px 8px 24px",
         gap: 14,
         position: "sticky",
         top: 16,
         alignSelf: "flex-start",
         height: "calc(100vh - 32px)",
+        transition: "width var(--dur) var(--ease)",
       }}
     >
-      <div className="oc-sidebar-logo" style={{ marginBottom: 8 }}>
-        <Link href="/dashboard" aria-label="otclick">
+      <div
+        className="oc-sidebar-logo"
+        style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 6px 8px" }}
+      >
+        <Link href="/dashboard" aria-label="otclick — на главную" style={{ display: "inline-flex" }}>
           <ILogo size={36} />
         </Link>
+        {!collapsed && <span style={{ fontWeight: 800, fontSize: 17 }}>otclick</span>}
+        <span style={{ marginLeft: "auto" }}>
+          <IconBtn
+            label={collapsed ? "развернуть меню" : "свернуть меню"}
+            icon={
+              <IChevRight
+                size={16}
+                style={{ transform: collapsed ? "none" : "rotate(180deg)", transition: "transform var(--dur) var(--ease)" }}
+              />
+            }
+            onClick={toggleCollapsed}
+          />
+        </span>
       </div>
-      <div
+
+      <nav
         className="oc-sidebar-nav"
+        aria-label="Основная навигация"
         style={{
           background: "var(--surface)",
-          borderRadius: 22,
+          borderRadius: "var(--r-lg)",
           padding: 8,
           display: "flex",
           flexDirection: "column",
-          gap: 6,
-          boxShadow: "0 1px 0 var(--line-2)",
+          gap: 4,
+          boxShadow: "var(--sh-1)",
         }}
       >
         {NAV.map((it) => {
-          const active = !it.action && it.href ? pathname.startsWith(it.href) : false;
-          return <SidebarBtn key={it.id} item={it} active={active} />;
+          const active = pathname.startsWith(it.href);
+          const badge = it.badge ? formatBadge(counts[it.badge]) : null;
+          return (
+            <Link
+              key={it.id}
+              href={it.href}
+              className="oc-nav-item"
+              aria-current={active ? "page" : undefined}
+              title={collapsed ? it.label : undefined}
+            >
+              <span className="oc-nav-item__icon">{it.icon}</span>
+              <span className="oc-nav-item__label">{it.label}</span>
+              {badge && (
+                <span className="oc-nav-badge" aria-label={`${counts[it.badge!]} новых`}>
+                  {badge}
+                </span>
+              )}
+            </Link>
+          );
         })}
-      </div>
+      </nav>
+
       <div className="oc-sidebar-spacer" style={{ flex: 1 }} />
+
       <div
         className="oc-sidebar-secondary"
         style={{
           background: "var(--surface)",
-          borderRadius: 22,
+          borderRadius: "var(--r-lg)",
           padding: 8,
           display: "flex",
           flexDirection: "column",
-          gap: 6,
+          gap: 4,
         }}
       >
-        <SidebarBtn
-          item={{
-            id: "support",
-            href: "https://t.me/UnixAuto",
-            icon: <ITelegram />,
-            label: "Поддержка",
-            external: true,
-          }}
-          active={false}
-        />
-        <SidebarBtn
-          item={{ id: "settings", href: "/account", icon: <ISettings />, label: "Настройки" }}
-          active={false}
-        />
-        <SidebarBtn
-          item={{ id: "logout", icon: <ILogout />, label: "Выйти" }}
-          active={false}
-          onClick={signOut}
-        />
+        {showPro && (
+          <LinkBtn
+            href="/billing"
+            kind="yellow"
+            size="sm"
+            icon={<IBolt size={14} />}
+            style={{ justifyContent: "center", marginBottom: 4 }}
+          >
+            {collapsed ? "" : "Pro"}
+          </LinkBtn>
+        )}
+        <a
+          href="https://t.me/UnixAuto"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="oc-nav-item"
+        >
+          <span className="oc-nav-item__icon"><ITelegram /></span>
+          <span className="oc-nav-item__label">Поддержка</span>
+        </a>
+        <Link href="/account" className="oc-nav-item">
+          <span className="oc-nav-item__icon"><ISettings /></span>
+          <span className="oc-nav-item__label">Настройки</span>
+        </Link>
+        <button type="button" onClick={signOut} className="oc-nav-item">
+          <span className="oc-nav-item__icon"><ILogout /></span>
+          <span className="oc-nav-item__label">Выйти</span>
+        </button>
       </div>
+
       <div
         className="oc-sidebar-avatar"
         title={email ?? ""}
@@ -206,6 +200,7 @@ export default function Sidebar({ email }: { email: string | null }) {
           fontWeight: 700,
           color: "var(--ink)",
           fontSize: 13,
+          flexShrink: 0,
         }}
       >
         {initials}

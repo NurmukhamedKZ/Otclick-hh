@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import type {
@@ -12,7 +11,7 @@ import type {
   WorkerStopResponse,
 } from "@/lib/types";
 import { StatusDot } from "@/components/otclick/ui";
-import { IBolt, IFilter, IPause, IPlay, IRefresh, ISpark } from "@/components/otclick/icons";
+import { IFilter, IPause, IPlay, IRefresh, ISpark } from "@/components/otclick/icons";
 import { pushToast } from "@/components/toaster";
 import { openFiltersDrawer } from "@/components/filters-drawer";
 
@@ -200,26 +199,7 @@ export default function WorkerBar() {
       >
         <IFilter size={14} /> Фильтры
       </button>
-      <Link href="/billing" style={{ textDecoration: "none" }}>
-        <button
-          type="button"
-          style={{
-            border: "none",
-            background: "var(--yellow)",
-            color: "var(--ink)",
-            borderRadius: 999,
-            padding: "8px 14px",
-            fontWeight: 600,
-            fontSize: 13,
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            cursor: "pointer",
-          }}
-        >
-          <IBolt size={14} /> Pro
-        </button>
-      </Link>
+
       <button
         type="button"
         disabled={agentBusy}
