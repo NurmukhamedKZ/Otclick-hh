@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { apiFetch } from "@/lib/api";
-import { Btn, Card, PageHeader, Tag } from "@/components/otclick/ui";
-import { IBolt, ICheck } from "@/components/otclick/icons";
+import { Btn, Card, KeyHint, PageHeader, Tag } from "@/components/otclick/ui";
+import { IBolt, ICheck, ISearch } from "@/components/otclick/icons";
+import { openCommandPalette } from "@/components/otclick/command-palette";
 import type { BillingStatus, SubscribeParams } from "@/lib/types";
 import { pushToast } from "@/components/toaster";
 
@@ -178,7 +179,9 @@ export default function BillingPage() {
 
   return (
     <>
-      <PageHeader title="Подписка" subtitle="план, оплата и история платежей" crumbs={[{ label: "Главная", href: "/dashboard" }, { label: "Аккаунт", href: "/account" }, { label: "Подписка" }]} />
+      <PageHeader title="Подписка" subtitle="план, оплата и история платежей" crumbs={[{ label: "Главная", href: "/dashboard" }, { label: "Аккаунт", href: "/account" }, { label: "Подписка" }]}
+        actions={<Btn kind="ghost" size="sm" icon={<ISearch size={15} />} onClick={openCommandPalette}>поиск <KeyHint>⌘K</KeyHint></Btn>}
+      />
       {status && !status.has_access && (
         <div
           style={{

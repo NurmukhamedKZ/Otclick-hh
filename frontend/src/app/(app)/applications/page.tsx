@@ -4,9 +4,10 @@ import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from "r
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { Application } from "@/lib/types";
-import { Btn, Card, EmptyState, PageHeader, Pager, SegmentedTabs, Skeleton, Tag } from "@/components/otclick/ui";
+import { Btn, Card, EmptyState, KeyHint, PageHeader, Pager, SegmentedTabs, Skeleton, Tag } from "@/components/otclick/ui";
 import { IExternal, IList, IRefresh, ISearch } from "@/components/otclick/icons";
 import { DEFAULT_VIEW, parseView, serializeView, type ApplicationsView } from "@/lib/applications-url";
+import { openCommandPalette } from "@/components/otclick/command-palette";
 import { openFiltersDrawer } from "@/components/filters-drawer";
 
 const PAGE_SIZE = 25;
@@ -166,7 +167,9 @@ function ApplicationsView() {
 
   return (
     <>
-      <PageHeader title="Отклики" subtitle="все попытки отклика и их результат" crumbs={[{ label: "Главная", href: "/dashboard" }, { label: "Отклики" }]} />
+      <PageHeader title="Отклики" subtitle="все попытки отклика и их результат" crumbs={[{ label: "Главная", href: "/dashboard" }, { label: "Отклики" }]}
+        actions={<Btn kind="ghost" size="sm" icon={<ISearch size={15} />} onClick={openCommandPalette}>поиск <KeyHint>⌘K</KeyHint></Btn>}
+      />
       <Card style={{ marginBottom: 18 }}>
         <div
           style={{

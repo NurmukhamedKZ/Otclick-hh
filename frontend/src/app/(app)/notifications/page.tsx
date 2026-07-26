@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { NotificationRow } from "@/lib/types";
-import { Btn, Card, PageHeader } from "@/components/otclick/ui";
-import { IBolt, ICheck, IClose, ILink, IShield, ITrash } from "@/components/otclick/icons";
+import { Btn, Card, KeyHint, PageHeader } from "@/components/otclick/ui";
+import { IBolt, ICheck, IClose, ILink, ISearch, IShield, ITrash } from "@/components/otclick/icons";
+import { openCommandPalette } from "@/components/otclick/command-palette";
 
 const ICON: Record<string, React.ReactNode> = {
   captcha: <IShield size={14} />,
@@ -131,7 +132,9 @@ export default function NotificationsPage() {
 
   return (
     <>
-      <PageHeader title="Уведомления" subtitle="события воркера и ИИ-агента" crumbs={[{ label: "Главная", href: "/dashboard" }, { label: "Уведомления" }]} />
+      <PageHeader title="Уведомления" subtitle="события воркера и ИИ-агента" crumbs={[{ label: "Главная", href: "/dashboard" }, { label: "Уведомления" }]}
+        actions={<Btn kind="ghost" size="sm" icon={<ISearch size={15} />} onClick={openCommandPalette}>поиск <KeyHint>⌘K</KeyHint></Btn>}
+      />
       <Card>
         <div
           style={{

@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { apiFetch } from "@/lib/api";
-import { Btn, Card, Field, LinkBtn, PageHeader, Tag } from "@/components/otclick/ui";
-import { ILink, IPower, IRefresh, ITelegram } from "@/components/otclick/icons";
+import { Btn, Card, Field, KeyHint, LinkBtn, PageHeader, Tag } from "@/components/otclick/ui";
+import { ILink, IPower, IRefresh, ISearch, ITelegram } from "@/components/otclick/icons";
+import { openCommandPalette } from "@/components/otclick/command-palette";
 
 type Tab = "profile" | "integrations" | "danger";
 
@@ -96,7 +97,9 @@ export default function AccountPage() {
 
   return (
     <>
-      <PageHeader title="Аккаунт" subtitle="подключение hh и настройки" crumbs={[{ label: "Главная", href: "/dashboard" }, { label: "Аккаунт" }]} />
+      <PageHeader title="Аккаунт" subtitle="подключение hh и настройки" crumbs={[{ label: "Главная", href: "/dashboard" }, { label: "Аккаунт" }]}
+        actions={<Btn kind="ghost" size="sm" icon={<ISearch size={15} />} onClick={openCommandPalette}>поиск <KeyHint>⌘K</KeyHint></Btn>}
+      />
       <div style={{ display: "flex", alignItems: "center", gap: 18, marginBottom: 18, flexWrap: "wrap" }}>
         <div
           style={{

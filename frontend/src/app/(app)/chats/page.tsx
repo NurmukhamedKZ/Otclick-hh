@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Btn, Card, PageHeader, Tag, Toggle, type TagTone } from "@/components/otclick/ui";
+import { Btn, Card, KeyHint, PageHeader, Tag, Toggle, type TagTone } from "@/components/otclick/ui";
+import { openCommandPalette } from "@/components/otclick/command-palette";
 import { IRefresh, ISearch } from "@/components/otclick/icons";
 import {
   useChats,
@@ -564,7 +565,9 @@ export default function ChatsPage() {
 
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <PageHeader title="Чаты" subtitle="переписка с работодателями" crumbs={[{ label: "Главная", href: "/dashboard" }, { label: "Чаты" }, ...(chatName ? [{ label: chatName }] : [])]} />
+      <PageHeader title="Чаты" subtitle="переписка с работодателями" crumbs={[{ label: "Главная", href: "/dashboard" }, { label: "Чаты" }, ...(chatName ? [{ label: chatName }] : [])]}
+        actions={<Btn kind="ghost" size="sm" icon={<ISearch size={15} />} onClick={openCommandPalette}>поиск <KeyHint>⌘K</KeyHint></Btn>}
+      />
       <Card
         className="oc-chat-card"
         style={{
