@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     SUPABASE_URL: str
+    # Browser-reachable base URL of the same Supabase stack. In the local
+    # docker-compose setup SUPABASE_URL is the in-network kong hostname, which
+    # a browser can't resolve — signed Storage URLs must be rewritten to this.
+    SUPABASE_PUBLIC_URL: str = "http://localhost:54321"
     SUPABASE_ANON_KEY: str
     SUPABASE_SERVICE_ROLE_KEY: str
     FERNET_KEY: str

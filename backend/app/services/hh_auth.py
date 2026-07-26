@@ -37,6 +37,16 @@ class JobState:
 _jobs: dict[str, JobState] = {}
 
 
+def _browser_reachable(url: str) -> str:
+    """Signed Storage URLs come back on SUPABASE_URL's host (in-docker `kong`).
+    Swap it for the host the user's browser can actually reach."""
+    base = settings.SUPABASE_URL.rstrip("/")
+    public = settings.SUPABASE_PUBLIC_URL.rstrip("/")
+    if public and url.startswith(base):
+        return public + url[len(base):]
+    return url
+
+
 def encrypt_token(plain: str) -> str:
     return settings.fernet.encrypt(plain.encode()).decode()
 
@@ -103,7 +113,7 @@ async def _run_oauth(job_id: str, username: str, password: str) -> None:
             url = signed.get("signedURL") or signed.get("signedUrl")
             if not url:
                 raise RuntimeError("Captcha screenshot URL unavailable (storage error)")
-            state.screenshot_url = url
+            state.screenshot_url = _browser_reachable(url)
 
             try:
                 solution = await asyncio.wait_for(
@@ -162,7 +172,7 @@ async def _run_oauth_email_code(job_id: str, username: str) -> None:
             url = signed.get("signedURL") or signed.get("signedUrl")
             if not url:
                 raise RuntimeError("Captcha screenshot URL unavailable (storage error)")
-            state.screenshot_url = url
+            state.screenshot_url = _browser_reachable(url)
 
             try:
                 solution = await asyncio.wait_for(

@@ -211,14 +211,6 @@ cp .env.local.example .env.local
 npm run dev
 ```
 
-### Using cloud Supabase instead
-
-If you prefer a managed Supabase project, comment out the
-`db`/`auth`/`rest`/`realtime`/`storage`/`kong` services in
-`docker-compose.yml` and set `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and
-`SUPABASE_SERVICE_ROLE_KEY` in `backend/.env` to your cloud project's
-values (see the comment block in `.env.example`).
-
 ### Run the Worker
 
 In a separate terminal:
@@ -237,6 +229,7 @@ python worker_main.py
 ```env
 # Local Supabase stack — generate keys with: python3 infra/supabase/gen-keys.py
 SUPABASE_URL=http://kong:8000
+SUPABASE_PUBLIC_URL=http://localhost:54321
 SUPABASE_ANON_KEY=<paste ANON_KEY from gen-keys.py>
 SUPABASE_SERVICE_ROLE_KEY=<paste SERVICE_ROLE_KEY from gen-keys.py>
 JWT_SECRET=<paste JWT_SECRET from gen-keys.py>
@@ -265,7 +258,7 @@ CLOUDPAYMENTS_API_SECRET=
 ```env
 NEXT_PUBLIC_SUPABASE_URL=http://localhost:54321
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<paste ANON_KEY from gen-keys.py>
-NEXT_PUBLIC_API_URL=http://localhost:54321
+NEXT_PUBLIC_API_URL=http://localhost:8000
 NEXT_PUBLIC_GOOGLE_AUTH_ENABLED=false
 ```
 

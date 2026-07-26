@@ -35,8 +35,14 @@ cd backend && python worker_main.py
 # Frontend dev
 cd frontend && npm run dev
 
-# All tests
+# All tests (tests/integration/ + tests/e2e/ auto-skip unless the local stack is up)
 cd backend && python -m pytest tests/ -v
+
+# Local-stack smoke tests only — needs `docker compose up -d` + root .env
+cd backend && python -m pytest tests/integration -v
+
+# Browser e2e (Chromium → frontend → Kong → API) — also needs the frontend on :3000
+cd backend && python -m pytest tests/e2e -v
 
 # Single test
 cd backend && python -m pytest tests/test_hh_auth.py::test_encrypt_decrypt_roundtrip -v

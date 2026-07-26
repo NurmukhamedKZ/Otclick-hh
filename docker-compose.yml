@@ -212,7 +212,8 @@ services:
       args:
         NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:54321}
+        # Backend FastAPI, not the Supabase gateway (54321) — /api/* lives here.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
         NEXT_PUBLIC_GOOGLE_AUTH_ENABLED: ${NEXT_PUBLIC_GOOGLE_AUTH_ENABLED:-false}
     image: aiautoclicker-frontend:latest
     container_name: aiautoclicker-frontend
