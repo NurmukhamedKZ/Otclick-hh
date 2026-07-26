@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 
 export type FormAnswer = {
@@ -25,26 +26,32 @@ export type FormDraft = {
   created_at: string;
 };
 
+export const formDraftsQueryKey = ["form-drafts"] as const;
+
+const EMPTY: FormDraft[] = [];
+
+/** Shared between the todo page and the sidebar badge via one query cache entry. */
 export function useFormDrafts() {
-  const [drafts, setDrafts] = useState<FormDraft[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const qc = useQueryClient();
+  const { data, error, isLoading } = useQuery({
+    queryKey: formDraftsQueryKey,
+    queryFn: () => apiFetch<FormDraft[]>("/api/forms/drafts"),
+    staleTime: 60_000,
+  });
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const d = await apiFetch<FormDraft[]>("/api/forms/drafts");
-      setDrafts(d);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const refresh = useCallback(
+    () => qc.invalidateQueries({ queryKey: formDraftsQueryKey }),
+    [qc],
+  );
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  const drop = useCallback(
+    (id: string) => {
+      qc.setQueryData<FormDraft[]>(formDraftsQueryKey, (prev) =>
+        (prev ?? []).filter((d) => d.id !== id),
+      );
+    },
+    [qc],
+  );
 
   const approve = useCallback(
     async (id: string, answers: FormAnswer[], letter: string) => {
@@ -52,15 +59,25 @@ export function useFormDrafts() {
         method: "POST",
         body: JSON.stringify({ answers, letter }),
       });
-      setDrafts((prev) => prev.filter((d) => d.id !== id));
+      drop(id);
     },
-    [],
+    [drop],
   );
 
-  const discard = useCallback(async (id: string) => {
-    await apiFetch(`/api/forms/drafts/${id}/discard`, { method: "POST" });
-    setDrafts((prev) => prev.filter((d) => d.id !== id));
-  }, []);
+  const discard = useCallback(
+    async (id: string) => {
+      await apiFetch(`/api/forms/drafts/${id}/discard`, { method: "POST" });
+      drop(id);
+    },
+    [drop],
+  );
 
-  return { drafts, loading, error, refresh, approve, discard };
+  return {
+    drafts: data ?? EMPTY,
+    loading: isLoading,
+    error: error instanceof Error ? error.message : null,
+    refresh,
+    approve,
+    discard,
+  };
 }

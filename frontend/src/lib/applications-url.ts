@@ -29,6 +29,13 @@ export function parseView(params: URLSearchParams): ApplicationsView {
   return { status, q: (params.get("q") ?? "").trim(), page };
 }
 
+/** Strip the characters PostgREST uses to structure an `or=(…)` filter.
+ *  The search term reaches the query builder from the URL, so a crafted link
+ *  could otherwise alter the filter expression instead of just the match text. */
+export function sanitizeSearch(raw: string): string {
+  return raw.replace(/[,()"\\]/g, "").trim();
+}
+
 export function serializeView(view: ApplicationsView): string {
   const params = new URLSearchParams();
   if (view.status !== DEFAULT_VIEW.status) params.set("status", view.status);

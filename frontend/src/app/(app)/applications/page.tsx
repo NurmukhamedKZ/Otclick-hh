@@ -1,12 +1,18 @@
 "use client";
 
-import { Fragment, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import type { Application } from "@/lib/types";
 import { Btn, Card, EmptyState, KeyHint, PageHeader, Pager, SegmentedTabs, Skeleton, Tag } from "@/components/otclick/ui";
 import { IExternal, IList, IRefresh, ISearch } from "@/components/otclick/icons";
-import { DEFAULT_VIEW, parseView, serializeView, type ApplicationsView } from "@/lib/applications-url";
+import {
+  DEFAULT_VIEW,
+  parseView,
+  sanitizeSearch,
+  serializeView,
+  type ApplicationsView,
+} from "@/lib/applications-url";
 import { openCommandPalette } from "@/components/otclick/command-palette";
 import { openFiltersDrawer } from "@/components/filters-drawer";
 
@@ -66,19 +72,40 @@ function ApplicationsView() {
   const [openId, setOpenId] = useState<string | null>(null);
 
   const setView = useCallback(
-    (patch: Partial<ApplicationsView>) => {
+    // "push" for discrete choices (a tab, a page) so the back button steps through
+    // them; "replace" for debounced typing, which would otherwise flood the history
+    // with one entry per keystroke.
+    (patch: Partial<ApplicationsView>, history: "push" | "replace" = "push") => {
       const next = { ...view, ...patch };
-      router.replace(`${pathname}${serializeView(next)}`, { scroll: false });
+      const url = `${pathname}${serializeView(next)}`;
+      if (history === "push") router.push(url, { scroll: false });
+      else router.replace(url, { scroll: false });
     },
     [view, pathname, router],
   );
 
+  // Last query this component pushed into the URL. Without it the debounce below
+  // cannot tell "the user typed" from "the URL changed underneath us", and would
+  // push the stale input back — breaking the back button and the reset action.
+  const pushedQ = useRef(view.q);
+
+  // URL changed externally (back/forward, reset button, shared link) → input follows
   useEffect(() => {
+    if (view.q !== pushedQ.current) {
+      pushedQ.current = view.q;
+      setSearch(view.q);
+    }
+  }, [view.q]);
+
+  // local typing → URL, debounced
+  useEffect(() => {
+    if (search.trim() === pushedQ.current) return;
     const t = setTimeout(() => {
-      if (search.trim() !== view.q) setView({ q: search.trim(), page: 0 });
+      pushedQ.current = search.trim();
+      setView({ q: search.trim(), page: 0 }, "replace");
     }, 300);
     return () => clearTimeout(t);
-  }, [search, view.q, setView]);
+  }, [search, setView]);
 
   const load = useCallback(async () => {
     setRows(null);
@@ -89,10 +116,9 @@ function ApplicationsView() {
       .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
 
     if (status !== "all") q = q.eq("status", status);
-    if (view.q) {
-      q = q.or(
-        `vacancy_id.ilike.%${view.q}%,employer_id.ilike.%${view.q}%`,
-      );
+    const term = sanitizeSearch(view.q);
+    if (term) {
+      q = q.or(`vacancy_id.ilike.%${term}%,employer_id.ilike.%${term}%`);
     }
 
     const { data, count, error } = await q;
@@ -200,10 +226,7 @@ function ApplicationsView() {
             <input
               placeholder="vacancy_id, employer_id…"
               value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setView({ page: 0 });
-              }}
+              onChange={(e) => setSearch(e.target.value)}
               style={{
                 flex: 1,
                 border: "none",
@@ -286,20 +309,15 @@ function ApplicationsView() {
             const qa = a.form_answers ?? [];
             const letter = (a.cover_letter ?? "").trim();
             const open = openId === a.id;
+            const expandable = qa.length > 0 || !!letter;
+            const toggle = () => setOpenId(open ? null : a.id);
             return (
               <Fragment key={a.id}>
               <div
                 className="oc-row"
-                onClick={() => setOpenId(open ? null : a.id)}
-                role="button"
-                tabIndex={0}
-                aria-expanded={open}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    setOpenId(open ? null : a.id);
-                  }
-                }}
+                // mouse convenience only — the keyboard path is the button below,
+                // because role="button" may not contain the hh.ru link.
+                onClick={expandable ? toggle : undefined}
                 style={{
                   display: "grid",
                   gridTemplateColumns: "120px minmax(160px, 1fr) 160px minmax(140px, 1fr) 100px 60px",
@@ -308,7 +326,7 @@ function ApplicationsView() {
                   alignItems: "center",
                   fontSize: 13,
                   borderBottom: i < rows.length - 1 ? "1px solid var(--line-2)" : "none",
-                  cursor: "pointer",
+                  cursor: expandable ? "pointer" : "default",
                 }}
               >
                 <Tag tone={s.tone} dot>
@@ -330,10 +348,28 @@ function ApplicationsView() {
                       резюме {a.resume_id.slice(0, 8)}
                     </div>
                   )}
-                  {(qa.length > 0 || letter) && (
-                    <div style={{ marginTop: 4, fontSize: 11, fontWeight: 600, color: "var(--coral)" }}>
+                  {expandable && (
+                    <button
+                      type="button"
+                      aria-expanded={open}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggle();
+                      }}
+                      style={{
+                        marginTop: 4,
+                        border: "none",
+                        background: "transparent",
+                        padding: 0,
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: "var(--coral)",
+                      }}
+                    >
                       {open ? "▾" : "▸"} {qa.length > 0 ? `тест · ${qa.length} вопр.` : "AI письмо"}
-                    </div>
+                    </button>
                   )}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>

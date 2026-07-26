@@ -91,6 +91,7 @@ export function LinkBtn({
   external,
   className,
   style,
+  label,
 }: {
   href: string;
   kind?: BtnKind;
@@ -100,18 +101,27 @@ export function LinkBtn({
   external?: boolean;
   className?: string;
   style?: CSSProperties;
+  /** required when `children` is empty (icon-only), otherwise the link has no name */
+  label?: string;
 }) {
   const cls = btnClass(kind, size, className);
   if (external) {
     return (
-      <a href={href} target="_blank" rel="noopener noreferrer" className={cls} style={style}>
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={cls}
+        style={style}
+        aria-label={label}
+      >
         {icon}
         {children}
       </a>
     );
   }
   return (
-    <Link href={href} className={cls} style={style}>
+    <Link href={href} className={cls} style={style} aria-label={label}>
       {icon}
       {children}
     </Link>
@@ -281,7 +291,7 @@ export function Toggle({
         border: "none",
         position: "relative",
         background: on ? "var(--ink)" : "var(--muted-2)",
-        transition: "background .2s",
+        transition: "background var(--dur) var(--ease)",
         cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.5 : 1,
         flexShrink: 0,
@@ -296,7 +306,7 @@ export function Toggle({
           height: 16,
           borderRadius: 999,
           background: "#fff",
-          transition: "left .2s",
+          transition: "left var(--dur) var(--ease)",
         }}
       />
     </button>
@@ -526,16 +536,21 @@ export type Crumb = { label: string; href?: string };
 export function Breadcrumbs({ items }: { items: Crumb[] }) {
   return (
     <nav className="oc-crumbs" aria-label="Хлебные крошки">
-      {items.map((c, i) => (
-        <span key={`${c.label}-${i}`} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          {i > 0 && <span aria-hidden="true">/</span>}
-          {c.href && i < items.length - 1 ? (
-            <Link href={c.href}>{c.label}</Link>
-          ) : (
-            <span aria-current="page">{c.label}</span>
-          )}
-        </span>
-      ))}
+      {items.map((c, i) => {
+        const isLast = i === items.length - 1;
+        return (
+          <span key={`${c.label}-${i}`} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            {i > 0 && <span aria-hidden="true">/</span>}
+            {c.href && !isLast ? (
+              <Link href={c.href}>{c.label}</Link>
+            ) : (
+              // aria-current belongs to the current page only, not to any crumb
+              // that merely happens to lack an href
+              <span aria-current={isLast ? "page" : undefined}>{c.label}</span>
+            )}
+          </span>
+        );
+      })}
     </nav>
   );
 }
@@ -615,9 +630,10 @@ export function Pager({
       >
         ‹
       </button>
-      <button type="button" className="oc-pager__btn" aria-current="page">
+      {/* a span, not a button: it has no action, and a focusable no-op is a dead tab stop */}
+      <span className="oc-pager__btn" aria-current="page">
         {page + 1}
-      </button>
+      </span>
       <button
         type="button"
         className="oc-pager__btn"

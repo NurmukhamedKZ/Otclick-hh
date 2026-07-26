@@ -323,9 +323,12 @@ html { scroll-behavior: smooth; }
   cursor: pointer;
   transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
 }
+.oc-seg__item { text-decoration: none; }
 .oc-seg__item:hover { background: var(--line-2); }
-.oc-seg__item[aria-selected="true"] { background: var(--ink); color: #F5F1E6; }
-.oc-seg__item[aria-selected="true"]:hover { background: var(--ink-soft); }
+.oc-seg__item[aria-selected="true"],
+.oc-seg__item[aria-current] { background: var(--ink); color: #F5F1E6; }
+.oc-seg__item[aria-selected="true"]:hover,
+.oc-seg__item[aria-current]:hover { background: var(--ink-soft); }
 .oc-seg__count {
   font-family: 'JetBrains Mono', monospace;
   background: #fff;
@@ -480,6 +483,8 @@ html { scroll-behavior: smooth; }
   padding: var(--s-2) var(--s-3);
   border-radius: var(--r-sm);
   cursor: pointer;
+  list-style: none;
+  user-select: none;
 }
 .oc-palette__item[aria-selected="true"] { background: var(--bg-deep); }
 .oc-palette__hint { margin-left: auto; font-size: 11px; color: var(--muted); }

@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 
 export type Draft = {
@@ -21,49 +22,74 @@ export type Todo = {
   created_at: string;
 };
 
-export function useRecruiter() {
-  const [drafts, setDrafts] = useState<Draft[]>([]);
-  const [todos, setTodos] = useState<Todo[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+type RecruiterData = { drafts: Draft[]; todos: Todo[] };
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [d, t] = await Promise.all([
+export const recruiterQueryKey = ["recruiter"] as const;
+
+const EMPTY: RecruiterData = { drafts: [], todos: [] };
+
+/** Shared between the todo page and the sidebar badge via one query cache entry. */
+export function useRecruiter() {
+  const qc = useQueryClient();
+  const { data, error, isLoading } = useQuery({
+    queryKey: recruiterQueryKey,
+    queryFn: async (): Promise<RecruiterData> => {
+      const [drafts, todos] = await Promise.all([
         apiFetch<Draft[]>("/api/recruiter/drafts"),
         apiFetch<Todo[]>("/api/recruiter/todos"),
       ]);
-      setDrafts(d);
-      setTodos(t);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+      return { drafts, todos };
+    },
+    staleTime: 60_000,
+  });
 
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
+  const refresh = useCallback(
+    () => qc.invalidateQueries({ queryKey: recruiterQueryKey }),
+    [qc],
+  );
 
-  const sendDraft = useCallback(async (id: string, message: string) => {
-    await apiFetch(`/api/recruiter/drafts/${id}/send`, {
-      method: "POST",
-      body: JSON.stringify({ message }),
-    });
-    setDrafts((prev) => prev.filter((d) => d.id !== id));
-  }, []);
+  const patch = useCallback(
+    (fn: (prev: RecruiterData) => RecruiterData) => {
+      qc.setQueryData<RecruiterData>(recruiterQueryKey, (prev) => fn(prev ?? EMPTY));
+    },
+    [qc],
+  );
 
-  const discardDraft = useCallback(async (id: string) => {
-    await apiFetch(`/api/recruiter/drafts/${id}/discard`, { method: "POST" });
-    setDrafts((prev) => prev.filter((d) => d.id !== id));
-  }, []);
+  const sendDraft = useCallback(
+    async (id: string, message: string) => {
+      await apiFetch(`/api/recruiter/drafts/${id}/send`, {
+        method: "POST",
+        body: JSON.stringify({ message }),
+      });
+      patch((prev) => ({ ...prev, drafts: prev.drafts.filter((d) => d.id !== id) }));
+    },
+    [patch],
+  );
 
-  const resolveTodo = useCallback(async (id: string, action: "done" | "dismiss") => {
-    await apiFetch(`/api/recruiter/todos/${id}/${action}`, { method: "POST" });
-    setTodos((prev) => prev.filter((t) => t.id !== id));
-  }, []);
+  const discardDraft = useCallback(
+    async (id: string) => {
+      await apiFetch(`/api/recruiter/drafts/${id}/discard`, { method: "POST" });
+      patch((prev) => ({ ...prev, drafts: prev.drafts.filter((d) => d.id !== id) }));
+    },
+    [patch],
+  );
 
-  return { drafts, todos, loading, error, refresh, sendDraft, discardDraft, resolveTodo };
+  const resolveTodo = useCallback(
+    async (id: string, action: "done" | "dismiss") => {
+      await apiFetch(`/api/recruiter/todos/${id}/${action}`, { method: "POST" });
+      patch((prev) => ({ ...prev, todos: prev.todos.filter((t) => t.id !== id) }));
+    },
+    [patch],
+  );
+
+  return {
+    drafts: data?.drafts ?? EMPTY.drafts,
+    todos: data?.todos ?? EMPTY.todos,
+    loading: isLoading,
+    error: error instanceof Error ? error.message : null,
+    refresh,
+    sendDraft,
+    discardDraft,
+    resolveTodo,
+  };
 }

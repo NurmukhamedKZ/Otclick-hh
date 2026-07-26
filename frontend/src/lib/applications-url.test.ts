@@ -1,7 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_VIEW, parseView, serializeView } from "./applications-url";
+import { DEFAULT_VIEW, parseView, sanitizeSearch, serializeView } from "./applications-url";
 
 const parse = (qs: string) => parseView(new URLSearchParams(qs));
+
+describe("sanitizeSearch", () => {
+  it("keeps an ordinary term untouched", () => {
+    expect(sanitizeSearch("ozon")).toBe("ozon");
+  });
+
+  it("keeps cyrillic and digits", () => {
+    expect(sanitizeSearch("Яндекс 123")).toBe("Яндекс 123");
+  });
+
+  it("strips the characters that structure a PostgREST or() filter", () => {
+    expect(sanitizeSearch('a,b(c)d"e\\f')).toBe("abcdef");
+  });
+
+  it("neutralizes an injected extra filter", () => {
+    expect(sanitizeSearch("x%,status.eq.sent")).toBe("x%status.eq.sent");
+  });
+
+  it("trims surrounding whitespace", () => {
+    expect(sanitizeSearch("  ozon  ")).toBe("ozon");
+  });
+});
 
 describe("parseView", () => {
   it("returns the default view for an empty query", () => {

@@ -27,6 +27,8 @@ export default function CommandPalette() {
   const [cursor, setCursor] = useState(0);
   const [recent, setRecent] = useState<Application[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
   const triggerRef = useRef<Element | null>(null);
 
   const close = useCallback(() => {
@@ -39,11 +41,16 @@ export default function CommandPalette() {
   // open via the module-level opener or ⌘K / Ctrl+K
   useEffect(() => {
     function show() {
-      triggerRef.current = document.activeElement;
-      setOpen(true);
+      // capture the trigger only on a real open, so re-firing while already open
+      // cannot overwrite it with a node inside the palette itself
+      setOpen((prev) => {
+        if (!prev) triggerRef.current = document.activeElement;
+        return true;
+      });
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key.toLowerCase() === "k" && (e.metaKey || e.ctrlKey)) {
+      // e.code, not e.key: under a Cyrillic layout the K key reports "л"
+      if (e.code === "KeyK" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         show();
       }
@@ -55,6 +62,16 @@ export default function CommandPalette() {
       window.removeEventListener("keydown", onKey);
     };
   }, []);
+
+  // the page behind must not scroll while the dialog is up
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -121,6 +138,14 @@ export default function CommandPalette() {
 
   useEffect(() => setCursor(0), [query]);
 
+  // keep the arrow-selected row visible in the scrollable list
+  useEffect(() => {
+    if (!open) return;
+    listRef.current
+      ?.querySelector<HTMLElement>('[aria-selected="true"]')
+      ?.scrollIntoView({ block: "nearest" });
+  }, [cursor, open]);
+
   if (!open) return null;
 
   function runAt(i: number) {
@@ -135,6 +160,25 @@ export default function CommandPalette() {
     else if (e.key === "ArrowDown") { e.preventDefault(); setCursor((c) => Math.min(results.length - 1, c + 1)); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setCursor((c) => Math.max(0, c - 1)); }
     else if (e.key === "Enter") { e.preventDefault(); runAt(cursor); }
+    else if (e.key === "Tab") {
+      // focus trap: aria-modal only tells assistive tech the rest is unavailable,
+      // it does not stop Tab from walking into the page behind the backdrop
+      const nodes = Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>(
+          'input, button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      );
+      if (nodes.length === 0) return;
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
   }
 
   let flat = -1;
@@ -144,7 +188,14 @@ export default function CommandPalette() {
       className="oc-palette-backdrop"
       onMouseDown={(e) => { if (e.target === e.currentTarget) close(); }}
     >
-      <div className="oc-palette" role="dialog" aria-modal="true" aria-label="Командная палитра" onKeyDown={onKeyDown}>
+      <div
+        ref={dialogRef}
+        className="oc-palette"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Командная палитра"
+        onKeyDown={onKeyDown}
+      >
         <input
           ref={inputRef}
           className="oc-palette__input"
@@ -152,33 +203,46 @@ export default function CommandPalette() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           aria-label="Поиск команды"
+          role="combobox"
+          aria-expanded
+          aria-controls="oc-palette-list"
+          aria-activedescendant={results[cursor] ? `oc-cmd-${results[cursor].id}` : undefined}
+          autoComplete="off"
         />
         {results.length === 0 ? (
           <div className="oc-palette__empty">ничего не нашлось</div>
         ) : (
-          <ul className="oc-palette__list">
+          <ul
+            ref={listRef}
+            id="oc-palette-list"
+            className="oc-palette__list"
+            role="listbox"
+            aria-label="Команды"
+          >
             {GROUP_ORDER.map((group) => {
               const inGroup = results.filter((c) => c.group === group);
               if (inGroup.length === 0) return null;
               return (
-                <li key={group}>
+                <li key={group} role="presentation">
                   <div className="oc-palette__group">{group}</div>
-                  <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                  <ul style={{ listStyle: "none", margin: 0, padding: 0 }} role="group" aria-label={group}>
                     {inGroup.map((c) => {
                       flat += 1;
                       const i = flat;
                       return (
-                        <li key={c.id}>
-                          <button
-                            type="button"
-                            className="oc-palette__item"
-                            aria-selected={i === cursor}
-                            onMouseEnter={() => setCursor(i)}
-                            onClick={() => runAt(i)}
-                          >
-                            {c.label}
-                            {c.hint && <span className="oc-palette__hint">{c.hint}</span>}
-                          </button>
+                        // role=option, not a button: aria-selected is only valid here,
+                        // and list rows must stay out of the tab order (arrows drive them)
+                        <li
+                          key={c.id}
+                          id={`oc-cmd-${c.id}`}
+                          role="option"
+                          aria-selected={i === cursor}
+                          className="oc-palette__item"
+                          onMouseEnter={() => setCursor(i)}
+                          onClick={() => runAt(i)}
+                        >
+                          {c.label}
+                          {c.hint && <span className="oc-palette__hint">{c.hint}</span>}
                         </li>
                       );
                     })}

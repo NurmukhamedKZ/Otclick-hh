@@ -39,8 +39,9 @@ export default function Sidebar({ email }: { email: string | null }) {
   const supabase = createClient();
   const counts = useNavCounts();
   const [collapsed, setCollapsed] = useState(false);
+  const [mounted, setMounted] = useState(false);
 
-  const { data: billing } = useQuery({
+  const { data: billing, isPending: billingPending } = useQuery({
     queryKey: ["billing-status"],
     queryFn: () => apiFetch<{ plan: string }>("/api/billing/status"),
     staleTime: 60_000,
@@ -48,6 +49,7 @@ export default function Sidebar({ email }: { email: string | null }) {
 
   useEffect(() => {
     setCollapsed(window.localStorage.getItem(STORAGE_KEY) === "1");
+    setMounted(true);
   }, []);
 
   function toggleCollapsed() {
@@ -65,7 +67,8 @@ export default function Sidebar({ email }: { email: string | null }) {
   }
 
   const initials = email ? email.split(/[@.]/)[0].slice(0, 2).toUpperCase() : "ME";
-  const showPro = billing?.plan !== "active";
+  // stay hidden until the plan is actually known, otherwise Pro flashes for subscribers
+  const showPro = !billingPending && billing?.plan !== "active";
 
   return (
     <aside
@@ -82,7 +85,9 @@ export default function Sidebar({ email }: { email: string | null }) {
         top: 16,
         alignSelf: "flex-start",
         height: "calc(100vh - 32px)",
-        transition: "width var(--dur) var(--ease)",
+        // no animation on the first paint: the stored collapsed width is only known
+        // after hydration, and sliding it would read as a glitch rather than intent
+        transition: mounted ? "width var(--dur) var(--ease)" : "none",
       }}
     >
       <div
@@ -162,6 +167,7 @@ export default function Sidebar({ email }: { email: string | null }) {
             kind="yellow"
             size="sm"
             icon={<IBolt size={14} />}
+            label={collapsed ? "Подписка Pro" : undefined}
             style={{ justifyContent: "center", marginBottom: 4 }}
           >
             {collapsed ? "" : "Pro"}

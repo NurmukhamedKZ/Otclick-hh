@@ -2,11 +2,23 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Btn, Card, EmptyState, KeyHint, PageHeader, SegmentedTabs, Skeleton } from "@/components/otclick/ui";
+import { Btn, Card, EmptyState, KeyHint, PageHeader, Skeleton } from "@/components/otclick/ui";
 import { ICheck, IDoc, IMail, ISearch } from "@/components/otclick/icons";
 import { openCommandPalette } from "@/components/otclick/command-palette";
 import { useRecruiter, type Draft } from "@/hooks/useRecruiter";
 import { useFormDrafts, type FormAnswer, type FormDraft } from "@/hooks/useFormDrafts";
+
+const SECTIONS = [
+  { id: "forms", label: "Анкеты" },
+  { id: "drafts", label: "Черновики" },
+  { id: "tasks", label: "Задачи" },
+] as const;
+
+type SectionId = (typeof SECTIONS)[number]["id"];
+
+function isSectionId(v: string): v is SectionId {
+  return SECTIONS.some((s) => s.id === v);
+}
 
 function FormDraftCard({
   draft,
@@ -286,40 +298,40 @@ export default function RecruiterPage() {
     discard: discardForm,
   } = useFormDrafts();
 
-  const SECTIONS = [
-    { id: "forms", label: "Анкеты" },
-    { id: "drafts", label: "Черновики" },
-    { id: "tasks", label: "Задачи" },
-  ] as const;
+  const counts: Record<SectionId, number> = {
+    forms: formDrafts.length,
+    drafts: drafts.length,
+    tasks: todos.length,
+  };
 
-  const [active, setActive] = useState<string>("forms");
+  const [active, setActive] = useState<SectionId>("forms");
 
   useEffect(() => {
     const hash = window.location.hash.replace("#", "");
-    if (SECTIONS.some((s) => s.id === hash)) setActive(hash);
+    if (isSectionId(hash)) setActive(hash);
   }, []);
-
-  function goto(id: string) {
-    setActive(id);
-    window.history.replaceState(null, "", `#${id}`);
-    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
 
   return (
     <>
       <PageHeader title="Todo" subtitle="что ждёт твоего решения" crumbs={[{ label: "Главная", href: "/dashboard" }, { label: "Todo" }]}
         actions={<Btn kind="ghost" size="sm" icon={<ISearch size={15} />} onClick={openCommandPalette}>поиск <KeyHint>⌘K</KeyHint></Btn>}
       />
-      <SegmentedTabs
-        items={[
-          { id: "forms", label: "Анкеты", count: formDrafts.length },
-          { id: "drafts", label: "Черновики", count: drafts.length },
-          { id: "tasks", label: "Задачи", count: todos.length },
-        ]}
-        value={active}
-        onChange={goto}
-        label="Разделы Todo"
-      />
+      {/* jump links, not tabs: all three sections stay on screen, so tab/tabpanel
+          semantics would promise a panel switch that never happens */}
+      <nav className="oc-seg" aria-label="Разделы Todo">
+        {SECTIONS.map((s) => (
+          <a
+            key={s.id}
+            href={`#${s.id}`}
+            className="oc-seg__item"
+            aria-current={active === s.id ? "true" : undefined}
+            onClick={() => setActive(s.id)}
+          >
+            {s.label}
+            <span className="oc-seg__count">{counts[s.id]}</span>
+          </a>
+        ))}
+      </nav>
       {error && <div style={{ color: "var(--err)", padding: 16 }}>{error}</div>}
       {formError && <div style={{ color: "var(--err)", padding: 16 }}>{formError}</div>}
       {loading || formLoading ? (
