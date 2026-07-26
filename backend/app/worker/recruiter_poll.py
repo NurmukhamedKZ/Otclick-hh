@@ -137,12 +137,10 @@ async def _process_chat(user_id: str, agent, client, ref: dict, states: dict[str
         await agent.answer_recruiter_choice(
             nid, mid, _history(msgs), client, target["text"], target["buttons"]
         )
-    elif target["is_bot"]:
-        # Bot text without buttons (greeting / "Спасибо, ответы отправлены") —
-        # nothing to answer; just mark handled.
-        pass
     else:
-        # Real recruiter wrote — free-text agent decides (reply/escalate/todo).
+        # Free text — from a real recruiter OR from the hh bot (it also asks open
+        # questions without buttons; skipping those dropped them silently).
+        # The agent decides: reply / escalate / todo, or SKIP on a rejection.
         await agent.answer_recruiter(
             nid, mid, _history(msgs), client, question_text=target["text"] or None
         )

@@ -27,6 +27,9 @@ class RecruiterContext:
     client: ApiClient
     question_text: str | None = None
     quick_reply_labels: list[str] | None = None
+    # Flipped by any successful side effect; the agent checks it after the run to
+    # catch "model replied text and called nothing" (see HHAgent._run_recruiter).
+    acted: bool = False
 
 
 def match_label(labels: list[str], text: str | None) -> str | None:
@@ -70,6 +73,7 @@ async def do_answer(ctx: RecruiterContext, message: str) -> str:
             question_text=ctx.question_text,
         )
         await notify(ctx.user_id, "recruiter_draft", {"negotiation_id": ctx.negotiation_id})
+        ctx.acted = True
         return "escalated"
     return await do_escalate(ctx, message, "")
 
@@ -81,12 +85,14 @@ async def do_escalate(ctx: RecruiterContext, draft: str, reason: str) -> str:
         question_text=ctx.question_text,
     )
     await notify(ctx.user_id, "recruiter_draft", {"negotiation_id": ctx.negotiation_id})
+    ctx.acted = True
     return "escalated"
 
 
 async def do_todo(ctx: RecruiterContext, title: str, detail: str, link: str | None) -> str:
     await recruiter.insert_todo(ctx.user_id, ctx.negotiation_id, ctx.message_id, title, detail, link)
     await notify(ctx.user_id, "recruiter_todo", {"negotiation_id": ctx.negotiation_id, "title": title})
+    ctx.acted = True
     return "todo_created"
 
 

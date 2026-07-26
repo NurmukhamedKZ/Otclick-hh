@@ -15,7 +15,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
 
 from app.ai.prompts import build_recruiter_prompt
-from app.ai.recruiter_tools import RECRUITER_TOOLS, RecruiterContext
+from app.ai.recruiter_tools import RECRUITER_TOOLS, RecruiterContext, do_escalate
 from app.config import settings
 from app.services import qa_memory
 from app.services.cover_letter import generate as _generate_cover_letter
@@ -162,14 +162,7 @@ class HHAgent:
             self.user_id, negotiation_id, message_id, client,
             question_text=question_text,
         )
-        await self._recruiter_agent.ainvoke(
-            {"messages": history},
-            config={
-                "configurable": {"thread_id": negotiation_id},
-                "metadata": {"thread_id": negotiation_id, "session_id": negotiation_id},
-            },
-            context=ctx,
-        )
+        await self._run_recruiter(history, ctx)
 
     async def answer_recruiter_choice(
         self, negotiation_id: str, message_id: str,
@@ -204,11 +197,30 @@ class HHAgent:
             "подходит или неоднозначно - escalate_to_human, где reason = причина "
             '(почему не выбрал) И перечисление этих вариантов через " / ".'
         )
-        await self._recruiter_agent.ainvoke(
-            {"messages": history + [("user", directive)]},
+        await self._run_recruiter(history + [("user", directive)], ctx)
+
+    async def _run_recruiter(self, messages: list[tuple[str, str]], ctx) -> None:
+        """Invoke the recruiter agent and guarantee an outcome.
+
+        The model may reply with plain text and call nothing — that used to
+        silently drop the recruiter's message. Only an explicit "SKIP" (rejection
+        / "we'll get back to you", per the prompt) is allowed to end without a
+        side effect; anything else is escalated to the user as a draft."""
+        nid = ctx.negotiation_id
+        result = await self._recruiter_agent.ainvoke(
+            {"messages": messages},
             config={
-                "configurable": {"thread_id": negotiation_id},
-                "metadata": {"thread_id": negotiation_id, "session_id": negotiation_id},
+                "configurable": {"thread_id": nid},
+                "metadata": {"thread_id": nid, "session_id": nid},
             },
             context=ctx,
         )
+        if ctx.acted:
+            return
+        final = result["messages"][-1].content if result.get("messages") else ""
+        text = (final if isinstance(final, str) else str(final)).strip()
+        if text.upper().strip(".!") == "SKIP":
+            logger.info("recruiter: chat %s skipped (отказ / в обработке)", nid)
+            return
+        logger.warning("recruiter: chat %s — no tool call, escalating", nid)
+        await do_escalate(ctx, text, "агент не выбрал действие, проверьте вручную")
