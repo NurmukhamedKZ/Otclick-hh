@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
 
 from app.services import chatik, recruiter
 from app.services.hh_credentials import load_api_client, persist_if_refreshed
@@ -31,11 +32,21 @@ SKIP_STATES = frozenset({
 })
 _MAX_NEG_PAGES = 15
 
+# The state list is only used to skip rejected/archived chats — it changes on
+# the scale of days, while the poll runs every 2 minutes. Without this cache
+# every poll pulled up to 1500 negotiations per user from hh.
+_STATES_TTL_S = 30 * 60
+_states_cache: dict[str, tuple[float, dict[str, str]]] = {}
 
-async def _negotiation_states(client) -> dict[str, str]:
+
+async def _negotiation_states(client, user_id: str) -> dict[str, str]:
     """nid -> state.id from the legacy negotiations list (same source the /chats
-    UI uses for the «Отказ» tag). Best-effort: returns {} on any failure so the
-    poll stays fail-open (a fetch error must not stop the agent from replying)."""
+    UI uses for the «Отказ» tag). Cached per user for _STATES_TTL_S. Best-effort:
+    returns {} on any failure so the poll stays fail-open (a fetch error must not
+    stop the agent from replying)."""
+    cached = _states_cache.get(user_id)
+    if cached and time.monotonic() - cached[0] < _STATES_TTL_S:
+        return cached[1]
     loop = asyncio.get_running_loop()
     out: dict[str, str] = {}
     try:
@@ -57,6 +68,7 @@ async def _negotiation_states(client) -> dict[str, str]:
     except Exception:
         logger.warning("recruiter poll: negotiation-state fetch failed", exc_info=True)
         return {}
+    _states_cache[user_id] = (time.monotonic(), out)
     return out
 
 
@@ -74,7 +86,7 @@ async def poll_recruiter_chats(user_id: str, agent) -> None:
         return
     original = client.access_token
     try:
-        states = await _negotiation_states(client)
+        states = await _negotiation_states(client, user_id)
         for ref in chats:
             try:
                 handled = await _process_chat(user_id, agent, client, ref, states)

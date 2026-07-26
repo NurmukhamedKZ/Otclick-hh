@@ -50,11 +50,14 @@ def _read_day_count(user_id: str, local_date: str) -> int:
     return ((res.data or {}).get("count") if res else 0) or 0
 
 
-def _increment_day(user_id: str, local_date: str, new_count: int) -> None:
-    service_client.table("apply_counters").upsert(
-        {"user_id": user_id, "date": local_date, "count": new_count},
-        on_conflict="user_id,date",
+def _increment_day(user_id: str, local_date: str) -> int:
+    """Atomic +1 (migration 025). A read-modify-write here loses increments as
+    soon as anything other than the single per-user runner writes, and the daily
+    cap stops holding."""
+    res = service_client.rpc(
+        "increment_apply_counter", {"p_user_id": user_id, "p_date": local_date}
     ).execute()
+    return int(res.data or 0)
 
 
 def _check_sync(user_id: str) -> LimitResult:
@@ -67,11 +70,7 @@ def _check_sync(user_id: str) -> LimitResult:
 
 def _increment_sync(user_id: str) -> int:
     tz = _tz_for_user(user_id)
-    local_date = _today_local(tz)
-    current = _read_day_count(user_id, local_date)
-    new_count = current + 1
-    _increment_day(user_id, local_date, new_count)
-    return new_count
+    return _increment_day(user_id, _today_local(tz))
 
 
 async def check(user_id: str) -> LimitResult:

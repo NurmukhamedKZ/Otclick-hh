@@ -5,10 +5,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Literal
+
+from fastapi import HTTPException
+from fastapi import status as status_codes
 
 from app.config import settings
 from app.db.supabase import service_client
@@ -24,6 +28,13 @@ CAPTCHA_TIMEOUT_SECONDS = 300.0
 CODE_TIMEOUT_SECONDS = 300.0
 
 
+# Each job launches a headless Chromium. Without a cap, one authenticated user
+# can OOM the API container by spamming POST /api/hh/connect.
+MAX_CONCURRENT_JOBS = 4
+# Finished jobs are kept only long enough for the client to poll the result.
+FINISHED_JOB_TTL_S = 600.0
+
+
 @dataclass
 class JobState:
     user_id: str
@@ -32,9 +43,46 @@ class JobState:
     code_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     screenshot_url: str | None = None
     error: str | None = None
+    finished_at: float | None = None
+    # Strong ref to the background task: a bare asyncio.create_task() result is
+    # only weakly held by the loop and can be GC'd mid-flow.
+    task: asyncio.Task | None = None
 
 
 _jobs: dict[str, JobState] = {}
+
+
+def _live_jobs() -> list[JobState]:
+    return [s for s in _jobs.values() if s.finished_at is None]
+
+
+def _purge_finished(now: float | None = None) -> None:
+    now = time.monotonic() if now is None else now
+    for job_id, state in list(_jobs.items()):
+        if state.finished_at is not None and now - state.finished_at > FINISHED_JOB_TTL_S:
+            _jobs.pop(job_id, None)
+
+
+def _finish(state: JobState, status: JobStatus, error: str | None = None) -> None:
+    state.status = status
+    state.error = error
+    state.finished_at = time.monotonic()
+
+
+def _admit(user_id: str) -> None:
+    """Raise 429 when this user (or the box) already has a job running."""
+    _purge_finished()
+    live = _live_jobs()
+    if any(s.user_id == user_id for s in live):
+        raise HTTPException(
+            status_code=status_codes.HTTP_429_TOO_MANY_REQUESTS,
+            detail="connect job already running for this user",
+        )
+    if len(live) >= MAX_CONCURRENT_JOBS:
+        raise HTTPException(
+            status_code=status_codes.HTTP_429_TOO_MANY_REQUESTS,
+            detail="too many concurrent hh connect jobs — try again shortly",
+        )
 
 
 def _browser_reachable(url: str) -> str:
@@ -60,10 +108,11 @@ def get_job(job_id: str) -> JobState | None:
 
 
 async def start_connect_job(user_id: str, username: str, password: str) -> str:
+    _admit(user_id)
     job_id = str(uuid.uuid4())
     state = JobState(user_id=user_id)
     _jobs[job_id] = state
-    asyncio.create_task(_run_oauth(job_id, username, password))
+    state.task = asyncio.create_task(_run_oauth(job_id, username, password))
     return job_id
 
 
@@ -75,10 +124,11 @@ async def solve_captcha(job_id: str, solution: str) -> None:
 
 
 async def start_connect_email_code_job(user_id: str, username: str) -> str:
+    _admit(user_id)
     job_id = str(uuid.uuid4())
     state = JobState(user_id=user_id)
     _jobs[job_id] = state
-    asyncio.create_task(_run_oauth_email_code(job_id, username))
+    state.task = asyncio.create_task(_run_oauth_email_code(job_id, username))
     return job_id
 
 
@@ -143,11 +193,10 @@ async def _run_oauth(job_id: str, username: str, password: str) -> None:
             token["hh_user_id"],
             cookies,
         )
-        state.status = "success"
+        _finish(state, "success")
     except Exception as ex:
         logger.exception("hh oauth job %s failed", job_id)
-        state.status = "failed"
-        state.error = str(ex)
+        _finish(state, "failed", str(ex))
 
 
 async def _run_oauth_email_code(job_id: str, username: str) -> None:
@@ -217,11 +266,10 @@ async def _run_oauth_email_code(job_id: str, username: str) -> None:
             token["hh_user_id"],
             cookies,
         )
-        state.status = "success"
+        _finish(state, "success")
     except Exception as ex:
         logger.exception("hh oauth email-code job %s failed", job_id)
-        state.status = "failed"
-        state.error = str(ex)
+        _finish(state, "failed", str(ex))
 
 
 def _exchange_and_fetch_user(code: str) -> dict:
@@ -260,6 +308,15 @@ def _persist_credentials(user_id: str, access: str, refresh: str,
     if web_cookies is not None:
         row["web_cookies_encrypted"] = encrypt_token(json.dumps(web_cookies))
     service_client.table("hh_credentials").upsert(row).execute()
+    # Fresh credentials — drop anything cached from the previous connection and
+    # re-arm the "web session expired" notification.
+    from app.services import notifications
+    from app.services.form_filler import drop_web_session
+    from app.services.hh_credentials import drop_cached_client
+
+    drop_web_session(user_id)
+    drop_cached_client(user_id)
+    notifications.clear_once(user_id, "web_session_expired")
 
 
 def get_credentials_status(user_id: str) -> dict:
@@ -278,4 +335,9 @@ def get_credentials_status(user_id: str) -> dict:
 
 
 def disconnect(user_id: str) -> None:
+    from app.services.form_filler import drop_web_session
+    from app.services.hh_credentials import drop_cached_client
+
     service_client.table("hh_credentials").delete().eq("user_id", user_id).execute()
+    drop_web_session(user_id)
+    drop_cached_client(user_id)

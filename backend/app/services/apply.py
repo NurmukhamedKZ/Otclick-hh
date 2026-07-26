@@ -47,6 +47,13 @@ ApplyStatus = Literal[
     "vacancy_gone",
 ]
 
+# Statuses that are NOT a spent attempt: the vacancy never reached hh, so it may
+# be re-evaluated on a later run (e.g. the user reconnected and the web session
+# that solves vacancy tests works again). Both the producer (when deciding what
+# to skip) and _already_applied read this — they used to disagree, which made
+# form_required rows permanently unreachable.
+RETRYABLE_STATUSES = frozenset({"form_required"})
+
 _FORM_REQUIRED_MARKERS = (
     "must process test",
     "process test first",
@@ -108,7 +115,7 @@ def _already_applied(user_id: str, vacancy_id: str) -> bool:
         return False
     # form_required pre-record is not a real attempt — allow re-evaluation.
     # form_pending = AI answers waiting for user approval; do not re-queue.
-    return res.data[0].get("status") != "form_required"
+    return res.data[0].get("status") not in RETRYABLE_STATUSES
 
 
 def _is_already_applied_error(ex: hh_errors.ClientError) -> bool:

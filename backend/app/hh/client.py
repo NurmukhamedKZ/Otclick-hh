@@ -77,8 +77,9 @@ class BaseClient:
         as_json: bool = False,
         **kwargs: Any,
     ) -> T:
-        # Не знаю насколько это "правильно"
-        assert method in AllowedMethods.__args__
+        # Не assert: под `python -O` проверка исчезла бы молча.
+        if method not in AllowedMethods.__args__:
+            raise ValueError(f"unsupported HTTP method: {method}")
         params = dict(params or {})
         params.update(kwargs)
         url = self.resolve_url(endpoint)
@@ -126,9 +127,11 @@ class BaseClient:
                 )
                 self._previous_request_time = time.monotonic()
         errors.ApiError.raise_for_status(response, rv)
-        assert 300 > response.status_code >= 200, (
-            f"Unexpected status code for {method} {url}: {response.status_code}"
-        )
+        if not 200 <= response.status_code < 300:
+            # raise_for_status didn't map it (3xx — redirects are disabled).
+            raise errors.BadResponse(
+                f"Unexpected status code for {method} {url}: {response.status_code}"
+            )
         return rv
 
     def get(self, *args, **kwargs) -> T:
@@ -239,8 +242,10 @@ class ApiClient(BaseClient):
         headers = super()._default_headers()
         if not self.access_token:
             return headers
-        # Это очень интересно, что access token'ы начинаются с USER, т.е. API может содержать какую-то уязвимость, связанную с этим
-        assert self.access_token.startswith("USER")
+        # hh's user tokens start with "USER". Не assert: если hh поменяет формат,
+        # весь апплай ляжет с голым AssertionError вместо внятной ошибки.
+        if not self.access_token.startswith("USER"):
+            logger.warning("unexpected hh access token prefix — sending anyway")
         return headers | {"authorization": f"Bearer {self.access_token}"}
 
     # Реализовано автоматическое обновление токена

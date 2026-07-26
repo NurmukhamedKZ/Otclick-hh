@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
@@ -57,6 +58,7 @@ def _mark_invalid_sync(user_id: str, reason: str) -> None:
 
 
 async def mark_invalid(user_id: str, reason: str) -> None:
+    drop_cached_client(user_id)
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, _mark_invalid_sync, user_id, reason)
 
@@ -88,11 +90,28 @@ def _persist_refreshed(user_id: str, client: ApiClient) -> None:
     }).eq("user_id", user_id).execute()
 
 
+# Every hh call used to rebuild the client: a Supabase round trip, two Fernet
+# decrypts and a fresh TCP+TLS handshake. Short TTL so `invalid_at` (set by
+# mark_invalid) still takes effect quickly on paths that don't call
+# drop_cached_client themselves.
+_CLIENT_TTL_S = 60.0
+_clients: dict[str, tuple[float, ApiClient]] = {}
+
+
+def drop_cached_client(user_id: str) -> None:
+    _clients.pop(user_id, None)
+
+
 async def load_api_client(user_id: str) -> ApiClient:
     """Build ApiClient from stored creds. Persists tokens if ApiClient auto-refreshes."""
+    cached = _clients.get(user_id)
+    if cached and time.monotonic() - cached[0] < _CLIENT_TTL_S:
+        return cached[1]
     loop = asyncio.get_running_loop()
     row = await loop.run_in_executor(None, _load_row, user_id)
-    return await loop.run_in_executor(None, _build_client, row)
+    client = await loop.run_in_executor(None, _build_client, row)
+    _clients[user_id] = (time.monotonic(), client)
+    return client
 
 
 async def persist_if_refreshed(

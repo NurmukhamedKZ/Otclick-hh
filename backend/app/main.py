@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
@@ -34,10 +34,12 @@ app.include_router(api_router)
 
 @app.get("/health")
 def health():
-    db_ok = False
+    # 503 on a dead DB — a 200 here makes the docker healthcheck (and every
+    # orchestrator above it) call a broken API healthy, and `worker` starts on
+    # `depends_on: api: service_healthy`.
     try:
         service_client.table("profiles").select("id").limit(1).execute()
-        db_ok = True
     except Exception:
-        db_ok = False
-    return {"status": "ok", "db": db_ok}
+        logging.getLogger(__name__).warning("health: db check failed", exc_info=True)
+        raise HTTPException(status_code=503, detail={"status": "degraded", "db": False})
+    return {"status": "ok", "db": True}

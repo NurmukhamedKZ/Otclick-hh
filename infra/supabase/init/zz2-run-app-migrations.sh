@@ -3,13 +3,8 @@
 # so Supabase's roles/auth/storage schemas already exist by the time this
 # runs — our app migrations FK into auth.users).
 #
-# Reads *.sql from a separately mounted source dir instead of copying files
-# into /docker-entrypoint-initdb.d/ at runtime: Postgres's entrypoint expands
-# /docker-entrypoint-initdb.d/* via a single shell glob before running any
-# script, so files created here mid-run would never be picked up.
+# Fresh volume only (docker-entrypoint-initdb.d runs once). Same script as the
+# `migrate` compose service, so both paths record into schema_migrations and
+# neither replays what the other already applied.
 set -e
-
-for f in /migrations-src/*.sql; do
-    echo "running $f"
-    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" -f "$f"
-done
+exec /migrate.sh

@@ -72,14 +72,17 @@ async def test_check_limit_day_at_cap():
 
 @pytest.mark.asyncio
 async def test_increment_bumps_count():
+    """One atomic RPC (migration 025) — no read-modify-write to lose races on."""
     from app.worker import limiter
 
     sb = MagicMock()
-    sb.table.side_effect = [
-        _fluent({"timezone": "Asia/Almaty"}),
-        _fluent({"count": 7}),
-        _fluent(None),  # upsert
-    ]
+    sb.table.side_effect = [_fluent({"timezone": "Asia/Almaty"})]
+    sb.rpc.return_value.execute.return_value = MagicMock(data=8)
     with patch.object(limiter, "service_client", sb):
         new_count = await limiter.increment("u1")
     assert new_count == 8
+    fn, args = sb.rpc.call_args[0]
+    assert fn == "increment_apply_counter"
+    assert args["p_user_id"] == "u1" and args["p_date"]
+    # the counter row is never read before writing
+    assert sb.table.call_count == 1

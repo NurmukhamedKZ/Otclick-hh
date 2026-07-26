@@ -7,6 +7,7 @@ import html
 import json
 import logging
 import re
+import time
 from typing import Literal
 
 import requests
@@ -36,6 +37,40 @@ HH_WEB_USER_AGENT = (
 )
 
 
+class WebSessionExpired(Exception):
+    """hh no longer accepts the stored web cookies — the user must reconnect."""
+
+
+def session_looks_dead(resp: requests.Response) -> bool:
+    """True when hh answered a logged-out request (auth wall, not a real error)."""
+    if resp.status_code in (401, 403):
+        return True
+    return "/account/login" in (resp.url or "")
+
+
+# One session per user instead of one per call: chatik polls it once per chat,
+# and rebuilding meant a DB round trip + Fernet decrypt + TLS handshake each time.
+# ponytail: process-local dict, move to a shared cache only if the API ever runs
+# multi-process and the extra handshakes actually show up in latency.
+_SESSION_TTL_S = 30 * 60
+_sessions: dict[str, tuple[float, requests.Session]] = {}
+
+
+def drop_web_session(user_id: str) -> None:
+    _sessions.pop(user_id, None)
+
+
+async def report_dead_session(user_id: str, ex: Exception) -> None:
+    """Drop the cached session and tell the user once — an expired web session
+    silently kills both recruiter chats and vacancy-test solving, and until now
+    it only produced a log line nobody reads."""
+    from app.services.notifications import notify_once
+
+    drop_web_session(user_id)
+    logger.warning("hh web session dead for %s: %s", user_id, ex)
+    await notify_once(user_id, "web_session_expired", {"reason": str(ex)})
+
+
 def _load_cookies_encrypted(user_id: str) -> str | None:
     res = (
         service_client.table("hh_credentials")
@@ -52,9 +87,14 @@ async def load_web_session(user_id: str) -> requests.Session:
     """Build a requests.Session from the stored hh.ru web cookies.
 
     Cookies were captured during the OAuth login (see hh/authorize.py). No
-    browser, no re-login. Raises ValueError if no session is stored (the user
-    connected before cookie capture existed → needs reconnect).
+    browser, no re-login. Cached per user for _SESSION_TTL_S. Raises ValueError
+    if no session is stored (the user connected before cookie capture existed →
+    needs reconnect).
     """
+    cached = _sessions.get(user_id)
+    if cached and time.monotonic() - cached[0] < _SESSION_TTL_S:
+        return cached[1]
+
     loop = asyncio.get_running_loop()
     enc = await loop.run_in_executor(None, _load_cookies_encrypted, user_id)
     if not enc:
@@ -67,6 +107,7 @@ async def load_web_session(user_id: str) -> requests.Session:
         session.cookies.set(
             c["name"], c["value"], domain=c.get("domain"), path=c.get("path", "/")
         )
+    _sessions[user_id] = (time.monotonic(), session)
     return session
 
 
@@ -344,6 +385,8 @@ def _solve(
 ) -> list[dict]:
     """Fetch the test page and produce AI answers WITHOUT submitting."""
     r = session.get(_response_url(vacancy_id), timeout=15)
+    if session_looks_dead(r):
+        raise WebSessionExpired(f"hh rejected the web session ({r.status_code})")
     r.raise_for_status()
     test_data = _parse_tests(r.text, vacancy_id)
     return _build_answers(test_data, chat, resume_ctx)
@@ -359,6 +402,8 @@ def _submit(
     """Re-fetch xsrf+test meta, build payload from approved answers, POST."""
     response_url = _response_url(vacancy_id)
     r = session.get(response_url, timeout=15)
+    if session_looks_dead(r):
+        raise WebSessionExpired(f"hh rejected the web session ({r.status_code})")
     r.raise_for_status()
     page = r.text
     test_data = _parse_tests(page, vacancy_id)
@@ -455,6 +500,9 @@ async def prepare_form_answers(
         answers = await loop.run_in_executor(
             None, _solve, session, vacancy_id, chat, resume_ctx
         )
+    except WebSessionExpired as ex:
+        await report_dead_session(user_id, ex)
+        return "form_required", []
     except Exception:
         logger.warning(
             "fill: solve failed for vacancy=%s, retrying once", vacancy_id, exc_info=True
@@ -463,6 +511,9 @@ async def prepare_form_answers(
             answers = await loop.run_in_executor(
                 None, _solve, session, vacancy_id, chat, resume_ctx
             )
+        except WebSessionExpired as ex:
+            await report_dead_session(user_id, ex)
+            return "form_required", []
         except Exception:
             logger.exception("fill: solve failed for vacancy=%s (retry)", vacancy_id)
             return "form_required", []
@@ -498,6 +549,9 @@ async def submit_prepared_form(
         resp = await loop.run_in_executor(
             None, _submit, session, vacancy_id, hh_resume_id, answers, letter
         )
+    except WebSessionExpired as ex:
+        await report_dead_session(user_id, ex)
+        return "failed", f"web_session_expired: {ex}"
     except Exception as ex:
         logger.exception("fill: submit failed vacancy=%s", vacancy_id)
         return "failed", f"submit_error: {ex}"

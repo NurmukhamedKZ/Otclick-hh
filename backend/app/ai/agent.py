@@ -12,7 +12,6 @@ import logging
 from langchain.agents import create_agent
 from langchain_core.rate_limiters import InMemoryRateLimiter
 from langchain_openai import ChatOpenAI
-from langgraph.checkpoint.memory import InMemorySaver
 
 from app.ai.prompts import build_recruiter_prompt
 from app.ai.recruiter_tools import RECRUITER_TOOLS, RecruiterContext, do_escalate
@@ -130,12 +129,16 @@ class HHAgent:
         return self._resume_summary
 
     def _build_recruiter_agent(self, system_prompt: str):
+        # No checkpointer on purpose: the caller passes the FULL chat history on
+        # every poll, so a persisted per-thread state would be appended to that
+        # history each cycle — the context (and the token bill) doubled every
+        # 2 minutes, and InMemorySaver never released a single chat for the
+        # whole lifetime of the worker process. History in, nothing retained.
         return create_agent(
             self.llm,
             tools=RECRUITER_TOOLS,
             system_prompt=system_prompt,
             context_schema=RecruiterContext,
-            checkpointer=InMemorySaver(),
         )
 
     async def answer_recruiter(

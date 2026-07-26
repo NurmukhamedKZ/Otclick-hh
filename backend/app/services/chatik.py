@@ -24,7 +24,12 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from app.services.form_filler import load_web_session
+from app.services.form_filler import (
+    WebSessionExpired,
+    load_web_session,
+    report_dead_session,
+    session_looks_dead,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +54,8 @@ def _chat_items(session) -> list[dict]:
             headers=_HEADERS,
             timeout=15,
         )
+        if session_looks_dead(r):
+            raise WebSessionExpired(f"chatik /chats rejected the session ({r.status_code})")
         r.raise_for_status()
         chats = r.json().get("chats") or {}
         items.extend(chats.get("items") or [])
@@ -94,6 +101,8 @@ def _chat_data(session, chat_id: str, applicant_id: str) -> dict:
         headers={**_HEADERS, "Referer": f"https://hh.ru/chat/{chat_id}"},
         timeout=15,
     )
+    if session_looks_dead(r):
+        raise WebSessionExpired(f"chatik /chat_data rejected the session ({r.status_code})")
     r.raise_for_status()
     return r.json()
 
@@ -135,6 +144,9 @@ async def recent_chats(user_id: str) -> list[dict] | None:
         return None
     try:
         return await loop.run_in_executor(None, lambda: list(_chats_map(session).values()))
+    except WebSessionExpired as ex:
+        await report_dead_session(user_id, ex)
+        return None
     except Exception:
         logger.warning("chatik: recent_chats failed for %s", user_id, exc_info=True)
         return None
@@ -152,6 +164,9 @@ async def chat_messages(user_id: str, chat_id: str, applicant_id: str) -> list[d
         return await loop.run_in_executor(
             None, lambda: _messages(session, chat_id, applicant_id)
         )
+    except WebSessionExpired as ex:
+        await report_dead_session(user_id, ex)
+        return None
     except Exception:
         logger.warning("chatik: chat_messages failed chat=%s", chat_id, exc_info=True)
         return None
@@ -176,6 +191,9 @@ async def fetch_messages(user_id: str, nid: str) -> list[dict] | None:
 
     try:
         return await loop.run_in_executor(None, _q)
+    except WebSessionExpired as ex:
+        await report_dead_session(user_id, ex)
+        return None
     except Exception:
         logger.warning("chatik: fetch_messages failed for nid=%s", nid, exc_info=True)
         return None
