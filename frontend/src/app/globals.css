@@ -336,7 +336,8 @@ html { scroll-behavior: smooth; }
   border-radius: var(--r-pill);
   font-size: 11px;
 }
-.oc-seg__item[aria-selected="true"] .oc-seg__count { background: #ffffff20; }
+.oc-seg__item[aria-selected="true"] .oc-seg__count,
+.oc-seg__item[aria-current] .oc-seg__count { background: #ffffff20; color: #F5F1E6; }
 
 .oc-pager { display: inline-flex; align-items: center; gap: var(--s-1); }
 .oc-pager__btn {
