@@ -1,0 +1,233 @@
+# Full local stack: backend API + worker + frontend + self-hosted Supabase.
+# Run from repo root:  docker compose up -d --build
+#
+# Needs backend/.env (see backend/.env.example) with generated keys.
+# Frontend NEXT_PUBLIC_* vars are baked at build time — set them in a root .env
+# (see frontend/.env.local.example), docker compose auto-loads it.
+
+services:
+  db:
+    image: supabase/postgres:15.1.1.78
+    container_name: aiautoclicker-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: postgres
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+    volumes:
+      - supabase-db-data:/var/lib/postgresql/data
+      - ./infra/supabase/init/zz1-set-role-passwords.sh:/docker-entrypoint-initdb.d/zz1-set-role-passwords.sh:ro
+      - ./infra/supabase/init/zz2-run-app-migrations.sh:/docker-entrypoint-initdb.d/zz2-run-app-migrations.sh:ro
+      - ./infra/supabase/migrations:/migrations-src:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  auth:
+    image: supabase/gotrue:v2.170.0
+    container_name: aiautoclicker-auth
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: http://localhost:54321/auth/v1
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      GOTRUE_SITE_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      GOTRUE_URI_ALLOW_LIST: "*"
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      # Local self-host has no SMTP configured by default — autoconfirm so
+      # sign-up doesn't dead-end waiting on a confirmation email. Self-hosters
+      # who wire up SMTP (GOTRUE_SMTP_*) should flip this back to "false".
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
+      GOTRUE_EXTERNAL_GOOGLE_ENABLED: ${ENABLE_GOOGLE_AUTH:-false}
+      GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOTRUE_EXTERNAL_GOOGLE_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}/auth/callback
+
+  rest:
+    image: postgrest/postgrest:v12.2.0
+    container_name: aiautoclicker-rest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db:5432/postgres
+      PGRST_DB_SCHEMAS: public,storage
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+
+  realtime:
+    image: supabase/realtime:v2.34.7
+    container_name: aiautoclicker-realtime
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PORT: 4000
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: postgres
+      DB_USER: supabase_admin
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_AFTER_CONNECT_QUERY: "SET search_path TO _realtime"
+      DB_ENC_KEY: supabaserealtime
+      API_JWT_SECRET: ${JWT_SECRET}
+      SECRET_KEY_BASE: ${JWT_SECRET}${JWT_SECRET}
+      ERL_AFLAGS: -proto_dist inet_tcp
+      DNS_NODES: "''"
+      RLIMIT_NOFILE: 10000
+      APP_NAME: realtime
+      SEED_SELF_HOST: "true"
+      RUN_JANITOR: "true"
+
+  storage:
+    image: supabase/storage-api:v1.11.13
+    container_name: aiautoclicker-storage
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      rest:
+        condition: service_started
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://rest:3000
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@db:5432/postgres
+      FILE_SIZE_LIMIT: 52428800
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: stub
+      REGION: stub
+      GLOBAL_S3_BUCKET: stub
+    volumes:
+      - supabase-storage-data:/var/lib/storage
+
+  storage-init:
+    # One-shot: creates the captcha-screenshots bucket after storage-api has
+    # finished its own internal migrations (see create-captcha-bucket.sh).
+    image: supabase/postgres:15.1.1.78
+    container_name: aiautoclicker-storage-init
+    restart: "no"
+    depends_on:
+      storage:
+        condition: service_started
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./infra/supabase/init/create-captcha-bucket.sh:/create-captcha-bucket.sh:ro
+    entrypoint: ["sh", "/create-captcha-bucket.sh"]
+
+  kong:
+    image: kong:2.8.1
+    container_name: aiautoclicker-kong
+    restart: unless-stopped
+    depends_on:
+      - auth
+      - rest
+      - realtime
+      - storage
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /tmp/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,key-auth,cors
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+    volumes:
+      - ./infra/supabase/kong.yml:/kong.yml.tpl:ro
+    # Kong's declarative config doesn't do env substitution natively for
+    # $ANON_KEY/$SERVICE_ROLE_KEY placeholders — replace them inline with
+    # sed (available in the base image, no root needed).
+    # NOTE: "$$" (not "\$") is required here — Compose's own interpolation
+    # runs on this string first, and "$$" is Compose's escape for a literal
+    # "$"; "\$" is not special to Compose and still gets substituted with
+    # the real key value, breaking the sed search pattern.
+    entrypoint: ["sh", "-c", "sed 's|$$ANON_KEY|'\"${ANON_KEY}\"'|g; s|$$SERVICE_ROLE_KEY|'\"${SERVICE_ROLE_KEY}\"'|g' /kong.yml.tpl > /tmp/kong.yml; exec /docker-entrypoint.sh kong docker-start"]
+    ports:
+      - "54321:8000"
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: aiautoclicker-backend:latest
+    container_name: aiautoclicker-api
+    restart: unless-stopped
+    env_file:
+      - backend/.env
+    ports:
+      - "8000:8000"
+    depends_on:
+      kong:
+        condition: service_healthy
+      storage-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  worker:
+    # Reuse the API image — same code, different entrypoint.
+    image: aiautoclicker-backend:latest
+    container_name: aiautoclicker-worker
+    restart: unless-stopped
+    env_file:
+      - backend/.env
+    command: ["python", "worker_main.py"]
+    depends_on:
+      api:
+        condition: service_healthy
+      kong:
+        condition: service_healthy
+    # Playwright Chromium needs more shared memory than the 64 MB default.
+    shm_size: "1gb"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:54321}
+        NEXT_PUBLIC_GOOGLE_AUTH_ENABLED: ${NEXT_PUBLIC_GOOGLE_AUTH_ENABLED:-false}
+    image: aiautoclicker-frontend:latest
+    container_name: aiautoclicker-frontend
+    restart: unless-stopped
+    environment:
+      # Server-side Supabase calls (middleware, server components) run inside
+      # this container, where NEXT_PUBLIC_SUPABASE_URL's "localhost" points at
+      # itself, not the kong container. Route server-side calls over the
+      # docker network instead; the browser keeps using the public URL.
+      SUPABASE_URL: http://kong:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  supabase-db-data:
+  supabase-storage-data:

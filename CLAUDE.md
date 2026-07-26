@@ -4,12 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AI autoclicker for hh.ru/hh.kz — automates job applications. Sub-projects:
+**Otclick** (public repo: `NurmukhamedKZ/Otclick`, MIT license) — open-source AI agent for hh.ru/hh.kz job application automation. Self-hostable, privacy-first. See `README.md` for the public-facing pitch, feature list, and roadmap. Sub-projects:
 
 - **`backend/`** — FastAPI service (active build) + standalone worker (`worker_main.py`)
 - **`frontend/`** — Next.js 16 + React 19 + Tailwind v4 (Supabase SSR auth)
 - **`hh-applicant-tool/`** — existing Python CLI tool (source to copy from, not modify)
 - **`MVP_PLAN.md`** — day-by-day build plan; check before starting work
+
+Open-source implications for this file:
+- README.md is now the canonical **public** entrypoint (setup, features, roadmap, contributing) — keep this CLAUDE.md focused on internal architecture/dev guidance, don't duplicate README content, update both when a change affects both audiences.
+- Contributions come from external contributors via PR — surface conventions here (Simplicity First, Surgical Changes, etc.) apply doubly since reviewers may not have full context.
+- Never commit secrets/`.env` values — repo is public. `backend/.env.example` and `frontend/.env.local.example` are the templates contributors copy.
+- `docker-compose.yml` (repo root) is the single-command self-host path (backend + worker + frontend) referenced in README Quick Start.
 
 Key discovery: hh.ru password grant OAuth is **broken** (`unsupported_grant_type`). Playwright headless browser is the only working login method.
 

@@ -96,7 +96,7 @@
     </td>
     <td width="50%">
       <h3>⚡ Self-hostable</h3>
-      Docker Compose for backend + worker. Frontend deploys to Vercel.
+      One `docker compose up` runs backend, worker, and frontend together.
       All data stays on your infrastructure.
     </td>
   </tr>
@@ -145,11 +145,35 @@
 - Python ≥ 3.13
 - Node.js ≥ 20
 - [uv](https://docs.astral.sh/uv/) — Python package manager
-- A Supabase project (free tier works)
+- Docker & Docker Compose
 - A hh.ru account
 - (Optional) OpenAI API key — for AI features
 
-### Backend Setup
+### One-command start (recommended)
+
+The fastest way to run everything — backend, worker, frontend, and a full
+self-hosted Supabase stack (Postgres + Auth + Storage + Realtime) — is
+Docker Compose:
+
+```bash
+# 1. Generate JWT/API keys for the local Supabase stack
+python3 infra/supabase/gen-keys.py
+
+# 2. Copy the output into backend/.env (see backend/.env.example for all vars)
+cp backend/.env.example backend/.env
+# Paste JWT_SECRET/ANON_KEY/SERVICE_ROLE_KEY into the matching vars,
+# copy ANON_KEY → SUPABASE_ANON_KEY, SERVICE_ROLE_KEY → SUPABASE_SERVICE_ROLE_KEY
+# Set POSTGRES_PASSWORD to any strong secret
+
+# 3. Build and start everything
+docker compose up -d --build
+
+# 4. Open http://localhost:3000 — sign up, connect hh, start applying
+```
+
+No cloud account needed. Everything runs locally.
+
+### Backend-only dev
 
 ```bash
 # Clone the repository
@@ -163,15 +187,17 @@ source .venv/bin/activate
 # Install Playwright browser
 playwright install chromium
 
-# Copy and configure environment
+# Generate keys and configure environment
+python3 infra/supabase/gen-keys.py
 cp backend/.env.example backend/.env
-# Edit backend/.env with your credentials (see Configuration section)
+# Fill in the generated keys and start the local Supabase stack:
+docker compose up -d db auth rest realtime storage kong
 
 # Start the development server
 cd backend && uvicorn app.main:app --reload
 ```
 
-### Frontend Setup
+### Frontend dev
 
 ```bash
 cd frontend
@@ -179,11 +205,19 @@ npm install
 
 # Copy and configure environment
 cp .env.local.example .env.local
-# Edit .env.local with your Supabase credentials
+# Edit .env.local with your ANON_KEY from gen-keys.py
 
 # Start the development server
 npm run dev
 ```
+
+### Using cloud Supabase instead
+
+If you prefer a managed Supabase project, comment out the
+`db`/`auth`/`rest`/`realtime`/`storage`/`kong` services in
+`docker-compose.yml` and set `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and
+`SUPABASE_SERVICE_ROLE_KEY` in `backend/.env` to your cloud project's
+values (see the comment block in `.env.example`).
 
 ### Run the Worker
 
@@ -201,9 +235,14 @@ python worker_main.py
 ### Backend (`backend/.env`)
 
 ```env
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+# Local Supabase stack — generate keys with: python3 infra/supabase/gen-keys.py
+SUPABASE_URL=http://kong:8000
+SUPABASE_ANON_KEY=<paste ANON_KEY from gen-keys.py>
+SUPABASE_SERVICE_ROLE_KEY=<paste SERVICE_ROLE_KEY from gen-keys.py>
+JWT_SECRET=<paste JWT_SECRET from gen-keys.py>
+ANON_KEY=<same as SUPABASE_ANON_KEY>
+SERVICE_ROLE_KEY=<same as SUPABASE_SERVICE_ROLE_KEY>
+POSTGRES_PASSWORD=<any strong local secret>
 
 # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 FERNET_KEY=your-fernet-key
@@ -224,9 +263,10 @@ CLOUDPAYMENTS_API_SECRET=
 ### Frontend (`frontend/.env.local`)
 
 ```env
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
-NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_SUPABASE_URL=http://localhost:54321
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<paste ANON_KEY from gen-keys.py>
+NEXT_PUBLIC_API_URL=http://localhost:54321
+NEXT_PUBLIC_GOOGLE_AUTH_ENABLED=false
 ```
 
 ---
@@ -242,7 +282,7 @@ NEXT_PUBLIC_API_URL=http://localhost:8000
 | **AI/LLM** | OpenAI (GPT) via langchain |
 | **Token Encryption** | Fernet (symmetric, cryptography) |
 | **Billing** | CloudPayments (optional) |
-| **Deployment** | Docker Compose (backend) + Vercel (frontend) |
+| **Deployment** | Docker Compose (backend + worker + frontend) |
 | **Package Manager** | uv (Python), npm (frontend) |
 
 ---
@@ -306,13 +346,14 @@ otclick/
 │   │   │   └── otclick/         # UI components
 │   │   ├── hooks/               # React hooks
 │   │   └── lib/                 # API client, types, Supabase config
+│   ├── Dockerfile
 │   └── package.json
 ├── infra/
-│   ├── docker-compose.yml       # Production deployment
 │   ├── nginx.conf               # Reverse proxy
 │   └── supabase/migrations/     # 21 SQL migrations
 ├── docs/                        # Documentation
 ├── hh-applicant-tool/           # Reference CLI tool (read-only)
+├── docker-compose.yml           # Backend + worker + frontend
 ├── pyproject.toml               # Python project config
 └── uv.lock                      # Lock file
 ```
@@ -380,7 +421,7 @@ Here are the priority tasks and future plans. Want to help? Pick one up!
 - [ ] **Fix Form Filling** — Debug and stabilize the vacancy form-filling pipeline
 - [ ] **Google, MS Teams, Yandex forms autofilling** — Extend autofill support beyond hh.ru built-in tests to external Google Forms, Microsoft Forms, and Yandex Forms used by employers
 - [ ] **Fix AI agent session persistence** — Resolve bug where AI agent and autofilling stop working the next day (token/session expiry issue)
-- [ ] **Unified Docker setup** — Single `docker compose` file that runs backend, frontend, and database together for one-command deployment
+- [x] **Unified Docker setup** — Single `docker compose` file that runs backend, worker, and frontend together for one-command deployment
 
 ### 📋 Future
 - [ ] **Multi-language support** — Internationalization (i18n) for the dashboard
