@@ -15,7 +15,7 @@ async def test_retry_once_on_transient_then_success():
 
     calls = []
 
-    async def fake_apply_one(user_id, resume_id, vacancy_id, agent):
+    async def fake_apply_one(user_id, resume_id, vacancy_id, agent, filter_id=None):
         calls.append(vacancy_id)
         if len(calls) == 1:
             raise req.ConnectionError("boom")
@@ -36,7 +36,7 @@ async def test_no_retry_on_fatal():
 
     calls = []
 
-    async def fake_apply_one(user_id, resume_id, vacancy_id, agent):
+    async def fake_apply_one(user_id, resume_id, vacancy_id, agent, filter_id=None):
         calls.append(vacancy_id)
         resp = type("R", (), {"status_code": 400, "request": None, "headers": {}})()
         raise hh_errors.BadRequest(resp, {"description": "nope"})
@@ -57,7 +57,7 @@ async def test_retry_once_then_give_up():
 
     calls = []
 
-    async def fake_apply_one(user_id, resume_id, vacancy_id, agent):
+    async def fake_apply_one(user_id, resume_id, vacancy_id, agent, filter_id=None):
         calls.append(vacancy_id)
         raise req.Timeout("slow")
 

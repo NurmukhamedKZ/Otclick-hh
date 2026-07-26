@@ -78,7 +78,7 @@ async def _maybe_apply_with_retry(
 ) -> apply_service.ApplyStatus:
     try:
         return await apply_service.apply_one(
-            job.user_id, job.resume_id, job.vacancy_id, agent
+            job.user_id, job.resume_id, job.vacancy_id, agent, job.filter_id
         )
     except Exception as ex:
         if not _is_transient(ex):
@@ -92,7 +92,7 @@ async def _maybe_apply_with_retry(
         )
     try:
         return await apply_service.apply_one(
-            job.user_id, job.resume_id, job.vacancy_id, agent
+            job.user_id, job.resume_id, job.vacancy_id, agent, job.filter_id
         )
     except Exception:
         logger.exception(

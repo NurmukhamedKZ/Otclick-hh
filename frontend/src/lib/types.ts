@@ -162,3 +162,47 @@ export type NotificationRow = {
   read: boolean;
   created_at: string;
 };
+
+export type AnalyticsBreakdown = {
+  filter_id?: string | null;
+  resume_id?: string | null;
+  with_letter?: boolean;
+  name?: string;
+  title?: string;
+  sent: number;
+  replied: number;
+  invited: number;
+  reply_rate: number | null;
+  invite_rate: number | null;
+};
+
+export type Analytics = {
+  days: number;
+  funnel: {
+    ai_checked: number;
+    ai_kept: number;
+    sent: number;
+    viewed: number;
+    replied: number;
+    invited: number;
+    discarded: number;
+    waiting: number;
+  };
+  kpi: {
+    view_rate: number | null;
+    reply_rate: number | null;
+    invite_rate: number | null;
+    discard_rate: number | null;
+    median_reaction_hours: number | null;
+    stuck_forms: number;
+    stuck_captcha: number;
+    stuck_drafts: number;
+  };
+  ai_filter: { checked: number; kept: number; dropped: number; drop_rate: number | null };
+  by_filter: AnalyticsBreakdown[];
+  by_resume: AnalyticsBreakdown[];
+  by_letter: AnalyticsBreakdown[];
+  failures: { status: string; count: number }[];
+  silent_employers: { employer_id: string; employer_name: string | null; sent: number }[];
+  daily: { date: string; sent: number; invited: number }[];
+};

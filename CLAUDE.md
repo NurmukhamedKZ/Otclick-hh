@@ -49,14 +49,41 @@ cd backend && python -m pytest tests/test_hh_auth.py::test_encrypt_decrypt_round
 
 # Install playwright browsers (needed for OAuth flow)
 playwright install chromium
+
+# ─── Local Supabase stack (the ONLY environment — see below) ───
+python3 infra/supabase/gen-keys.py     # once: JWT/API keys for root .env
+docker compose up -d                   # db, auth, kong, storage, realtime, api, worker, frontend
+docker compose ps                      # kong + db must be (healthy)
+
+# Apply a NEW migration to an already-initialized volume (fresh volumes auto-run
+# every migration via infra/supabase/init/zz2-run-app-migrations.sh)
+docker exec -i aiautoclicker-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+  < infra/supabase/migrations/023_analytics.sql
+
+# psql shell / ad-hoc query
+docker exec -it aiautoclicker-db psql -U postgres -d postgres
+
+# api and worker run BAKED code — after backend edits the container needs a rebuild
+docker compose build api && docker compose up -d api
 ```
+
+## Supabase: local self-hosted only
+
+There is **no hosted Supabase project** anymore — the stack in `docker-compose.yml` (Postgres + Auth + Kong + Storage + Realtime) is the single environment for dev and for self-hosters. Consequences:
+
+- **Migrations run automatically only on a fresh volume**: `infra/supabase/init/zz2-run-app-migrations.sh` (a `docker-entrypoint-initdb.d` hook) replays every `infra/supabase/migrations/*.sql` in order the first time the `db` volume is created. On an **existing** volume that hook never fires again — a new migration must be applied by hand with `psql` (see Commands), then verified (`\d applications`, or select from the new object). No `supabase db push`, no MCP `apply_migration`: those talk to hosted projects and are useless here.
+- **Two URLs, on purpose**: `SUPABASE_URL=http://kong:8000` is in-network (backend/worker containers). `SUPABASE_PUBLIC_URL` / `NEXT_PUBLIC_SUPABASE_URL=http://localhost:54321` is browser-side. Swapping them breaks whichever side got the wrong one, and the failure looks like a network error, not a config error.
+- **Keys come from `infra/supabase/gen-keys.py`**, not from a dashboard: one `JWT_SECRET` + HS256 anon/service tokens signed with it (10-year exp, rotate by re-running the script). All three must move together — `ANON_KEY`/`SERVICE_ROLE_KEY` (stack-level, consumed by auth/rest/kong) have to equal `SUPABASE_ANON_KEY`/`SUPABASE_SERVICE_ROLE_KEY` (app-level), and any of them signed by a different secret gives blanket 401s.
+- `NEXT_PUBLIC_API_URL=http://localhost:8000` is the FastAPI backend, **not** Kong on 54321. Next bakes it at build time.
+- Full setup walkthrough lives in README Quick Start (it's the public-facing self-host guide); don't duplicate it here.
 
 ## Required `.env` (backend root or project root)
 
 ```
-SUPABASE_URL=
-SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_URL=http://kong:8000            # in-network; localhost:54321 from the host
+SUPABASE_PUBLIC_URL=http://localhost:54321
+SUPABASE_ANON_KEY=                       # from infra/supabase/gen-keys.py
+SUPABASE_SERVICE_ROLE_KEY=               # from infra/supabase/gen-keys.py
 FERNET_KEY=   # generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 
 # AI (cover letters, form-test answers, recruiter chat). Empty key → fallback templates.
@@ -90,6 +117,7 @@ api/
   forms.py                   — /api/forms/drafts (list, approve→post to hh, discard)
   chats.py                   — /api/chats (list negotiations, get messages, send message)
   recruiter.py               — /api/recruiter (escalation drafts send/discard, todos done/dismiss)
+  analytics.py               — /api/analytics?days= (syncs hh negotiation states, then one RPC)
   billing.py                 — /api/billing/* (subscribe params, status, cancel)
   webhooks.py                — /api/webhooks/cloudpayments (HMAC-auth, no JWT)
   internal.py                — /internal/cron/* (X-Internal-Token, no JWT) → token refresh
@@ -131,6 +159,8 @@ services/
   captcha.py                 — captcha_requests create/solve/dismiss helpers
   recruiter.py               — recruiter-chat persistence + new_employer_message cursor; shared by tools/poller/API
   chatik.py                  — chatik.hh.ru web API client (recent_chats/chat_messages/fetch_messages); real source of truth for chats — legacy negotiations API is frozen. Reads over stored web session (same cookies as form_filler), no browser
+  negotiation_sync.py        — mirror hh negotiation state (response|invitation|discard) + viewed flag into applications; on-demand, throttled by profiles.negotiations_synced_at
+  analytics.py               — funnel metrics via the analytics_summary PG function (fail-soft: rpc error → empty shape)
   relevance.py               — batch semantic relevance filter (filter_relevant) + relevance_cache helpers; conservative + fail-open (any failure → keep all)
   worker_control.py          — persisted on/off intent (profiles.worker_enabled); enabled_active_user_ids
   worker_runtime.py          — runner heartbeat → worker_runtime table so API /api/worker/status can read it
@@ -161,6 +191,8 @@ schemas/
 
 **Cover letter cache**: `cover_letter.generate` keys on `(vacancy_id, resume_id)` in `cover_letters_cache` (PG). Hit → skip OpenAI. Miss → LLM → on failure, `rand_text` `{a|b}` template. All writes service_role.
 
+**Analytics funnel**: `GET /api/analytics?days=` → `negotiation_sync.sync_states` (paged `GET /negotiations`, `order_by=updated_at`, writes only actual state changes so `hh_state_at` really means "when it changed"; throttled to 5 min per user, never raises) → `analytics.summary` → `analytics_summary()` in PG. Funnel: AI-checked → AI-kept → sent → viewed (`hh_viewed`) → replied (`hh_state` moved OR a `recruiter_chats` row saw an employer message) → invited (`hh_state='invitation'`). "Sent" counts only `sent`/`form_sent` rows — `form_required`/`failed`/`captcha` never reached hh and land in the failures breakdown instead. Rates are `null` when the denominator is 0; the UI prints "—", never a fake 0%. Attribution comes from `applications.filter_id` (passed `producer → ApplyJob → apply_one`) and `employer_name`, both set on new rows only — historical rows show up as "без фильтра".
+
 **Plan gating**: `plan.has_access` — `trial` until `trial_ends`, `active`/`cancelled` until `plan_expires_at`, else no access. Gates worker start (`/api/worker`) and `worker_main`.
 
 **Billing**: CloudPayments widget (params from `billing.subscribe_params`) → card charge → server-to-server POST to `/api/webhooks/cloudpayments`. Webhook verifies `Content-HMAC` (HMAC-SHA256 over raw body), records payment idempotently (`TransactionId` → `payments.provider_payment_id` UNIQUE), activates plan only on a genuinely new row. Always answers CP `{"code": 0}` once HMAC valid so it stops retrying.
@@ -179,18 +211,18 @@ schemas/
 
 ## Frontend (`frontend/src/`)
 
-Next.js App Router. Authed pages under `app/(app)/` (dashboard, applications, billing, account, notifications, chats, todo) behind `(app)/layout.tsx`; public `auth/`, `onboarding/`, landing `page.tsx`. Supabase SSR auth split across `lib/supabase/{client,server,middleware}.ts`.
+Next.js App Router. Authed pages under `app/(app)/` (dashboard, applications, analytics, billing, account, notifications, chats, todo) behind `(app)/layout.tsx`; public `auth/`, `onboarding/`, landing `page.tsx`. Supabase SSR auth split across `lib/supabase/{client,server,middleware}.ts`.
 
 - `lib/api.ts` — `apiFetch`: attaches the Supabase session JWT as `Bearer` to every backend call (backend `deps.get_current_user` validates it). Base URL from `NEXT_PUBLIC_API_URL`.
 - `hooks/` — `useHHConnect`, `useFilters`, `useBlacklist` wrap the backend endpoints.
 - `components/otclick/` — app chrome (sidebar, topbar, worker-bar, hh-banner); top-level `captcha-modal`, `filters-drawer`, `toaster`.
 - Notifications stream in via Supabase Realtime (matches backend `notifications` inserts).
 
-Env: `frontend/.env.local` (see `.env.local.example`) — `NEXT_PUBLIC_API_URL`, Supabase URL/anon key.
+Env: `frontend/.env.local` (see `.env.local.example`) — `NEXT_PUBLIC_API_URL=http://localhost:8000` (the backend, not Kong), `NEXT_PUBLIC_SUPABASE_URL=http://localhost:54321`, anon key from `gen-keys.py`. The dockerized frontend bakes these at build time (`docker compose build frontend` after changing them).
 
 ## Supabase Tables
 
-Migrations live in `infra/supabase/migrations/` (numbered SQL files).
+Migrations live in `infra/supabase/migrations/` (numbered SQL files, `001`–`023`). Applied by hand via `psql` into the local stack — see Commands.
 
 - `profiles` — user profiles + plan state (`plan`, `trial_ends`, `plan_expires_at`, `cp_subscription_id`, `worker_enabled`)
 - `hh_credentials` — encrypted hh tokens + `web_cookies_encrypted` per user (full RLS denial, service_role only)
@@ -212,6 +244,8 @@ Migrations live in `infra/supabase/migrations/` (numbered SQL files).
 - `relevance_cache` — AI vacancy relevance verdicts, unique on `(resume_id, vacancy_id)`; service_role only. Migration 015 also adds `filters.ai_filter_enabled`
 - `qa_memory` — user-curated Q&A (only answers the user EDITED when approving a form draft, plus manual entries), unique on `(user_id, question)`; service_role only. `services/qa_memory.prompt_block` injects it into form-test and recruiter prompts (migration 022)
 - `captcha-screenshots` — Supabase Storage bucket for captcha images
+
+Migration 023 adds analytics: `applications.hh_state`/`hh_state_at`/`hh_viewed` (mirrored negotiation state — the only honest source for "invited to interview"), `applications.filter_id`/`employer_name` (breakdown attribution), `profiles.negotiations_synced_at`, and the `analytics_summary(user_id, days)` PG function that returns every metric as one jsonb (service_role only; revoked from anon/authenticated).
 
 Migrations 010–015 add the recruiter tables, `worker_enabled`, `form_drafts`, recruiter `question_text`, `worker_runtime`, and the relevance cache + `filters.ai_filter_enabled`.
 

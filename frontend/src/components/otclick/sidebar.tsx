@@ -11,7 +11,7 @@ import { IconBtn, LinkBtn } from "@/components/otclick/ui";
 import { useQuery } from "@tanstack/react-query";
 import {
   IHome, IList, IBell, IMail, IDoc, IUser, ISettings, ILogo, ILogout,
-  ITelegram, IBolt, IChevRight,
+  ITelegram, IBolt, IChevRight, IChart,
 } from "@/components/otclick/icons";
 
 const STORAGE_KEY = "oc-sidebar-collapsed";
@@ -27,6 +27,7 @@ type Item = {
 const NAV: Item[] = [
   { id: "dashboard", href: "/dashboard", icon: <IHome />, label: "Главная" },
   { id: "applications", href: "/applications", icon: <IList />, label: "Отклики" },
+  { id: "analytics", href: "/analytics", icon: <IChart />, label: "Аналитика" },
   { id: "chats", href: "/chats", icon: <IMail />, label: "Чаты", badge: "chats" },
   { id: "todo", href: "/todo", icon: <IDoc />, label: "Todo", badge: "todo" },
   { id: "notifications", href: "/notifications", icon: <IBell />, label: "Уведомления", badge: "notifications" },

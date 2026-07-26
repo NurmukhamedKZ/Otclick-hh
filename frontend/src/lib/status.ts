@@ -18,4 +18,10 @@ export const STATUS_LABEL: Record<string, string> = {
   form_required: "форма",
   vacancy_gone: "удалена",
   test_solved: "тест решён",
+  form_pending: "форма на подтверждении",
+  form_sent: "форма отправлена",
+  resume_missing: "резюме недоступно",
+  limit_day: "лимит дня",
+  token_dead: "нужно переподключить hh",
+  account_banned: "аккаунт заблокирован",
 };

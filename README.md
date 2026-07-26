@@ -100,6 +100,13 @@
       All data stays on your infrastructure.
     </td>
   </tr>
+  <tr>
+    <td width="50%">
+      <h3>📈 Application Analytics</h3>
+      Funnel view (AI-checked → sent → viewed → replied → invited) with reply/invite rates,
+      breakdowns by filter/resume/cover-letter, and a failures report — powered by mirrored hh negotiation state.
+    </td>
+  </tr>
 </table>
 
 ---
@@ -171,7 +178,18 @@ docker compose up -d --build
 # 4. Open http://localhost:3000 — sign up, connect hh, start applying
 ```
 
-No cloud account needed. Everything runs locally.
+No cloud account needed. Everything runs locally — there is no hosted Supabase
+project, this stack is the only environment.
+
+Database schema: on the **first** start, every file in
+`infra/supabase/migrations/` is replayed into the fresh Postgres volume
+automatically. When you pull a new migration later, apply it yourself — the
+init hook only runs once per volume:
+
+```bash
+docker exec -i aiautoclicker-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+  < infra/supabase/migrations/023_analytics.sql
+```
 
 ### Backend-only dev
 
@@ -296,6 +314,7 @@ otclick/
 │   │   │   ├── forms.py         # Form draft approval
 │   │   │   ├── chats.py         # Recruiter chat messages
 │   │   │   ├── recruiter.py     # Recruiter escalation/todos
+│   │   │   ├── analytics.py     # Funnel/KPI analytics
 │   │   │   ├── billing.py       # Subscription management
 │   │   │   ├── webhooks.py      # CloudPayments webhook
 │   │   │   └── internal.py      # Cron job endpoints
@@ -317,6 +336,8 @@ otclick/
 │   │   │   ├── vacancy_producer.py  # Search + dedup + queue
 │   │   │   ├── relevance.py     # AI vacancy relevance filter
 │   │   │   ├── chatik.py        # chatik.hh.ru web API client
+│   │   │   ├── negotiation_sync.py # Mirror hh negotiation state for analytics
+│   │   │   ├── analytics.py     # Funnel/KPI computation
 │   │   │   ├── token_refresh.py # hh token refresh cron
 │   │   │   └── ...              # More services
 │   │   ├── hh/                  # hh.ru API client
@@ -343,7 +364,7 @@ otclick/
 │   └── package.json
 ├── infra/
 │   ├── nginx.conf               # Reverse proxy
-│   └── supabase/migrations/     # 21 SQL migrations
+│   └── supabase/migrations/     # 23 SQL migrations (apply with psql, see Quick Start)
 ├── docs/                        # Documentation
 ├── hh-applicant-tool/           # Reference CLI tool (read-only)
 ├── docker-compose.yml           # Backend + worker + frontend
@@ -419,7 +440,7 @@ Here are the priority tasks and future plans. Want to help? Pick one up!
 ### 📋 Future
 - [ ] **Multi-language support** — Internationalization (i18n) for the dashboard
 - [ ] **More job platforms** — LinkedIn, Indeed, Glassdoor integrations
-- [ ] **Application analytics** — Charts and insights on your applications
+- [x] **Application analytics** — Funnel, KPIs, and breakdowns on your applications
 - [ ] **Cover letter templates** — Customizable templates with variables
 - [ ] **AI interview prep** — Generate likely interview questions based on the vacancy
 - [ ] **Scheduling** — Set specific hours for the worker to run
