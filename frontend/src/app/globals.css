@@ -390,6 +390,7 @@ html { scroll-behavior: smooth; }
   font-size: 14px;
   font-weight: 600;
   text-decoration: none;
+  text-align: left;
   cursor: pointer;
   width: 100%;
   transition: background var(--dur) var(--ease), color var(--dur) var(--ease);

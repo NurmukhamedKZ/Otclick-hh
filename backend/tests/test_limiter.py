@@ -46,11 +46,10 @@ async def test_check_allowed_below_caps():
     from app.worker import limiter
 
     sb = MagicMock()
-    # Sequence: tz lookup → day count read → hour count read.
+    # Sequence: tz lookup → day count read.
     sb.table.side_effect = [
         _fluent({"timezone": "Asia/Almaty"}),
         _fluent({"count": 10}),
-        _fluent([{"id": "x"}] * 3, count=3),
     ]
     with patch.object(limiter, "service_client", sb):
         result = await limiter.check("u1")
@@ -69,21 +68,6 @@ async def test_check_limit_day_at_cap():
     with patch.object(limiter, "service_client", sb):
         result = await limiter.check("u1")
     assert result == "limit_day"
-
-
-@pytest.mark.asyncio
-async def test_check_limit_hour_when_day_ok():
-    from app.worker import limiter
-
-    sb = MagicMock()
-    sb.table.side_effect = [
-        _fluent({"timezone": "Asia/Almaty"}),
-        _fluent({"count": 5}),
-        _fluent([], count=limiter.HOURLY_LIMIT),
-    ]
-    with patch.object(limiter, "service_client", sb):
-        result = await limiter.check("u1")
-    assert result == "limit_hour"
 
 
 @pytest.mark.asyncio

@@ -89,6 +89,10 @@ services:
       DNS_NODES: "''"
       RLIMIT_NOFILE: 10000
       APP_NAME: realtime
+      # Kong proxies to http://realtime:4000/socket/ → Host header is "realtime",
+      # and Realtime resolves the tenant from that host. The self-host seed
+      # defaults to "realtime-dev", which would 404 as TenantNotFound.
+      SELF_HOST_TENANT_NAME: realtime
       SEED_SELF_HOST: "true"
       RUN_JANITOR: "true"
 

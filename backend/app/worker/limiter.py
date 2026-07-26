@@ -1,10 +1,10 @@
-"""Per-user apply rate limits: 100/day (local TZ) + 20/hour (UTC sliding)."""
+"""Per-user apply rate limits: 100/day (local TZ)."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -13,10 +13,9 @@ from app.db.supabase import service_client
 logger = logging.getLogger(__name__)
 
 DAILY_LIMIT = 100
-HOURLY_LIMIT = 20
 DEFAULT_TZ = "Asia/Almaty"
 
-LimitResult = Literal["allowed", "limit_day", "limit_hour"]
+LimitResult = Literal["allowed", "limit_day"]
 
 
 def _tz_for_user(user_id: str) -> ZoneInfo:
@@ -51,19 +50,6 @@ def _read_day_count(user_id: str, local_date: str) -> int:
     return ((res.data or {}).get("count") if res else 0) or 0
 
 
-def _read_hour_count(user_id: str) -> int:
-    since = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-    res = (
-        service_client.table("applications")
-        .select("id", count="exact")
-        .eq("user_id", user_id)
-        .eq("status", "sent")
-        .gte("applied_at", since)
-        .execute()
-    )
-    return res.count or 0
-
-
 def _increment_day(user_id: str, local_date: str, new_count: int) -> None:
     service_client.table("apply_counters").upsert(
         {"user_id": user_id, "date": local_date, "count": new_count},
@@ -76,8 +62,6 @@ def _check_sync(user_id: str) -> LimitResult:
     local_date = _today_local(tz)
     if _read_day_count(user_id, local_date) >= DAILY_LIMIT:
         return "limit_day"
-    if _read_hour_count(user_id) >= HOURLY_LIMIT:
-        return "limit_hour"
     return "allowed"
 
 

@@ -11,10 +11,11 @@ import type {
   WorkerStatus,
   WorkerStopResponse,
 } from "@/lib/types";
-import { IconBtn, StatusDot, Tooltip } from "@/components/otclick/ui";
-import { IFilter, IPause, IPlay, IRefresh, ISpark } from "@/components/otclick/icons";
+import { Btn, IconBtn, KeyHint, StatusDot, Tooltip } from "@/components/otclick/ui";
+import { IFilter, IPause, IPlay, IRefresh, ISearch, ISpark } from "@/components/otclick/icons";
 import { pushToast } from "@/components/toaster";
 import { openFiltersDrawer } from "@/components/filters-drawer";
+import { openCommandPalette } from "@/components/otclick/command-palette";
 
 const STATE_LABEL: Record<WorkerStatus["state"], string> = {
   running: "работает",
@@ -186,6 +187,9 @@ export default function WorkerBar() {
       )}
       <div style={{ flex: 1 }} />
 
+      <Btn kind="ghostDark" size="sm" icon={<ISearch size={15} />} onClick={openCommandPalette}>
+        поиск <KeyHint>⌘K</KeyHint>
+      </Btn>
       <button
         type="button"
         disabled={agentBusy}

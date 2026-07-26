@@ -69,15 +69,18 @@ async def load_web_session(user_id: str) -> requests.Session:
     return session
 
 
-def extract_xsrf_token(html: str) -> str:
+def extract_xsrf_token(page_html: str) -> str:
     """Pull the xsrfToken out of an hh.ru page's inline JSON state."""
     marker = ',"xsrfToken":"'
-    start = html.find(marker)
+    start = page_html.find(marker)
+    if start == -1:  # hh entity-encodes the inline JSON (&#34;)
+        page_html = html.unescape(page_html)
+        start = page_html.find(marker)
     if start == -1:
         raise ValueError("xsrfToken not found in page")
     start += len(marker)
-    end = html.find('"', start)
-    return html[start:end]
+    end = page_html.find('"', start)
+    return page_html[start:end]
 
 
 async def _get_hh_resume_id(user_id: str, resume_row_id: str | None) -> str:
@@ -229,13 +232,23 @@ def _find_balanced_object(text: str, obj_start: int) -> str:
     raise ValueError("unbalanced vacancyTests object in page")
 
 
+def _decode_page(page_html: str) -> str:
+    """hh serves the inline JSON HTML-entity-encoded (&#34; instead of ") — decode.
+
+    Only when the plain marker is absent, so already-plain pages keep their
+    literal &amp; sequences intact.
+    """
+    return page_html if _TESTS_MARKER in page_html else html.unescape(page_html)
+
+
 def _parse_tests(page_html: str, vacancy_id: str) -> dict:
     """Pull the test definition for vacancy_id out of the page's inline JSON."""
+    page_html = _decode_page(page_html)
     marker_pos = page_html.find(_TESTS_MARKER)
     if marker_pos == -1:
         raise ValueError("vacancyTests block not found in page")
     obj_start = marker_pos + len(_TESTS_MARKER)
-    blob = html.unescape(_find_balanced_object(page_html, obj_start))
+    blob = _find_balanced_object(page_html, obj_start)
     tests_data = json.loads(blob, strict=False)
     try:
         return tests_data[str(vacancy_id)]
@@ -271,7 +284,10 @@ def _free_text(chat: BaseChatModel | None, question: str, resume_ctx: str = "") 
     if chat is not None:
         try:
             prompt = build_form_text_prompt(question, resume_ctx)
-            return sanitize_ai_text(_ai_answer(chat, prompt))
+            # Never let an empty LLM reply become an empty submitted field.
+            if answer := sanitize_ai_text(_ai_answer(chat, prompt)):
+                return answer
+            logger.warning("fill: empty AI free-text — using fallback")
         except Exception:
             logger.warning("fill: AI free-text failed — using fallback", exc_info=True)
     return "Да"

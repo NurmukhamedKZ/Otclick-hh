@@ -2,9 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Btn, Card, EmptyState, KeyHint, PageHeader, Skeleton } from "@/components/otclick/ui";
-import { ICheck, IDoc, IMail, ISearch } from "@/components/otclick/icons";
-import { openCommandPalette } from "@/components/otclick/command-palette";
+import { Btn, Card, EmptyState, PageHeader, Skeleton } from "@/components/otclick/ui";
+import { ICheck, IDoc, IMail } from "@/components/otclick/icons";
 import { useRecruiter, type Draft } from "@/hooks/useRecruiter";
 import { useFormDrafts, type FormAnswer, type FormDraft } from "@/hooks/useFormDrafts";
 
@@ -320,9 +319,7 @@ export default function RecruiterPage() {
 
   return (
     <>
-      <PageHeader title="Todo" subtitle="что ждёт твоего решения" crumbs={[{ label: "Главная", href: "/dashboard" }, { label: "Todo" }]}
-        actions={<Btn kind="ghost" size="sm" icon={<ISearch size={15} />} onClick={openCommandPalette}>поиск <KeyHint>⌘K</KeyHint></Btn>}
-      />
+      <PageHeader title="Todo" subtitle="что ждёт твоего решения" crumbs={[{ label: "Главная", href: "/dashboard" }, { label: "Todo" }]} />
       {/* jump links, not tabs: all three sections stay on screen, so tab/tabpanel
           semantics would promise a panel switch that never happens */}
       <nav className="oc-seg" aria-label="Разделы Todo">

@@ -254,11 +254,27 @@ async def apply_one(
                 vacancy_id, fill_status,
             )
             if fill_status == "form_pending":
+                # Test vacancies can also require a letter — prefill it, else
+                # hh rejects the submit at approval time. Editable in the UI.
+                draft_letter = ""
+                if vacancy.get("response_letter_required"):
+                    try:
+                        draft_letter = await agent.write_cover_letter(
+                            user_id=user_id,
+                            vacancy=vacancy,
+                            resume=resume,
+                            resume_uuid=resume_uuid,
+                        )
+                    except Exception:
+                        logger.exception(
+                            "apply: draft cover letter failed vacancy=%s", vacancy_id
+                        )
                 await form_drafts.insert_draft(
                     user_id=user_id,
                     resume_id=resume_uuid,
                     vacancy=vacancy,
                     answers=form_answers,
+                    letter=draft_letter,
                 )
                 await notifications.notify(
                     user_id, "form_approval",

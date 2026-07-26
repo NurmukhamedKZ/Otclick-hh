@@ -35,9 +35,6 @@ logger = logging.getLogger(__name__)
 
 State = Literal["runningы", "paused_captcha", "paused_limit", "stopped"]
 
-# Hour-limit cooldown when limiter says limit_hour.
-HOUR_COOLDOWN_S = 60 * 60 + 30
-
 # Sleep when producer found 0 jobs and we're idle.
 IDLE_REFILL_SLEEP_S = 10
 
@@ -233,18 +230,6 @@ async def _run_loop(handle: RunnerHandle) -> None:
             handle.last_error = None
             await _hb()
             continue
-        if check == "limit_hour":
-            handle.state = "paused_limit"
-            handle.last_error = "hourly limit"
-            handle.next_run_at = datetime.now(timezone.utc) + timedelta(seconds=HOUR_COOLDOWN_S)
-            await _hb()
-            logger.info("user %s: hourly limit, sleeping %ds", user_id, HOUR_COOLDOWN_S)
-            await asyncio.sleep(HOUR_COOLDOWN_S)
-            handle.state = "running"
-            handle.last_error = None
-            await _hb()
-            continue
-
         # Refill queue when empty.
         if queue.empty():
             try:
@@ -358,7 +343,7 @@ async def _recruiter_loop(handle: RunnerHandle) -> None:
     """Answer recruiter chats on a fixed cadence, independent of the apply loop.
 
     Runs as its own task with its own on/off signal (`agent_stop`), so the AI
-    agent can run with auto-apply off (and vice versa). Daily/hourly apply caps
+    agent can run with auto-apply off (and vice versa). Daily apply caps
     and empty-queue idle never stop recruiter replies.
     """
     user_id = handle.user_id

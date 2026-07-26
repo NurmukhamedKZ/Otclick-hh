@@ -1,6 +1,4 @@
-import { Btn, KeyHint, PageHeader } from "@/components/otclick/ui";
-import { ISearch } from "@/components/otclick/icons";
-import { openCommandPalette } from "@/components/otclick/command-palette";
+import { PageHeader } from "@/components/otclick/ui";
 import CaptchaBanner from "@/components/otclick/captcha-banner";
 import HHBanner from "@/components/otclick/hh-banner";
 import LimitRing from "./limit-ring";
@@ -13,9 +11,7 @@ import NotificationsCard from "./notifications-card";
 export default async function DashboardPage() {
   return (
     <>
-      <PageHeader title="Главная" subtitle="обзор автоотклика и последних событий" crumbs={[{ label: "Главная" }]}
-        actions={<Btn kind="ghost" size="sm" icon={<ISearch size={15} />} onClick={openCommandPalette}>поиск <KeyHint>⌘K</KeyHint></Btn>}
-      />
+      <PageHeader title="Главная" subtitle="обзор автоотклика и последних событий" crumbs={[{ label: "Главная" }]} />
       <HHBanner />
       <CaptchaBanner />
       <div
