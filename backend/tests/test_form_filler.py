@@ -143,12 +143,14 @@ def test_choose_solution_fallback_middle_when_no_da():
     assert _choose_solution(None, "q?", solutions) == "2"
 
 
-def test_free_text_empty_ai_answer_falls_back():
+def test_free_text_empty_ai_answer_raises():
     from app.services.form_filler import _free_text
 
     chat = MagicMock()
     chat.invoke.return_value = MagicMock(content="   ")
-    assert _free_text(chat, "q?") == "Да"  # never submit an empty field
+    # Раньше отдавался "Да" — на «желаемый доход» это мусор в черновике.
+    with pytest.raises(ValueError):
+        _free_text(chat, "q?")
 
 
 def test_choose_solution_ai_picks_valid_id():
@@ -219,7 +221,9 @@ def test_solve_collects_answers_without_submitting():
     session = MagicMock()
     session.get.return_value = get_resp
 
-    answers = _solve(session, "777", chat=None, resume_ctx="")
+    chat = MagicMock()
+    chat.invoke.return_value = MagicMock(content="Опыт 5 лет в бэкенде.")
+    answers = _solve(session, "777", chat=chat, resume_ctx="")
 
     session.post.assert_not_called()
     assert len(answers) == 2
@@ -227,13 +231,30 @@ def test_solve_collects_answers_without_submitting():
     choice = answers[0]
     assert choice["type"] == "choice"
     assert choice["question"] == "Готовы переехать?"
-    assert choice["answer_id"] == "1"  # fallback prefers "да"
-    assert choice["answer"] == "Да"
+    assert choice["answer"] in ("Да", "Нет")
     assert {"id": "2", "text": "Нет"} in choice["options"]
 
     text = answers[1]
     assert text["type"] == "text"
-    assert text["answer"] == "Да"  # no chat → fallback
+    assert text["answer"] == "Опыт 5 лет в бэкенде."
+
+
+def test_solve_raises_without_llm_on_free_text():
+    """Без LLM свободный вопрос не заполняется мусором — весь тест уходит в form_required."""
+    from app.services.form_filler import _solve
+
+    td = {
+        "777": {
+            "uidPk": "u", "guid": "g", "startTime": 1, "required": True,
+            "tasks": [{"id": 12, "description": "Желаемый доход", "candidateSolutions": []}],
+        }
+    }
+    page = 'pre,"xsrfToken":"XT","vacancyTests":' + json.dumps(td) + ',"counters":{}'
+    session = MagicMock()
+    session.get.return_value = MagicMock(status_code=200, text=page)
+
+    with pytest.raises(ValueError):
+        _solve(session, "777", chat=None, resume_ctx="")
 
 
 def test_submit_posts_approved_answers():

@@ -16,6 +16,7 @@ __all__ = (
     "InternalServerError",
     "Redirect",
     "ResourceNotFound",
+    "TooManyRequests",
 )
 
 
@@ -90,6 +91,8 @@ class ApiError(BadResponse):
                 raise Forbidden(response, data)
             case 404:
                 raise ResourceNotFound(response, data)
+            case 429:
+                raise TooManyRequests(response, data)
             case status if 500 > status >= 400:
                 raise ClientError(response, data)
             case 502:
@@ -135,6 +138,13 @@ class CaptchaRequired(ClientError):
 
 
 class ResourceNotFound(ClientError):
+    pass
+
+
+# 429 намеренно НЕ ClientError: это «попробуй позже», а не ошибка отклика.
+# Так он проходит мимо except ClientError в apply_one и доезжает до раннера,
+# который считает его transient и повторяет попытку после паузы.
+class TooManyRequests(ApiError):
     pass
 
 

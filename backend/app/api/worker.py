@@ -50,7 +50,9 @@ async def start_worker(user_id: str = Depends(require_active_plan)) -> StartResp
             detail="Создайте хотя бы один фильтр с привязанным резюме перед запуском.",
         )
     await worker_control.set_enabled(user_id, True)
-    return StartResponse(state="running", queued=0)
+    # Раннер живёт в worker-контейнере и подхватит флаг на следующем цикле
+    # (до POLL_INTERVAL_S), поэтому "running" здесь был бы враньём.
+    return StartResponse(state="starting", queued=0)
 
 
 @router.post("/stop", response_model=StopResponse)
@@ -94,9 +96,11 @@ async def worker_status(user_id: str = Depends(get_current_user)) -> StatusRespo
     )
 
     if enabled:
-        state = (rt or {}).get("state") or "running"
+        # Нет строки heartbeat или она от прошлой остановленной сессии —
+        # раннер ещё не поднялся.
+        state = (rt or {}).get("state") or "starting"
         if state == "stopped":
-            state = "running"
+            state = "starting"
     else:
         state = "stopped"
 

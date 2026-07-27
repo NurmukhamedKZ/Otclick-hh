@@ -183,10 +183,17 @@ export default function AnalyticsView() {
   if (isPending) {
     return <Skeleton h={120} count={4} />;
   }
-  if (error || !data) {
+  if (error || !data || data.error) {
     return (
       <Card tone="light">
-        <EmptyState icon={<IChart />} title="Аналитика недоступна" description={(error as Error)?.message} />
+        <EmptyState
+          icon={<IChart />}
+          title="Аналитика недоступна"
+          description={
+            (error as Error)?.message ??
+            "Не удалось посчитать метрики. Нули на графиках были бы неправдой — попробуйте позже."
+          }
+        />
       </Card>
     );
   }

@@ -331,8 +331,10 @@ def _free_text(chat: BaseChatModel | None, question: str, resume_ctx: str = "") 
                 return answer
             logger.warning("fill: empty AI free-text — using fallback")
         except Exception:
-            logger.warning("fill: AI free-text failed — using fallback", exc_info=True)
-    return "Да"
+            logger.warning("fill: AI free-text failed", exc_info=True)
+    # Никакого фолбэка: на «Укажите желаемый доход» ушло бы «Да». Пусть весь
+    # тест уедет в form_required — пользователь заполнит его руками.
+    raise ValueError(f"no answer for free-text task: {question[:80]}")
 
 
 def _response_url(vacancy_id: str) -> str:

@@ -18,6 +18,7 @@ import { openFiltersDrawer } from "@/components/filters-drawer";
 import { openCommandPalette } from "@/components/otclick/command-palette";
 
 const STATE_LABEL: Record<WorkerStatus["state"], string> = {
+  starting: "запускается",
   running: "работает",
   paused_captcha: "капча",
   paused_limit: "лимит",
@@ -103,8 +104,11 @@ export default function WorkerBar() {
 
   const state = status?.state ?? "stopped";
   const isRunning = state === "running";
+  // Кнопка отражает намерение (флаг включён), а не мгновенное состояние раннера:
+  // "запускается"/"капча"/"лимит" — это включённый воркер, показываем «стоп».
+  const isOn = state !== "stopped";
   const isErr = !!status?.last_error;
-  const dot = isErr ? "err" : isRunning ? "ok" : state === "paused_captcha" || state === "paused_limit" ? "warn" : "muted";
+  const dot = isErr ? "err" : isRunning ? "ok" : state === "paused_captcha" || state === "paused_limit" || state === "starting" ? "warn" : "muted";
   const label = STATE_LABEL[state];
   const busy = startM.isPending || stopM.isPending;
   const agentRunning = (status?.agent_state ?? "stopped") === "running";
@@ -222,11 +226,11 @@ export default function WorkerBar() {
       <button
         type="button"
         disabled={busy}
-        onClick={() => (isRunning ? stopM.mutate() : startM.mutate())}
+        onClick={() => (isOn ? stopM.mutate() : startM.mutate())}
         style={{
           border: "none",
-          background: isRunning ? "#ffffff15" : "var(--yellow)",
-          color: isRunning ? "#F5F1E6" : "var(--ink)",
+          background: isOn ? "#ffffff15" : "var(--yellow)",
+          color: isOn ? "#F5F1E6" : "var(--ink)",
           borderRadius: 999,
           padding: "8px 14px",
           fontWeight: 600,
@@ -238,7 +242,7 @@ export default function WorkerBar() {
           opacity: busy ? 0.6 : 1,
         }}
       >
-        {isRunning ? (
+        {isOn ? (
           <>
             <IPause size={14} /> автоотклик
           </>
