@@ -138,53 +138,6 @@ async def insert_todo(
 
 # --- query + send ------------------------------------------------------------
 
-async def _update_draft_question(draft_id: str, text: str) -> None:
-    def _q():
-        return (
-            service_client.table("recruiter_drafts")
-            .update({"question_text": text})
-            .eq("id", draft_id)
-            .execute()
-        )
-    await _run(_q)
-
-
-async def _backfill_question(user_id: str, draft: dict) -> None:
-    """Lazy backfill `question_text` for drafts saved before the column existed.
-    Looks up the recruiter message by `message_id` over the hh API and writes it
-    back to the draft row so the UI shows it. No-op on any failure."""
-    nid = draft.get("negotiation_id")
-    mid = draft.get("message_id")
-    if not nid or not mid:
-        return
-    try:
-        client = await load_api_client(user_id)
-    except Exception:
-        return
-    original = client.access_token
-    loop = asyncio.get_running_loop()
-    try:
-        try:
-            data = await loop.run_in_executor(
-                None,
-                lambda: client.get(f"negotiations/{nid}/messages", with_text_only="true"),
-            )
-        except Exception:
-            return
-    finally:
-        await persist_if_refreshed(user_id, client, original)
-    for m in data.get("items", []):
-        if str(m.get("id")) == str(mid):
-            text = (m.get("text") or "").strip()
-            if text:
-                draft["question_text"] = text
-                try:
-                    await _update_draft_question(draft["id"], text)
-                except Exception:
-                    logger.warning("draft %s: question backfill write failed", draft["id"], exc_info=True)
-            return
-
-
 async def list_drafts(user_id: str) -> list[dict]:
     def _q():
         return (
@@ -196,16 +149,7 @@ async def list_drafts(user_id: str) -> list[dict]:
             .execute()
         )
     res = await _run(_q)
-    drafts = res.data or []
-    # one-shot backfill for rows created before the column existed; sequential
-    # to avoid hammering hh and to stay within ApiClient's per-instance lock.
-    for d in drafts:
-        if not (d.get("question_text") or "").strip():
-            try:
-                await _backfill_question(user_id, d)
-            except Exception:
-                logger.warning("draft %s: question backfill failed", d.get("id"), exc_info=True)
-    return drafts
+    return res.data or []
 
 
 async def list_todos(user_id: str) -> list[dict]:

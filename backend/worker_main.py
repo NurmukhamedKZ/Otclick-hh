@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from app.services.plan import filter_accessible
+from app.services.plan import filter_paid
 from app.services.worker_control import active_user_flags
 from app.worker.runner import get_registry
 
@@ -32,15 +32,14 @@ POLL_INTERVAL_S = 15
 async def _reconcile(registry) -> None:
     loop = asyncio.get_running_loop()
     flags = await loop.run_in_executor(None, active_user_flags)
-    accessible = set(
-        await loop.run_in_executor(None, filter_accessible, list(flags.keys()))
-    )
+    paid = set(await loop.run_in_executor(None, filter_paid, list(flags.keys())))
 
-    # Plan gate both loops; a user without a valid plan gets neither.
+    # Гейт остался только на агенте-рекрутёре: он по определению автономен, а
+    # автономность — платная. Отклики бесплатный юзер шлёт сам, его ограничивают
+    # лимиты в limiter, а не отказ на входе.
     desired: dict[str, tuple[bool, bool]] = {}
     for uid, (apply_on, agent_on) in flags.items():
-        ok = uid in accessible
-        desired[uid] = (apply_on and ok, agent_on and ok)
+        desired[uid] = (apply_on, agent_on and uid in paid)
     # Users with a live loop but no longer desired → reconcile to (False, False).
     for uid in registry.active_user_ids():
         desired.setdefault(uid, (False, False))

@@ -12,17 +12,24 @@ export default function LimitRing() {
     refetchInterval: 15000,
   });
 
-  const goal = status?.daily_limit ?? 30;
-  const current = status?.today_count ?? 0;
+  // На бесплатном тарифе лимит суммарный (30 всего), а не дневной — кольцо
+  // должно показывать именно ту цифру, в которую человек упрётся.
+  const manual = status?.mode === "manual";
+  const goal = (manual ? status?.limit_total : status?.daily_limit) ?? 30;
+  const current = (manual ? status?.total_used : status?.today_count) ?? 0;
   const pct = goal > 0 ? Math.min(current / goal, 1) : 0;
   const C = 2 * Math.PI * 52;
 
   return (
     <Card tone="light" interactive={{ href: "/billing" }} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
       <div>
-        <div style={{ fontSize: 17, fontWeight: 700 }}>Лимит на сегодня</div>
-        <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 4, maxWidth: 160 }}>
-          Бот сам остановится при достижении лимита
+        <div style={{ fontSize: 17, fontWeight: 700 }}>
+          {manual ? "Бесплатные отклики" : "Лимит на сегодня"}
+        </div>
+        <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 4, maxWidth: 170 }}>
+          {manual
+            ? `${current} из ${goal} — дальше нужен тариф`
+            : "Бот сам остановится при достижении лимита"}
         </div>
         <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>
           нужно больше — открыть тарифы →
@@ -54,7 +61,9 @@ export default function LimitRing() {
             alignItems: "center",
           }}
         >
-          <div style={{ fontSize: 10, color: "var(--muted)", letterSpacing: 0.5 }}>цель</div>
+          <div style={{ fontSize: 10, color: "var(--muted)", letterSpacing: 0.5 }}>
+            {manual ? "всего" : "цель"}
+          </div>
           <div style={{ fontSize: 26, fontWeight: 800, lineHeight: 1 }}>{goal}</div>
           <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
             {current} отправлено

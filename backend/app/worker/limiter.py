@@ -1,4 +1,10 @@
-"""Per-user apply rate limits: 100/day (local TZ)."""
+"""Per-user apply limits.
+
+Paid: N/day in the user's local TZ. Free: a lifetime total, counted straight off
+`applications` — no counter column, one query per loop iteration is cheaper than
+a new entity to keep in sync. Which of the two applies comes from
+`plan.limits_for`, never from a constant here.
+"""
 
 from __future__ import annotations
 
@@ -8,14 +14,20 @@ from datetime import datetime
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.config import settings
 from app.db.supabase import service_client
+from app.services import plan as plan_service
 
 logger = logging.getLogger(__name__)
 
-DAILY_LIMIT = 100
+DAILY_LIMIT = settings.PAID_DAILY_APPLIES
 DEFAULT_TZ = "Asia/Almaty"
 
-LimitResult = Literal["allowed", "limit_day"]
+# Statuses that actually reached hh. form_required / failed / captcha never did
+# and must not burn a free user's lifetime quota.
+COUNTED_STATUSES = ("sent", "form_sent")
+
+LimitResult = Literal["allowed", "limit_day", "limit_total"]
 
 
 def _tz_for_user(user_id: str) -> ZoneInfo:
@@ -60,11 +72,30 @@ def _increment_day(user_id: str, local_date: str) -> int:
     return int(res.data or 0)
 
 
+def sent_total(user_id: str) -> int:
+    """Applies that actually reached hh, ever. Drives the free lifetime cap."""
+    res = (
+        service_client.table("applications")
+        .select("id", count="exact")
+        .eq("user_id", user_id)
+        .in_("status", list(COUNTED_STATUSES))
+        .execute()
+    )
+    return (getattr(res, "count", None) if res else 0) or 0
+
+
 def _check_sync(user_id: str) -> LimitResult:
-    tz = _tz_for_user(user_id)
-    local_date = _today_local(tz)
-    if _read_day_count(user_id, local_date) >= DAILY_LIMIT:
-        return "limit_day"
+    limits = plan_service.limits_for(plan_service._fetch_profile(user_id))
+
+    total_cap = limits["total"]
+    if total_cap is not None and sent_total(user_id) >= total_cap:
+        return "limit_total"
+
+    daily_cap = limits["daily"]
+    if daily_cap is not None:
+        tz = _tz_for_user(user_id)
+        if _read_day_count(user_id, _today_local(tz)) >= daily_cap:
+            return "limit_day"
     return "allowed"
 
 

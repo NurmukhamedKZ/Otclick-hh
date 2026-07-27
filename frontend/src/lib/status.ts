@@ -22,6 +22,7 @@ export const STATUS_LABEL: Record<string, string> = {
   form_sent: "форма отправлена",
   resume_missing: "резюме недоступно",
   limit_day: "лимит дня",
+  limit_total: "бесплатный лимит исчерпан",
   token_dead: "нужно переподключить hh",
   account_banned: "аккаунт заблокирован",
 };

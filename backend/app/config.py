@@ -28,11 +28,25 @@ class Settings(BaseSettings):
     INTERNAL_CRON_TOKEN: str = ""
     REFRESH_THRESHOLD_DAYS: int = 2
 
-    # CloudPayments billing. PUBLIC_ID is sent to the widget; API_SECRET is the
-    # HMAC key for webhook verification (Content-HMAC header) — never exposed.
-    CLOUDPAYMENTS_PUBLIC_ID: str = ""
-    CLOUDPAYMENTS_API_SECRET: str = ""
-    PLAN_CURRENCY: str = "RUB"
+    # Polar.sh billing (merchant of record). Prices, intervals and currency live
+    # in the Polar products, not here — the code only knows product ids.
+    POLAR_ACCESS_TOKEN: str = ""
+    POLAR_WEBHOOK_SECRET: str = ""
+    POLAR_SERVER: str = "sandbox"  # "sandbox" | "production"
+    POLAR_SUCCESS_URL: str = "http://localhost:3000/billing/success"
+    # Product ids differ between the sandbox and production organisations, so
+    # they are env, not code. One per plan id in PLANS (POLAR_PRODUCT_<PLAN>).
+    POLAR_PRODUCT_SPRINT: str = ""
+    POLAR_PRODUCT_MONTH: str = ""
+    PLAN_CURRENCY: str = "KZT"  # display only
+
+    # Free tier vs paid. BILLING_ENABLED=False (self-host default) turns the
+    # paywall off entirely: no caps, autonomous mode for everyone. Without it a
+    # self-hoster would sit on 30 applies inside their own instance and could
+    # only fix it by editing SQL.
+    BILLING_ENABLED: bool = False
+    FREE_TOTAL_APPLIES: int = 30      # lifetime, not per day
+    PAID_DAILY_APPLIES: int = 100
 
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
@@ -51,25 +65,15 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
-# Paid plans offered in-app (mirror the landing pricing). Widget recurrent flag:
-# charge every `period` `interval`(s). `period_days` drives the access window — the
-# webhook derives it from the charged Amount (see billing._plan_for_amount).
+# Paid plans offered in-app. Price and interval live in the Polar product —
+# duplicating them here is how you get two sources of truth that drift. `price`
+# stays only because the UI prints it; the access window comes from the
+# subscription's current_period_end, not from a local period_days.
+# The Polar product id per plan lives in POLAR_PRODUCT_<PLAN> (see billing.py).
+# `price` is in ₸ and is only printed in the UI — the charge itself comes from
+# the Polar product, so these two must be kept in sync by hand.
 PLANS: dict[str, dict] = {
-    "sprint": {
-        "id": "sprint",
-        "name": "Otclick Спринт",
-        "price": 1990,
-        "interval": "Week",
-        "period": 1,
-        "period_days": 7,
-    },
-    "month": {
-        "id": "month",
-        "name": "Otclick Месяц",
-        "price": 3900,
-        "interval": "Month",
-        "period": 1,
-        "period_days": 30,
-    },
+    "sprint": {"id": "sprint", "name": "Otclick Спринт", "price": 1000},
+    "month": {"id": "month", "name": "Otclick Месяц", "price": 3000},
 }
 DEFAULT_PLAN_ID = "month"

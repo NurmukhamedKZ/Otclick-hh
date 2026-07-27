@@ -204,6 +204,9 @@ services:
       - .env
     ports:
       - "8000:8000"
+    # /api/hh/connect поднимает headless Chromium прямо здесь — те же 64 МБ
+    # /dev/shm по умолчанию роняют его на середине OAuth.
+    shm_size: "1gb"
     depends_on:
       kong:
         condition: service_healthy

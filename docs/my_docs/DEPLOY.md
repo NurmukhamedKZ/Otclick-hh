@@ -81,8 +81,12 @@ SERVICE_ROLE_KEY=
 POSTGRES_PASSWORD=
 FERNET_KEY=                  # ⚠ back this up offline — losing it bricks all stored hh tokens
 OPENAI_API_KEY=
-CLOUDPAYMENTS_PUBLIC_ID=
-CLOUDPAYMENTS_API_SECRET=
+POLAR_ACCESS_TOKEN=
+POLAR_WEBHOOK_SECRET=
+POLAR_SERVER=production
+POLAR_PRODUCT_SPRINT=
+POLAR_PRODUCT_MONTH=
+BILLING_ENABLED=true         # false = no paywall at all (self-host default)
 INTERNAL_CRON_TOKEN=         # random; used by the daily refresh cron
 CORS_ORIGINS=https://otclick.org,https://www.otclick.org
 ```
@@ -121,9 +125,12 @@ sudo certbot --nginx -d api.otclick.org
 - `otclick.org` → Vercel (apex A `76.76.21.21`, or CNAME per Vercel docs)
 - `api.otclick.org` → VPS IPv4 (A record)
 
-### CloudPayments
+### Polar.sh
 
-Dashboard → Pay URL = `https://api.otclick.org/api/webhooks/cloudpayments`.
+Dashboard → Webhooks → endpoint `https://api.otclick.org/api/webhooks/polar`, subscribed to
+`order.paid`, `subscription.active`, `subscription.canceled`, `subscription.revoked`.
+Copy the signing secret into `POLAR_WEBHOOK_SECRET` and the product ids into
+`POLAR_PRODUCT_*` (they differ between the sandbox and production organisations).
 
 ---
 

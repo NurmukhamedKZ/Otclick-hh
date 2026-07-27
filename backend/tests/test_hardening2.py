@@ -133,6 +133,11 @@ async def test_cluster_break_publishes_heartbeat_before_sleeping():
 
     with patch.object(runner, "heartbeat", new=_hb), \
          patch.object(runner.limiter, "check", new=AsyncMock(return_value="allowed")), \
+         patch.object(
+             runner.plan_service,
+             "get_limits",
+             new=AsyncMock(return_value={"mode": "auto", "daily": 100, "total": None}),
+         ), \
          patch.object(runner.asyncio, "sleep", new=_sleep), \
          patch("app.services.vacancy_producer.produce_jobs", new=AsyncMock(return_value=(1, 0))):
         with pytest.raises(asyncio.CancelledError):

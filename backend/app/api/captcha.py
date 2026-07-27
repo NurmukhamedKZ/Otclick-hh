@@ -1,7 +1,7 @@
 """Captcha handoff endpoints (plan B).
 
-The worker operates one captcha at a time per user; `{request_id}` is accepted for
-REST shape but the service operates per-user.
+The worker handles one captcha at a time per user, so both actions clear that
+user's pending rows; `{request_id}` is kept for REST shape only.
 """
 
 from __future__ import annotations
@@ -11,7 +11,6 @@ from pydantic import BaseModel
 
 from app.api.deps import get_current_user
 from app.services import captcha as captcha_service
-from app.services import worker_control
 
 router = APIRouter(prefix="/api/captcha", tags=["captcha"])
 
@@ -21,7 +20,7 @@ class RecheckResponse(BaseModel):
 
 
 class DismissResponse(BaseModel):
-    stopped: bool
+    dismissed: bool
 
 
 @router.get("/pending")
@@ -43,7 +42,7 @@ async def solve(
 async def dismiss(
     request_id: str, user_id: str = Depends(get_current_user)
 ) -> DismissResponse:
+    # Только убирает окно: воркер остаётся на паузе и сам продолжит, когда hh
+    # снимет капчу. Кнопка «закрыть» не должна выключать автоотклик целиком.
     await captcha_service.mark_solved(user_id)
-    # Stop the worker by flipping the persisted flag (worker_main reconciles).
-    await worker_control.set_enabled(user_id, False)
-    return DismissResponse(stopped=True)
+    return DismissResponse(dismissed=True)

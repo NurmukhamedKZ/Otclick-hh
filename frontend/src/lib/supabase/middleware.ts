@@ -31,13 +31,10 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const path = request.nextUrl.pathname;
-  const isProtected =
-    path.startsWith("/dashboard") ||
-    path.startsWith("/onboarding") ||
-    path.startsWith("/applications") ||
-    path.startsWith("/billing") ||
-    path.startsWith("/notifications") ||
-    path.startsWith("/account");
+  // Белый список публичного, а не чёрный список приватного: новая страница под
+  // (app)/ защищена по умолчанию, а не пока о ней не вспомнят здесь.
+  const isPublic = path === "/" || path.startsWith("/auth");
+  const isProtected = !isPublic;
   const isAuthPage = path === "/auth";
 
   if (path === "/login" || path === "/signup" || path === "/filters") {

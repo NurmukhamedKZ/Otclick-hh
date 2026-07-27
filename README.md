@@ -278,9 +278,10 @@ OPENAI_MODEL=gpt-5.4-nano
 # Shared secret for the /internal/cron/* endpoints (token refresh, notification pruning)
 INTERNAL_CRON_TOKEN=your-cron-token
 
-# CloudPayments billing — optional for self-hosted
-CLOUDPAYMENTS_PUBLIC_ID=
-CLOUDPAYMENTS_API_SECRET=
+# Polar.sh billing — optional for self-hosted (leave BILLING_ENABLED=false)
+POLAR_ACCESS_TOKEN=
+POLAR_WEBHOOK_SECRET=
+POLAR_SERVER=sandbox
 ```
 
 ### Frontend (`frontend/.env.local`)
@@ -319,7 +320,7 @@ curl -fsS -X POST http://127.0.0.1:8000/internal/cron/prune-notifications \
 | **hh.ru Integration** | Playwright (headless Chromium) + REST API |
 | **AI/LLM** | OpenAI (GPT) via langchain |
 | **Token Encryption** | Fernet (symmetric, cryptography) |
-| **Billing** | CloudPayments (optional) |
+| **Billing** | Polar.sh — merchant of record (optional) |
 | **Deployment** | Docker Compose (backend + worker + frontend) |
 | **Package Manager** | uv (Python), npm (frontend) |
 
@@ -343,7 +344,7 @@ otclick/
 │   │   │   ├── recruiter.py     # Recruiter escalation/todos
 │   │   │   ├── analytics.py     # Funnel/KPI analytics
 │   │   │   ├── billing.py       # Subscription management
-│   │   │   ├── webhooks.py      # CloudPayments webhook
+│   │   │   ├── webhooks.py      # Polar webhook
 │   │   │   ├── qa.py            # User-curated Q&A memory
 │   │   │   └── internal.py      # Cron endpoints (token refresh, retention)
 │   │   ├── ai/

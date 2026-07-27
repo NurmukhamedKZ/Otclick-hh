@@ -38,5 +38,6 @@ async def summary(user_id: str, days: int) -> dict:
         data = await loop.run_in_executor(None, _fetch, user_id, days)
     except Exception:
         logger.exception("analytics_summary rpc failed for %s", user_id)
-        return {**EMPTY, "days": days}
-    return {**EMPTY, **data, "days": days}
+        # Нули, неотличимые от «данных нет», врут сильнее, чем ошибка.
+        return {**EMPTY, "days": days, "error": True}
+    return {**EMPTY, **data, "days": days, "error": False}

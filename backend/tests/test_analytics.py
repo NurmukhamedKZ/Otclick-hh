@@ -27,6 +27,7 @@ async def test_summary_passes_params_and_merges_defaults():
     # keys the rpc did not return still exist (UI never sees undefined)
     assert out["kpi"]["invite_rate"] is None
     assert out["failures"] == []
+    assert out["error"] is False
 
 
 @pytest.mark.asyncio
@@ -35,3 +36,4 @@ async def test_summary_returns_empty_shape_on_rpc_failure():
         out = await analytics.summary("u1", 30)
     assert out["funnel"]["sent"] == 0
     assert out["days"] == 30
+    assert out["error"] is True

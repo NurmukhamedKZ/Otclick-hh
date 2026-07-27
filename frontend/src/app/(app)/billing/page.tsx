@@ -1,52 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
 import { apiFetch } from "@/lib/api";
 import { Btn, Card, PageHeader, Tag } from "@/components/otclick/ui";
 import { IBolt, ICheck } from "@/components/otclick/icons";
-import type { BillingStatus, SubscribeParams } from "@/lib/types";
+import type { BillingStatus, PortalResponse, SubscribeResponse } from "@/lib/types";
 import { pushToast } from "@/components/toaster";
-
-const CP_SCRIPT = "https://widget.cloudpayments.ru/bundles/cloudpayments.js";
-
-type CPWidget = {
-  pay: (
-    type: "auth" | "charge",
-    options: Record<string, unknown>,
-    callbacks: {
-      onSuccess?: () => void;
-      onFail?: (reason: string) => void;
-      onComplete?: () => void;
-    },
-  ) => void;
-};
-
-declare global {
-  interface Window {
-    cp?: { CloudPayments: new () => CPWidget };
-  }
-}
-
-function loadWidgetScript(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (window.cp) return resolve();
-    const existing = document.querySelector<HTMLScriptElement>(
-      `script[src="${CP_SCRIPT}"]`,
-    );
-    if (existing) {
-      existing.addEventListener("load", () => resolve());
-      existing.addEventListener("error", () => reject(new Error("widget load failed")));
-      return;
-    }
-    const s = document.createElement("script");
-    s.src = CP_SCRIPT;
-    s.async = true;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error("widget load failed"));
-    document.head.appendChild(s);
-  });
-}
 
 function fmtDate(s: string | null): string {
   return s ? new Date(s).toLocaleDateString("ru-RU") : "—";
@@ -68,11 +27,11 @@ const PLANS: Plan[] = [
   {
     id: "sprint",
     name: "Спринт",
-    price: "1 990 ₽",
+    price: "1 000 ₸",
     period: "7 дней",
     sub: "Закрыть поиск за один спринт. Низкий коммит.",
     feats: [
-      "До 25 откликов в день",
+      "До 100 откликов в день",
       "AI-сопроводительные под каждую вакансию",
       "Агент отвечает рекрутёрам и ведёт до оффера",
       "Формы, тесты, созвоны — в задачах",
@@ -81,12 +40,12 @@ const PLANS: Plan[] = [
   {
     id: "month",
     name: "Месяц",
-    price: "3 900 ₽",
+    price: "3 000 ₸",
     period: "в месяц",
     sub: "Полный автопилот. Агент-ответчик уже включён.",
     popular: true,
     feats: [
-      "До 30 откликов в день",
+      "До 100 откликов в день",
       "Всё из «Спринта»",
       "Приоритетная обработка чатов",
       "Авто-продление · отмена в 1 клик",
@@ -95,16 +54,13 @@ const PLANS: Plan[] = [
 ];
 
 const PLAN_LABELS: Record<string, string> = {
-  trial: "Пробный период",
   free: "Бесплатный",
   active: "Активная подписка",
   cancelled: "Отменена · доступ до конца периода",
 };
 
 export default function BillingPage() {
-  const supabase = createClient();
   const [status, setStatus] = useState<BillingStatus | null>(null);
-  const [email, setEmail] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   const loadStatus = useCallback(async () => {
@@ -116,60 +72,37 @@ export default function BillingPage() {
   }, []);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? null));
     loadStatus();
-  }, [supabase, loadStatus]);
+  }, [loadStatus]);
 
+  // Оплата целиком на стороне Polar (merchant of record): никакого виджета и
+  // никаких карточных данных у нас на странице — только редирект.
   async function subscribe(planId: string) {
     setBusy(planId);
     try {
-      const p = await apiFetch<SubscribeParams>(
+      const { checkout_url } = await apiFetch<SubscribeResponse>(
         `/api/billing/subscribe?plan=${planId}`,
         { method: "POST" },
       );
-      await loadWidgetScript();
-      if (!window.cp) throw new Error("CloudPayments widget unavailable");
-      const widget = new window.cp.CloudPayments();
-      widget.pay(
-        "charge",
-        {
-          publicId: p.public_id,
-          description: p.description,
-          amount: p.amount,
-          currency: p.currency,
-          accountId: p.account_id,
-          invoiceId: p.invoice_id,
-          email: email ?? undefined,
-          data: {
-            CloudPayments: {
-              recurrent: { interval: p.interval, period: p.period },
-            },
-          },
-        },
-        {
-          onSuccess: () => {
-            pushToast({ kind: "success", title: "платёж принят" });
-            setTimeout(loadStatus, 3000);
-            setTimeout(loadStatus, 10000);
-          },
-          onFail: (reason) => pushToast({ kind: "error", title: `платёж не прошёл: ${reason}` }),
-          onComplete: () => setBusy(null),
-        },
-      );
+      window.location.href = checkout_url;
     } catch (e) {
       pushToast({ kind: "error", title: e instanceof Error ? e.message : "subscribe failed" });
       setBusy(null);
     }
   }
 
-  async function cancel() {
-    if (!confirm("Отменить подписку? Доступ сохранится до конца оплаченного периода.")) return;
+  // Отмена, смена карты и счета живут в портале Polar — раньше «отмена» лишь
+  // переключала колонку, а реальное списание останавливали руками.
+  async function openPortal() {
+    setBusy("portal");
     try {
-      await apiFetch("/api/billing/cancel", { method: "POST" });
-      await loadStatus();
-      pushToast({ kind: "info", title: "подписка отменена" });
+      const { portal_url } = await apiFetch<PortalResponse>("/api/billing/portal", {
+        method: "POST",
+      });
+      window.location.href = portal_url;
     } catch (e) {
-      pushToast({ kind: "error", title: e instanceof Error ? e.message : "cancel failed" });
+      pushToast({ kind: "error", title: e instanceof Error ? e.message : "portal failed" });
+      setBusy(null);
     }
   }
 
@@ -182,7 +115,7 @@ export default function BillingPage() {
       {status && !status.has_access && (
         <div
           style={{
-            background: "var(--coral-soft, #fde2dd)",
+            background: "var(--yellow-soft, #fdf3d0)",
             color: "var(--ink)",
             borderRadius: 14,
             padding: "12px 16px",
@@ -191,7 +124,9 @@ export default function BillingPage() {
             fontWeight: 600,
           }}
         >
-          ⚠ Доступ неактивен — trial закончился или нет подписки. Worker не запустится, пока не оформите тариф.
+          Вы на бесплатном тарифе: отклики отправляются вручную по кнопке «прогнать
+          пачку», всего 30 штук. Подписка включает автономный режим — агент работает,
+          пока вы спите.
         </div>
       )}
 
@@ -213,16 +148,15 @@ export default function BillingPage() {
             <div style={{ fontSize: 22, fontWeight: 700, marginTop: 2 }}>{PLAN_LABELS[plan] ?? plan}</div>
           </div>
           <Tag tone={status?.has_access ? "ok" : "neutral"} dot>
-            {status?.has_access ? "доступ активен" : "нет доступа"}
+            {status?.has_access ? "подписка активна" : "бесплатный тариф"}
           </Tag>
         </div>
-        {status?.trial_ends && <Row k="trial до" v={fmtDate(status.trial_ends)} />}
         {status?.plan_expires_at && <Row k="действует до" v={fmtDate(status.plan_expires_at)} />}
         {status?.next_charge_at && <Row k="следующее списание" v={fmtDate(status.next_charge_at)} />}
-        {isActive && (
+        {(isActive || plan === "cancelled") && (
           <div style={{ marginTop: 16 }}>
-            <Btn kind="coral" size="sm" onClick={cancel}>
-              отменить подписку
+            <Btn kind="coral" size="sm" onClick={openPortal} disabled={busy === "portal"}>
+              {busy === "portal" ? "открываем…" : "управлять подпиской"}
             </Btn>
           </div>
         )}
@@ -287,7 +221,7 @@ export default function BillingPage() {
                 }}
               >
                 <div>{fmtDate(p.created_at)}</div>
-                <div className="mono">{p.amount ?? "—"} ₽</div>
+                <div className="mono">{p.amount ?? "—"}</div>
                 <div>{p.status}</div>
               </div>
             ))}

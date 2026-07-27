@@ -180,6 +180,66 @@ async def test_registry_resume_captcha():
         await registry.stop("u2")
 
 
+async def _drain_loop(handle, *, limits, check_result="allowed", produce=(0, 0)):
+    """Прогнать _run_loop с замоканными зависимостями до самоостановки."""
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from app.worker import runner
+
+    produce_calls = []
+
+    async def fake_produce(user_id, agent):
+        produce_calls.append(user_id)
+        return produce
+
+    with (
+        patch.object(runner.plan_service, "get_limits", new=AsyncMock(return_value=limits)),
+        patch.object(runner.limiter, "check", new=AsyncMock(return_value=check_result)),
+        patch("app.services.vacancy_producer.produce_jobs", new=fake_produce),
+        patch.object(runner, "heartbeat", new=AsyncMock()),
+        patch.object(runner, "notify", new=AsyncMock()) as notify_mock,
+        patch.object(runner.worker_control, "set_enabled", new=AsyncMock()) as set_enabled,
+    ):
+        await asyncio.wait_for(runner._run_loop(handle), timeout=5)
+    return produce_calls, notify_mock, set_enabled
+
+
+async def test_manual_mode_runs_one_batch_then_stops():
+    from app.worker import runner
+    from app.worker.queue import drop_user_queue
+
+    drop_user_queue("u-manual")
+    handle = runner.RunnerHandle(user_id="u-manual")
+    produce_calls, _, set_enabled = await _drain_loop(
+        handle, limits={"mode": "manual", "daily": None, "total": 30}
+    )
+
+    # Ровно один заход продюсера, затем самоостановка — не бесконечная петля.
+    assert produce_calls == ["u-manual"]
+    assert handle.state == "idle"
+    set_enabled.assert_awaited_once_with("u-manual", False)
+
+
+async def test_limit_total_stops_runner_and_clears_flag():
+    from app.worker import runner
+    from app.worker.queue import drop_user_queue
+
+    drop_user_queue("u-capped")
+    handle = runner.RunnerHandle(user_id="u-capped")
+    produce_calls, notify_mock, set_enabled = await _drain_loop(
+        handle,
+        limits={"mode": "manual", "daily": None, "total": 30},
+        check_result="limit_total",
+    )
+
+    assert produce_calls == []  # до продюсера не дошли
+    assert handle.state == "stopped"
+    # Флаг гасим, иначе worker_main поднимает раннер каждые 15с по кругу.
+    set_enabled.assert_awaited_once_with("u-capped", False)
+    assert notify_mock.await_args[0][1] == "limit_total"
+
+
 async def test_probe_me_ok():
     from unittest.mock import MagicMock
     from app.worker import runner

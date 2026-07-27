@@ -104,7 +104,7 @@ async def test_reconcile_drives_both_loops_gated_by_plan():
 
     flags = {"a": (True, False), "b": (False, True)}
     with patch.object(worker_main, "active_user_flags", return_value=flags), \
-         patch.object(worker_main, "filter_accessible", side_effect=lambda u: u):
+         patch.object(worker_main, "filter_paid", side_effect=lambda u: u):
         await worker_main._reconcile(registry)
 
     calls = {c.args[0]: c.args[1:] for c in registry.reconcile.await_args_list}
@@ -114,7 +114,9 @@ async def test_reconcile_drives_both_loops_gated_by_plan():
 
 
 @pytest.mark.asyncio
-async def test_reconcile_no_plan_disables_all_loops():
+async def test_free_user_keeps_apply_loop_loses_agent():
+    """Бесплатный не выкидывается — его ограничивает лимитер, а не ворота.
+    Агент-рекрутёр автономен по определению, поэтому остаётся платным."""
     import worker_main
 
     registry = MagicMock()
@@ -123,7 +125,7 @@ async def test_reconcile_no_plan_disables_all_loops():
 
     flags = {"a": (True, True)}
     with patch.object(worker_main, "active_user_flags", return_value=flags), \
-         patch.object(worker_main, "filter_accessible", side_effect=lambda u: []):
+         patch.object(worker_main, "filter_paid", side_effect=lambda u: []):
         await worker_main._reconcile(registry)
 
-    registry.reconcile.assert_awaited_once_with("a", False, False)
+    registry.reconcile.assert_awaited_once_with("a", True, False)
