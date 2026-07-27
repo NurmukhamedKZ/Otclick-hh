@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Btn, Card, EmptyState, PageHeader, SegmentedTabs, Skeleton } from "@/components/otclick/ui";
 import { ICheck, IDoc, IMail } from "@/components/otclick/icons";
-import { useRecruiter, type Draft } from "@/hooks/useRecruiter";
+import { useRecruiter, type Draft, type Todo } from "@/hooks/useRecruiter";
 import { useFormDrafts, type FormAnswer, type FormDraft } from "@/hooks/useFormDrafts";
 import { useChats, useChatMessages, type ChatSummary } from "@/hooks/useChats";
 
@@ -129,6 +129,45 @@ function FormDraftCard({
   );
 }
 
+function VacancyMeta({ meta }: { meta?: ChatSummary }) {
+  if (!meta || (!meta.vacancy_name && !meta.employer_name)) return null;
+  const href = meta.vacancy_id ? `https://hh.ru/vacancy/${meta.vacancy_id}` : null;
+  return (
+    <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
+      {meta.vacancy_name && (
+        href ? (
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            style={{ fontWeight: 600, overflowWrap: "anywhere", color: "var(--ink)", textDecoration: "none" }}
+          >
+            {meta.vacancy_name}
+          </a>
+        ) : (
+          <div style={{ fontWeight: 600, overflowWrap: "anywhere" }}>{meta.vacancy_name}</div>
+        )
+      )}
+      {meta.employer_name && (
+        href ? (
+          <a
+            href={href}
+            target="_blank"
+            rel="noreferrer"
+            style={{ fontSize: 13, color: "var(--muted)", overflowWrap: "anywhere", textDecoration: "none" }}
+          >
+            {meta.employer_name}
+          </a>
+        ) : (
+          <div style={{ fontSize: 13, color: "var(--muted)", overflowWrap: "anywhere" }}>
+            {meta.employer_name}
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
 function ChatHistory({ negotiationId, vacancyId }: { negotiationId: string; vacancyId: string | null }) {
   const { messages, loading, error } = useChatMessages(negotiationId, vacancyId);
 
@@ -198,18 +237,7 @@ function DraftCard({
   const [buf, setBuf] = useState(draft.draft_text);
   return (
     <Card style={{ display: "grid", gap: 10, gridTemplateColumns: "minmax(0, 1fr)" }}>
-      {(meta?.vacancy_name || meta?.employer_name) && (
-        <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
-          {meta.vacancy_name && (
-            <div style={{ fontWeight: 600, overflowWrap: "anywhere" }}>{meta.vacancy_name}</div>
-          )}
-          {meta.employer_name && (
-            <div style={{ fontSize: 13, color: "var(--muted)", overflowWrap: "anywhere" }}>
-              {meta.employer_name}
-            </div>
-          )}
-        </div>
-      )}
+      <VacancyMeta meta={meta} />
       <ChatHistory negotiationId={draft.negotiation_id} vacancyId={meta?.vacancy_id ?? null} />
       {draft.question_text && (
         <div
@@ -413,9 +441,16 @@ function TasksSection({
   todos,
   resolveTodo,
 }: {
-  todos: { id: string; title: string; detail: string | null; link: string | null }[];
+  todos: Todo[];
   resolveTodo: (id: string, action: "done" | "dismiss") => void;
 }) {
+  const { chats } = useChats(false);
+  const metaById = useMemo(() => {
+    const map = new Map<string, ChatSummary>();
+    for (const c of chats ?? []) map.set(c.id, c);
+    return map;
+  }, [chats]);
+
   return (
     <div style={{ display: "grid", gap: 12, minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}>
       {todos.length === 0 && (
@@ -423,6 +458,7 @@ function TasksSection({
       )}
       {todos.map((t) => (
         <Card key={t.id} style={{ display: "grid", gap: 6, gridTemplateColumns: "minmax(0, 1fr)" }}>
+          <VacancyMeta meta={metaById.get(t.negotiation_id)} />
           <div style={{ fontWeight: 600, overflowWrap: "anywhere" }}>{t.title}</div>
           {t.detail && <div style={{ fontSize: 14, overflowWrap: "anywhere" }}>{t.detail}</div>}
           {t.link && (
