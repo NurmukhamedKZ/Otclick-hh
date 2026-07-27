@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **`backend/`** — FastAPI service (active build) + standalone worker (`worker_main.py`)
 - **`frontend/`** — Next.js 16 + React 19 + Tailwind v4 (Supabase SSR auth)
 - **`hh-applicant-tool/`** — existing Python CLI tool (source to copy from, not modify)
-- **`AUDIT.md`** — production-readiness audit: what's fixed, what's still open (billing `TestMode`/amount checks, real CloudPayments subscription cancel). Read it before shipping anything near billing or the worker.
+- **`AUDIT.md`** — production-readiness audit: what's fixed, what's still open (older items; the CloudPayments amount-check and manual-cancel entries are obsolete — billing is Polar now). Read it before shipping anything near billing or the worker.
 
 Open-source implications for this file:
 - README.md is now the canonical **public** entrypoint (setup, features, roadmap, contributing) — keep this CLAUDE.md focused on internal architecture/dev guidance, don't duplicate README content, update both when a change affects both audiences.
@@ -100,9 +100,12 @@ OPENAI_MODEL=gpt-5.4-nano
 # cron endpoints (shared secret for /internal/cron/*: refresh-tokens, prune-notifications)
 INTERNAL_CRON_TOKEN=
 
-# CloudPayments billing
-CLOUDPAYMENTS_PUBLIC_ID=
-CLOUDPAYMENTS_API_SECRET=   # HMAC key for webhook verification — never exposed
+# Polar.sh billing (merchant of record). Prices/intervals live in Polar products.
+POLAR_ACCESS_TOKEN=
+POLAR_WEBHOOK_SECRET=       # Standard Webhooks secret — never exposed
+POLAR_SERVER=sandbox        # sandbox | production
+POLAR_PRODUCT_SPRINT=       # product ids differ per Polar organisation
+POLAR_PRODUCT_MONTH=
 ```
 
 All non-secret config (rate limits, plan price, prompts, `REFRESH_THRESHOLD_DAYS`) has defaults in `config.py`.
@@ -119,14 +122,14 @@ api/
   filters.py                 — /api/filters/* (CRUD + vacancy preview)
   blacklist.py               — /api/blacklist/* (employer blacklist CRUD)
   captcha.py                 — /api/captcha/* (pending list, solve, dismiss)
-  worker.py                  — /api/worker/* (start/stop apply loop, agent/start + agent/stop, status; plan-gated)
+  worker.py                  — /api/worker/* (start/stop apply loop — free too, agent/start + agent/stop — paid, status)
   qa.py                      — /api/qa (list/upsert/delete user-curated Q&A memory)
   forms.py                   — /api/forms/drafts (list, approve→post to hh, discard)
   chats.py                   — /api/chats (list negotiations, get messages, send message)
   recruiter.py               — /api/recruiter (escalation drafts send/discard, todos done/dismiss)
   analytics.py               — /api/analytics?days= (syncs hh negotiation states, then one RPC)
-  billing.py                 — /api/billing/* (subscribe params, status, cancel)
-  webhooks.py                — /api/webhooks/cloudpayments (HMAC-auth, no JWT)
+  billing.py                 — /api/billing/* (subscribe→Polar checkout URL, portal, status)
+  webhooks.py                — /api/webhooks/polar (Standard Webhooks signature, no JWT)
   internal.py                — /internal/cron/* (X-Internal-Token via hmac.compare_digest, no JWT) → refresh-tokens, prune-notifications
   _debug.py                  — debug-only routes, mounted iff DEBUG_ENDPOINTS
   router.py                  — aggregates all routers
@@ -161,8 +164,8 @@ services/
   form_drafts.py             — form-draft persistence + approval; approve() re-fetches xsrf, posts to hh
   cover_letter.py            — cover letter gen with PG cache + rand_text fallback
   blacklist.py               — employer blacklist CRUD + bulk auto-blacklist
-  billing.py                 — CloudPayments HMAC verify, idempotent payment, plan activate
-  plan.py                    — has_access / check_access + filter_accessible (drops users w/o plan)
+  billing.py                 — Polar checkout/portal + webhook verify, idempotent order, plan state
+  plan.py                    — limits_for/get_limits (free vs paid caps) + has_access/filter_paid (paid-only features)
   captcha.py                 — captcha_requests create/solve/dismiss helpers
   recruiter.py               — recruiter-chat persistence + new_employer_message cursor; shared by tools/poller/API
   chatik.py                  — chatik.hh.ru web API client (recent_chats/chat_messages/fetch_messages); real source of truth for chats — legacy negotiations API is frozen. Reads over stored web session (same cookies as form_filler), no browser
@@ -212,9 +215,9 @@ Negotiation states (used only for the «Отказ» tag) are cached per user fo
 
 **Analytics funnel**: `GET /api/analytics?days=` → `negotiation_sync.sync_states` (paged `GET /negotiations`, `order_by=updated_at`, writes only actual state changes so `hh_state_at` really means "when it changed"; throttled to 5 min per user, never raises) → `analytics.summary` → `analytics_summary()` in PG. Funnel: AI-checked → AI-kept → sent → viewed (`hh_viewed`) → replied (`hh_state` moved OR a `recruiter_chats` row saw an employer message) → invited (`hh_state='invitation'`). "Sent" counts only `sent`/`form_sent` rows — `form_required`/`failed`/`captcha` never reached hh and land in the failures breakdown instead. Rates are `null` when the denominator is 0; the UI prints "—", never a fake 0%. Attribution comes from `applications.filter_id` (passed `producer → ApplyJob → apply_one`) and `employer_name`, both set on new rows only — historical rows show up as "без фильтра".
 
-**Plan gating**: `plan.has_access` — `trial` until `trial_ends`, `active`/`cancelled` until `plan_expires_at`, else no access. Gates worker start (`/api/worker`) and `worker_main`.
+**Plan → limits (no trial, migration 026)**: gating is not a gate anymore, it's "which caps apply". `plan.limits_for(profile)` → `{mode, daily, total}`: `active`/`cancelled` inside `plan_expires_at` → `auto` + `PAID_DAILY_APPLIES`/day; everything else (`free`, expired paid) → `manual` + a lifetime `FREE_TOTAL_APPLIES`. `BILLING_ENABLED=False` (self-host default) short-circuits to unlimited+auto and never reads the plan — without it a self-hoster is capped at 30 applies inside their own instance. The free total is counted straight off `applications` where `status in ('sent','form_sent')` (no counter column; `form_required`/`failed`/`captcha` never reached hh and must not burn quota) and surfaces as `limiter.check` → `"limit_total"`. `has_access` survives only as "is this a paying customer" — billing status and `require_active_plan`, which now gates just the recruiter agent, not worker start. In `manual` mode the runner does **one** producer pass, drains the queue, then clears `worker_enabled` and stops (`_finish_batch`, state `idle`) — the flag must be cleared first or `worker_main` respawns it every 15 s and "one batch" becomes the old infinite loop. `limit_total` stops the runner the same way. `worker_main` gates only the agent loop on `plan.filter_paid`; the apply loop runs for free users too.
 
-**Billing**: CloudPayments widget (params from `billing.subscribe_params`) → card charge → server-to-server POST to `/api/webhooks/cloudpayments`. Webhook verifies `Content-HMAC` (HMAC-SHA256 over raw body), records payment idempotently (`TransactionId` → `payments.provider_payment_id` UNIQUE), activates plan only on a genuinely new row. Always answers CP `{"code": 0}` once HMAC valid so it stops retrying.
+**Billing (Polar.sh, merchant of record)**: `/api/billing/subscribe` → `billing.polar_checkout_url` creates a hosted Checkout Session with `external_customer_id = user_id` → the frontend redirects there. Polar charges the card and POSTs to `/api/webhooks/polar`, verified by the SDK's `validate_event` (Standard Webhooks — never hand-rolled HMAC; note it base64-encodes the secret internally). Events handled: `order.paid` (records the payment idempotently — Polar order id → `payments.provider_payment_id` UNIQUE — then activates), `subscription.active`/`uncanceled` (activate), `subscription.canceled` (plan `cancelled`, paid period kept), `subscription.revoked` (back to `free`, **not** to a locked account). The access window is the subscription's `current_period_end`, taken from the provider — the old code guessed it from the charged amount and could not tell two same-priced plans apart. The user is matched by `customer.external_id`. In SDK models the event type field is `TYPE` (alias `type`), so `process_polar_event` reads both. The endpoint always answers 200 once the signature is valid, or Polar retries forever. Cancellation is the Polar **customer portal** (`/api/billing/portal`), which closes the old "real cancel is manual via support" debt.
 
 **Cron endpoints** (`/internal/cron/*`, guarded by `X-Internal-Token` compared with `hmac.compare_digest`, no JWT — trigger from system cron):
 - `refresh-tokens` → `token_refresh.refresh_due`, refreshes only creds expiring within `REFRESH_THRESHOLD_DAYS` (hh refresh tokens are single-use and only usable after the access token expires).
@@ -250,7 +253,7 @@ Env: `frontend/.env.local` (see `.env.local.example`) — `NEXT_PUBLIC_API_URL=h
 
 Migrations live in `infra/supabase/migrations/` (numbered SQL files, `001`–`025`). Applied by the `migrate` service against the local stack, tracked in `public.schema_migrations` — see Commands.
 
-- `profiles` — user profiles + plan state (`plan`, `trial_ends`, `plan_expires_at`, `cp_subscription_id`), `worker_enabled` / `agent_enabled`, `onboarded`, `timezone`, `negotiations_synced_at`. **`authenticated` may UPDATE only `onboarded` and `timezone`** (migration 024) — every billing/worker field is service_role-only, since PostgREST is exposed to the browser through Kong
+- `profiles` — user profiles + plan state (`plan`, `trial_ends`, `plan_expires_at`, `polar_customer_id`/`polar_subscription_id`, legacy `cp_subscription_id`), `worker_enabled` / `agent_enabled`, `onboarded`, `timezone`, `negotiations_synced_at`. **`authenticated` may UPDATE only `onboarded` and `timezone`** (migration 024) — every billing/worker field is service_role-only, since PostgREST is exposed to the browser through Kong
 - `hh_credentials` — encrypted hh tokens + `web_cookies_encrypted` per user (full RLS denial, service_role only)
 - `resumes` — user resume list synced from hh, unique on `(user_id, hh_resume_id)`; `professional_roles int[]` seeds a new filter's search (migration 019)
 - `filters` — saved vacancy search filters per user (`name`, `ai_filter_enabled`); `resume_id` is `ON DELETE SET NULL` (migration 021 — CASCADE used to wipe filters on reconnect)
@@ -259,7 +262,7 @@ Migrations live in `infra/supabase/migrations/` (numbered SQL files, `001`–`02
 - `apply_counters` — per-user daily/hourly apply tallies (limiter)
 - `cover_letters_cache` — generated cover letters keyed on `(vacancy_id, resume_id)`
 - `vacancy_cache` — cached hh vacancy payloads
-- `payments` — CloudPayments transactions, unique on `provider_payment_id`
+- `payments` — payment transactions (`provider='polar'`), unique on `provider_payment_id` (= Polar order id)
 - `notifications` — worker→UI events (read via Realtime)
 - `captcha_requests` — pending captcha challenges raised by worker
 - `form_drafts` — AI-filled test answers awaiting user approval (service_role only)

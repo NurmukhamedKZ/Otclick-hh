@@ -1,23 +1,36 @@
-"""Plan gating: does a user's plan currently grant worker access?
+"""Plan → limits. Not a gate anymore: everyone works, the question is how much.
 
-Access windows by plan:
-- ``trial``     — until ``trial_ends`` (set on signup, see migration 007)
-- ``active``    — until ``plan_expires_at`` (set by the paid webhook)
-- ``cancelled`` — kept until ``plan_expires_at`` (period already paid; billing.cancel
-                  only flips local state, real CP stop is manual — see day 19)
+There is no trial (migration 026). A profile is either paid or free:
 
-Anything else (or a missing/expired window) = no access. Worker start and the
-standalone worker_main both gate on this.
+- ``active`` / ``cancelled`` inside ``plan_expires_at`` — autonomous mode, daily cap
+- everything else (``free``, expired paid, unknown) — manual mode, lifetime cap
+
+``BILLING_ENABLED=False`` (self-host default) short-circuits all of it: unlimited
+and autonomous, plan column never read.
+
+``has_access`` survives as "is this a paying customer right now" — billing status
+and the genuinely paid features (recruiter agent) still ask it. It no longer
+decides whether the apply worker may run at all.
 """
 
 from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from typing import Literal, TypedDict
 
+from app.config import settings
 from app.db.supabase import service_client
 
 _SELECT = "plan,trial_ends,plan_expires_at"
+
+Mode = Literal["manual", "auto"]
+
+
+class Limits(TypedDict):
+    mode: Mode
+    daily: int | None
+    total: int | None
 
 
 def _parse_ts(raw) -> datetime | None:
@@ -33,40 +46,61 @@ def _parse_ts(raw) -> datetime | None:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def has_access(profile: dict) -> bool:
-    """True if this profile's plan grants worker access right now."""
-    now = datetime.now(timezone.utc)
-    plan = (profile.get("plan") or "trial").strip()
+def is_paid(profile: dict) -> bool:
+    """True if this profile is inside a paid window right now."""
+    plan = (profile.get("plan") or "free").strip()
+    if plan not in ("active", "cancelled"):
+        return False
+    exp = _parse_ts(profile.get("plan_expires_at"))
+    return exp is not None and exp > datetime.now(timezone.utc)
 
-    if plan == "trial":
-        ends = _parse_ts(profile.get("trial_ends"))
-        return ends is not None and ends > now
-    if plan in ("active", "cancelled"):
-        exp = _parse_ts(profile.get("plan_expires_at"))
-        return exp is not None and exp > now
-    return False
+
+def has_access(profile: dict) -> bool:
+    """Paid access. False for free users — they are not blocked, just limited."""
+    if not settings.BILLING_ENABLED:
+        return True
+    return is_paid(profile)
+
+
+def limits_for(profile: dict) -> Limits:
+    """What this profile may do right now. The single source of limit truth."""
+    if not settings.BILLING_ENABLED:
+        return {"mode": "auto", "daily": None, "total": None}
+    if is_paid(profile):
+        return {"mode": "auto", "daily": settings.PAID_DAILY_APPLIES, "total": None}
+    return {"mode": "manual", "daily": None, "total": settings.FREE_TOTAL_APPLIES}
+
+
+def _fetch_profile(user_id: str) -> dict:
+    res = (
+        service_client.table("profiles")
+        .select(_SELECT)
+        .eq("id", user_id)
+        .maybe_single()
+        .execute()
+    )
+    return (res.data if res else None) or {}
 
 
 async def check_access(user_id: str) -> bool:
     loop = asyncio.get_running_loop()
-
-    def _q():
-        return (
-            service_client.table("profiles")
-            .select(_SELECT)
-            .eq("id", user_id)
-            .single()
-            .execute()
-        )
-
-    res = await loop.run_in_executor(None, _q)
-    return has_access(res.data or {})
+    profile = await loop.run_in_executor(None, _fetch_profile, user_id)
+    return has_access(profile)
 
 
-def filter_accessible(user_ids: list[str]) -> list[str]:
-    """Sync — keep only user_ids whose plan grants access (for worker_main)."""
+async def get_limits(user_id: str) -> Limits:
+    loop = asyncio.get_running_loop()
+    profile = await loop.run_in_executor(None, _fetch_profile, user_id)
+    return limits_for(profile)
+
+
+def filter_paid(user_ids: list[str]) -> list[str]:
+    """Sync — keep only user_ids with paid access (worker_main gates the
+    recruiter agent on this; the apply loop runs for free users too)."""
     if not user_ids:
         return []
+    if not settings.BILLING_ENABLED:
+        return list(user_ids)
     res = (
         service_client.table("profiles")
         .select(f"id,{_SELECT}")
@@ -74,4 +108,4 @@ def filter_accessible(user_ids: list[str]) -> list[str]:
         .execute()
     )
     by_id = {r["id"]: r for r in (res.data or [])}
-    return [uid for uid in user_ids if has_access(by_id.get(uid, {}))]
+    return [uid for uid in user_ids if is_paid(by_id.get(uid, {}))]

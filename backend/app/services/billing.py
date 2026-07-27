@@ -1,132 +1,237 @@
-"""CloudPayments billing: webhook HMAC verify + idempotent payment + plan activate.
+"""Polar.sh billing: hosted checkout + webhook-driven plan state.
 
-Flow: frontend opens the CP widget with params from ``subscribe_params`` (recurrent
-flag set). CP charges the card and POSTs a server-to-server notification to
-``/api/webhooks/cloudpayments``. We verify the ``Content-HMAC`` header (HMAC-SHA256
-over the raw body, base64), then record the payment idempotently (TransactionId →
-payments.provider_payment_id UNIQUE) and, on a genuinely new payment, flip the
-user's plan to paid. A duplicate webhook hits the UNIQUE conflict and activates
-nothing twice.
+Flow: the frontend asks ``/api/billing/subscribe`` for a checkout URL and sends the
+user there. Polar (merchant of record) collects the money and POSTs events to
+``/api/webhooks/polar``. Signatures follow the Standard Webhooks spec and are
+verified by the SDK's ``validate_event`` — never by hand-rolled HMAC.
+
+The user is matched by ``external_customer_id = user_id``, set when the checkout is
+created and echoed back as ``customer.external_id`` on every event.
+
+Access window comes from the subscription's ``current_period_end`` — the provider
+knows when the period ends; guessing it from the charged amount (as the
+CloudPayments code did) could not even tell two same-priced plans apart.
 """
 
 from __future__ import annotations
 
 import asyncio
-import base64
-import hashlib
-import hmac
 import logging
-import uuid
 from datetime import datetime, timedelta, timezone
+
+from polar_sdk import Polar
+from polar_sdk.webhooks import (
+    WebhookVerificationError,
+    validate_event,
+)
 
 from app.config import DEFAULT_PLAN_ID, PLANS, settings
 from app.db.supabase import service_client
+from app.schemas.billing import BillingStatusResponse, PaymentEntry, SubscribeResponse
 from app.services import plan as plan_service
-from app.schemas.billing import (
-    BillingStatusResponse,
-    PaymentEntry,
-    SubscribeResponse,
-)
 
 logger = logging.getLogger(__name__)
 
-
-def verify_hmac(raw_body: bytes, header_hmac: str | None) -> bool:
-    """Constant-time check of CloudPayments' Content-HMAC over the raw body."""
-    secret = settings.CLOUDPAYMENTS_API_SECRET
-    if not secret or not header_hmac:
-        return False
-    digest = hmac.new(secret.encode(), raw_body, hashlib.sha256).digest()
-    expected = base64.b64encode(digest).decode()
-    return hmac.compare_digest(expected, header_hmac)
+# Fallback access window for a one-off order that carries no subscription.
+# Subscriptions always bring their own current_period_end.
+FALLBACK_PERIOD_DAYS = 30
 
 
-def subscribe_params(user_id: str, plan_id: str | None = None) -> SubscribeResponse:
+class BillingNotConfigured(RuntimeError):
+    """POLAR_ACCESS_TOKEN / product id missing — checkout cannot be created."""
+
+
+def _client() -> Polar:
+    if not settings.POLAR_ACCESS_TOKEN:
+        raise BillingNotConfigured("POLAR_ACCESS_TOKEN is not set")
+    return Polar(access_token=settings.POLAR_ACCESS_TOKEN, server=settings.POLAR_SERVER)
+
+
+def product_id_for(plan_id: str) -> str:
+    """POLAR_PRODUCT_<PLAN> from env — sandbox and prod products differ."""
+    return getattr(settings, f"POLAR_PRODUCT_{plan_id.upper()}", "") or ""
+
+
+def _checkout_sync(user_id: str, plan_id: str) -> str:
+    product_id = product_id_for(plan_id)
+    if not product_id:
+        raise BillingNotConfigured(f"POLAR_PRODUCT_{plan_id.upper()} is not set")
+    with _client() as polar:
+        checkout = polar.checkouts.create(
+            request={
+                "products": [product_id],
+                "external_customer_id": user_id,
+                "success_url": settings.POLAR_SUCCESS_URL,
+                "metadata": {"user_id": user_id, "plan_id": plan_id},
+            }
+        )
+    return checkout.url
+
+
+async def polar_checkout_url(user_id: str, plan_id: str | None = None) -> SubscribeResponse:
     plan = PLANS.get(plan_id or "") or PLANS[DEFAULT_PLAN_ID]
-    invoice_id = uuid.uuid4().hex
-    return SubscribeResponse(
-        public_id=settings.CLOUDPAYMENTS_PUBLIC_ID,
-        amount=plan["price"],
-        currency=settings.PLAN_CURRENCY,
-        description=plan["name"],
-        account_id=user_id,
-        invoice_id=invoice_id,
-        interval=plan["interval"],
-        period=plan["period"],
+    loop = asyncio.get_running_loop()
+    url = await loop.run_in_executor(None, _checkout_sync, user_id, plan["id"])
+    return SubscribeResponse(checkout_url=url)
+
+
+def _portal_sync(user_id: str) -> str:
+    with _client() as polar:
+        session = polar.customer_sessions.create(
+            request={"external_customer_id": user_id}
+        )
+    return session.customer_portal_url
+
+
+async def customer_portal_url(user_id: str) -> str:
+    """Where the user manages/cancels the subscription — Polar's own portal.
+
+    Replaces the old local-only `cancel`, which flipped a column and left the
+    real recurring charge to be stopped by hand via support.
+    """
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _portal_sync, user_id)
+
+
+# ─── webhooks ────────────────────────────────────────────────
+
+def verify_polar_webhook(raw_body: bytes, headers: dict[str, str]):
+    """Standard Webhooks signature check. Raises WebhookVerificationError."""
+    if not settings.POLAR_WEBHOOK_SECRET:
+        raise WebhookVerificationError("POLAR_WEBHOOK_SECRET is not set")
+    return validate_event(
+        body=raw_body, headers=headers, secret=settings.POLAR_WEBHOOK_SECRET
     )
 
 
-def _plan_for_amount(amount: int | None) -> dict | None:
-    """Match a charged Amount back to a plan (no plan id in CP webhooks)."""
-    return next((p for p in PLANS.values() if p["price"] == amount), None)
+def _parse_ts(raw) -> datetime | None:
+    if not raw:
+        return None
+    if isinstance(raw, datetime):
+        return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def _period_end(now: datetime, amount: int | None) -> datetime:
-    """End of the paid period, from the charged Amount. Unknown → default plan."""
-    plan = _plan_for_amount(amount) or PLANS[DEFAULT_PLAN_ID]
-    return now + timedelta(days=plan["period_days"])
+def _user_id_of(obj) -> str | None:
+    """external_customer_id we set at checkout, echoed as customer.external_id."""
+    customer = getattr(obj, "customer", None)
+    external = getattr(customer, "external_id", None)
+    if external:
+        return str(external)
+    metadata = getattr(obj, "metadata", None) or {}
+    value = metadata.get("user_id") if isinstance(metadata, dict) else None
+    return str(value) if value else None
 
 
-def process_payment(fields: dict[str, str]) -> dict:
-    """Handle a CloudPayments Pay/Recurrent notification (sync, runs in executor).
+def process_polar_event(event) -> dict:
+    """Apply one verified Polar event (sync, runs in an executor).
 
-    ``fields`` is the parsed form body. Idempotent on TransactionId. Returns a
-    summary dict; the webhook endpoint always answers CP with {"code": 0} once the
-    HMAC is valid, regardless of duplicate/unknown-user, so CP stops retrying.
+    Idempotent on order id. Unknown event types are ignored on purpose — the
+    endpoint still answers 200 so Polar stops retrying.
     """
-    transaction_id = str(fields.get("TransactionId") or fields.get("Id") or "").strip()
-    user_id = (fields.get("AccountId") or "").strip()
-    if not transaction_id or not user_id:
-        logger.warning("cp webhook missing TransactionId/AccountId: %s", fields)
+    event_type = getattr(event, "type", None) or getattr(event, "TYPE", None)
+    data = getattr(event, "data", None)
+    if data is None:
+        return {"status": "ignored", "reason": "no_data"}
+
+    if event_type == "order.paid":
+        return _handle_order_paid(data)
+    if event_type in ("subscription.active", "subscription.uncanceled"):
+        return _handle_subscription_active(data)
+    if event_type == "subscription.canceled":
+        return _handle_subscription_state(data, "cancelled")
+    if event_type == "subscription.revoked":
+        return _handle_subscription_revoked(data)
+
+    logger.info("polar webhook ignored type=%s", event_type)
+    return {"status": "ignored", "reason": "unhandled_type", "type": event_type}
+
+
+def _handle_order_paid(order) -> dict:
+    user_id = _user_id_of(order)
+    order_id = str(getattr(order, "id", "") or "")
+    if not user_id or not order_id:
+        logger.warning("polar order.paid without user/order id: %s", order_id)
         return {"status": "ignored", "reason": "missing_ids"}
 
-    amount = _parse_amount(fields.get("Amount"))
-    subscription_id = (fields.get("SubscriptionId") or "").strip() or None
-    now = datetime.now(timezone.utc)
-    expires_at = _period_end(now, amount)
+    subscription = getattr(order, "subscription", None)
+    expires_at = _parse_ts(getattr(subscription, "current_period_end", None)) or (
+        datetime.now(timezone.utc) + timedelta(days=FALLBACK_PERIOD_DAYS)
+    )
+    subscription_id = str(getattr(order, "subscription_id", "") or "") or None
 
     row = {
         "user_id": user_id,
-        "provider_payment_id": transaction_id,
-        "amount": amount,
-        "provider": "cloudpayments",
+        "provider_payment_id": order_id,
+        "amount": getattr(order, "total_amount", None),
+        "provider": "polar",
         "status": "completed",
         "subscription_id": subscription_id,
         "expires_at": expires_at.isoformat(),
     }
-    # ignore_duplicates → data is non-empty only when this row was newly inserted.
+    # ignore_duplicates → data is non-empty only for a genuinely new row, so a
+    # redelivered webhook never activates a plan twice.
     res = (
         service_client.table("payments")
         .upsert(row, on_conflict="provider_payment_id", ignore_duplicates=True)
         .execute()
     )
     if not res.data:
-        logger.info("cp webhook duplicate, skipping activation: tx=%s", transaction_id)
-        return {"status": "duplicate", "transaction_id": transaction_id}
+        logger.info("polar webhook duplicate, skipping activation: order=%s", order_id)
+        return {"status": "duplicate", "order_id": order_id}
 
     _activate_plan(user_id, expires_at, subscription_id)
-    logger.info("cp payment activated plan for user=%s tx=%s", user_id, transaction_id)
-    return {"status": "activated", "user_id": user_id, "transaction_id": transaction_id}
+    logger.info("polar order.paid activated plan user=%s order=%s", user_id, order_id)
+    return {"status": "activated", "user_id": user_id, "order_id": order_id}
 
 
-def _parse_amount(raw: str | None) -> int | None:
-    if raw is None:
-        return None
-    try:
-        return int(round(float(raw)))
-    except (TypeError, ValueError):
-        return None
+def _handle_subscription_active(subscription) -> dict:
+    user_id = _user_id_of(subscription)
+    if not user_id:
+        return {"status": "ignored", "reason": "missing_user"}
+    expires_at = _parse_ts(getattr(subscription, "current_period_end", None))
+    if expires_at is None:
+        return {"status": "ignored", "reason": "no_period_end"}
+    _activate_plan(user_id, expires_at, str(getattr(subscription, "id", "") or "") or None)
+    return {"status": "activated", "user_id": user_id}
+
+
+def _handle_subscription_state(subscription, new_plan: str) -> dict:
+    """Cancelled: no more charges, but the paid period is already bought."""
+    user_id = _user_id_of(subscription)
+    if not user_id:
+        return {"status": "ignored", "reason": "missing_user"}
+    service_client.table("profiles").update({"plan": new_plan}).eq(
+        "id", user_id
+    ).execute()
+    logger.info("polar subscription → %s for user=%s", new_plan, user_id)
+    return {"status": new_plan, "user_id": user_id}
+
+
+def _handle_subscription_revoked(subscription) -> dict:
+    """Access is over — back to the free tier, not to a locked account."""
+    user_id = _user_id_of(subscription)
+    if not user_id:
+        return {"status": "ignored", "reason": "missing_user"}
+    service_client.table("profiles").update(
+        {"plan": "free", "plan_expires_at": None}
+    ).eq("id", user_id).execute()
+    logger.info("polar subscription revoked → free for user=%s", user_id)
+    return {"status": "free", "user_id": user_id}
 
 
 def _activate_plan(user_id: str, expires_at: datetime, subscription_id: str | None) -> None:
-    update = {
-        "plan": "active",
-        "plan_expires_at": expires_at.isoformat(),
-    }
+    update = {"plan": "active", "plan_expires_at": expires_at.isoformat()}
     if subscription_id:
-        update["cp_subscription_id"] = subscription_id
+        update["polar_subscription_id"] = subscription_id
     service_client.table("profiles").update(update).eq("id", user_id).execute()
 
+
+# ─── status ──────────────────────────────────────────────────
 
 async def get_status(user_id: str) -> BillingStatusResponse:
     loop = asyncio.get_running_loop()
@@ -157,32 +262,10 @@ async def get_status(user_id: str) -> BillingStatusResponse:
     prof = prof_res.data or {}
     plan_expires = prof.get("plan_expires_at")
     return BillingStatusResponse(
-        plan=prof.get("plan") or "trial",
+        plan=prof.get("plan") or "free",
         trial_ends=prof.get("trial_ends"),
         plan_expires_at=plan_expires,
-        # Widget-recurrent: next charge ≈ end of current paid period.
         next_charge_at=plan_expires if (prof.get("plan") == "active") else None,
         has_access=plan_service.has_access(prof),
         history=[PaymentEntry(**p) for p in (pay_res.data or [])],
     )
-
-
-async def cancel(user_id: str) -> dict:
-    """Mark the plan cancelled locally. Access stays until plan_expires_at.
-
-    MVP: actual CloudPayments subscription stop is handled manually via support
-    (Subscriptions REST API not wired — see MVP_PLAN day 19). We only flip local
-    state so the user stops being billed at the app level after period end."""
-    loop = asyncio.get_running_loop()
-
-    def _update():
-        return (
-            service_client.table("profiles")
-            .update({"plan": "cancelled"})
-            .eq("id", user_id)
-            .execute()
-        )
-
-    await loop.run_in_executor(None, _update)
-    logger.info("plan cancelled (local) for user=%s", user_id)
-    return {"status": "cancelled"}

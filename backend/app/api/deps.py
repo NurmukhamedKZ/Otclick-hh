@@ -67,10 +67,13 @@ async def get_current_user(
 
 
 async def require_active_plan(user_id: str = Depends(get_current_user)) -> str:
-    """Gate paid features: 402 if trial expired and no active subscription."""
+    """Gate genuinely paid features: 402 without an active subscription.
+
+    NOT the apply worker — free users run it too, capped by plan.limits_for.
+    """
     if not await plan_service.check_access(user_id):
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail="plan_inactive: trial expired or no active subscription",
+            detail="plan_inactive: no active subscription",
         )
     return user_id

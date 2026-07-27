@@ -61,6 +61,11 @@ async def _status(runtime_row: dict | None) -> object:
             worker_api.worker_control, "is_agent_enabled", AsyncMock(return_value=False)
         ),
         patch("app.services.worker_runtime.get", AsyncMock(return_value=runtime_row)),
+        patch(
+            "app.services.plan.get_limits",
+            AsyncMock(return_value={"mode": "auto", "daily": 100, "total": None}),
+        ),
+        patch("app.worker.limiter.sent_total", return_value=12),
         patch("app.worker.limiter._read_day_count", return_value=3),
         patch("app.worker.limiter._tz_for_user", return_value=SimpleNamespace()),
         patch("app.worker.limiter._today_local", return_value="2026-07-27"),

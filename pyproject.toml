@@ -17,6 +17,7 @@ dependencies = [
     "langchain>=1.3.2",
     "langchain-openai>=1.2.2",
     "langsmith>=0.8.5",
+    "polar-sdk>=0.24.0",
 ]
 
 [dependency-groups]

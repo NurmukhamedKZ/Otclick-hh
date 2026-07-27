@@ -6,19 +6,15 @@ from pydantic import BaseModel
 
 
 class SubscribeResponse(BaseModel):
-    """Config the frontend passes to the CloudPayments JS widget.
+    """Hosted Polar checkout — the frontend just redirects here."""
 
-    publicId is safe to expose; the widget tokenizes the card client-side and the
-    recurrent block tells CloudPayments to charge every period automatically."""
+    checkout_url: str
 
-    public_id: str
-    amount: int
-    currency: str
-    description: str
-    account_id: str  # = user_id, echoed back in webhooks as AccountId
-    invoice_id: str
-    interval: str
-    period: int
+
+class PortalResponse(BaseModel):
+    """Polar customer portal: payment methods, invoices, cancellation."""
+
+    portal_url: str
 
 
 class PaymentEntry(BaseModel):
@@ -33,5 +29,5 @@ class BillingStatusResponse(BaseModel):
     trial_ends: datetime | None = None
     plan_expires_at: datetime | None = None
     next_charge_at: datetime | None = None
-    has_access: bool = False  # plan currently grants worker access (trial/paid window)
+    has_access: bool = False  # inside a paid window right now (false = free tier)
     history: list[PaymentEntry]

@@ -25,6 +25,7 @@ from app.services.hh_credentials import (
     mark_invalid,
     persist_if_refreshed,
 )
+from app.services import plan as plan_service
 from app.services import worker_control
 from app.services.notifications import notify
 from app.services.worker_runtime import heartbeat
@@ -34,7 +35,7 @@ from app.worker.recruiter_poll import poll_recruiter_chats
 
 logger = logging.getLogger(__name__)
 
-State = Literal["running", "paused_captcha", "paused_limit", "stopped"]
+State = Literal["running", "paused_captcha", "paused_limit", "idle", "stopped"]
 
 # Sleep when producer found 0 jobs and we're idle. Backs off exponentially:
 # each empty producer run scans up to MAX_PAGES_PER_FILTER pages *per filter*,
@@ -132,6 +133,27 @@ async def _disable_worker(user_id: str) -> None:
         logger.warning("failed to clear worker_enabled for %s", user_id, exc_info=True)
 
 
+async def _finish_batch(handle: RunnerHandle) -> None:
+    """Ручной режим отработал пачку: погасить флаг и встать.
+
+    Флаг гасим первым — иначе worker_main на следующем цикле увидит
+    worker_enabled=true, поднимет раннер заново, и «один проход» превратится
+    в ту же бесконечную петлю, только с паузой в POLL_INTERVAL_S.
+    """
+    handle.state = "idle"
+    handle.next_run_at = None
+    await worker_control.set_enabled(handle.user_id, False)
+    await heartbeat(
+        handle.user_id,
+        state="idle",
+        queued=0,
+        today_count=handle.today_count,
+        next_run_at=None,
+        last_error=handle.last_error,
+    )
+    logger.info("user %s: manual batch done — stopping", handle.user_id)
+
+
 async def _probe_me(user_id: str) -> str:
     """Probe GET /me to detect whether the hh captcha lifted.
 
@@ -181,7 +203,12 @@ async def _run_loop(handle: RunnerHandle) -> None:
     queue = get_user_queue(user_id)
     rng = random.Random()
     idle_sleep = IDLE_REFILL_SLEEP_S
-    logger.info("runner: user=%s loop START", user_id)
+    # Free tier runs one batch by hand and stops; paid loops forever. Read once —
+    # a plan change mid-batch takes effect on the next start, which is fine.
+    limits = await plan_service.get_limits(user_id)
+    manual = limits["mode"] == "manual"
+    produced_once = False
+    logger.info("runner: user=%s loop START (mode=%s)", user_id, limits["mode"])
 
     async def _hb() -> None:
         await heartbeat(
@@ -247,6 +274,18 @@ async def _run_loop(handle: RunnerHandle) -> None:
 
         # Limits.
         check = await limiter.check(user_id)
+        if check == "limit_total":
+            # Бесплатный тир исчерпан навсегда — спать до полуночи бессмысленно.
+            # Флаг гасим, иначе worker_main поднимает раннер каждые POLL_INTERVAL_S
+            # и уведомление уходит по кругу.
+            handle.state = "stopped"
+            handle.last_error = "free limit reached"
+            handle.next_run_at = None
+            await notify(user_id, "limit_total", {"limit": limits["total"]})
+            await _disable_worker(user_id)
+            await _hb()
+            logger.info("user %s: free total limit reached — stopping", user_id)
+            return
         if check == "limit_day":
             handle.state = "paused_limit"
             handle.last_error = "daily limit"
@@ -266,14 +305,22 @@ async def _run_loop(handle: RunnerHandle) -> None:
             continue
         # Refill queue when empty.
         if queue.empty():
+            if manual and produced_once:
+                # Пачка отработана — в ручном режиме на этом всё.
+                await _finish_batch(handle)
+                return
             try:
                 pushed, skipped_has_test = await produce_jobs(user_id, handle.agent)
             except Exception:
                 logger.exception("producer failed for %s", user_id)
                 pushed, skipped_has_test = 0, 0
+            produced_once = True
             handle.skipped_has_test += skipped_has_test
             await _hb()
             if pushed == 0:
+                if manual:
+                    await _finish_batch(handle)
+                    return
                 handle.next_run_at = datetime.now(timezone.utc) + timedelta(
                     seconds=idle_sleep
                 )

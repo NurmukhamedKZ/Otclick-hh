@@ -37,13 +37,19 @@ class StatusResponse(BaseModel):
     next_run_at: str | None
     last_error: str | None
     skipped_has_test: int = 0
+    # Free tier: manual mode + a lifetime quota instead of a daily one.
+    mode: str = "auto"
+    limit_total: int | None = None
+    total_used: int = 0
 
 
 # The runners live in the standalone worker container, not this process — the
 # dashboard only flips the persisted worker_enabled flag (worker_main reconciles
 # within its poll interval). Status is derived from the flag + DB counters.
+# Бесплатный тир тоже запускается — он ограничен лимитом и ручным режимом
+# (plan.limits_for), а не воротами на входе.
 @router.post("/start", response_model=StartResponse)
-async def start_worker(user_id: str = Depends(require_active_plan)) -> StartResponse:
+async def start_worker(user_id: str = Depends(get_current_user)) -> StartResponse:
     if not await filters_service.has_active_filter(user_id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -79,8 +85,10 @@ async def stop_agent(user_id: str = Depends(get_current_user)) -> AgentStopRespo
 async def worker_status(user_id: str = Depends(get_current_user)) -> StatusResponse:
     import asyncio
 
+    from app.config import settings
+    from app.services import plan as plan_service
     from app.services import worker_runtime
-    from app.worker.limiter import DAILY_LIMIT, _read_day_count, _today_local, _tz_for_user
+    from app.worker.limiter import _read_day_count, _today_local, _tz_for_user, sent_total
 
     loop = asyncio.get_running_loop()
 
@@ -88,11 +96,13 @@ async def worker_status(user_id: str = Depends(get_current_user)) -> StatusRespo
         tz = _tz_for_user(user_id)
         return _read_day_count(user_id, _today_local(tz))
 
-    db_today, enabled, agent_enabled, rt = await asyncio.gather(
+    db_today, enabled, agent_enabled, rt, limits, used_total = await asyncio.gather(
         loop.run_in_executor(None, _today_count_db),
         worker_control.is_enabled(user_id),
         worker_control.is_agent_enabled(user_id),
         worker_runtime.get(user_id),
+        plan_service.get_limits(user_id),
+        loop.run_in_executor(None, sent_total, user_id),
     )
 
     if enabled:
@@ -110,12 +120,20 @@ async def worker_status(user_id: str = Depends(get_current_user)) -> StatusRespo
     next_run_at = (rt or {}).get("next_run_at") if enabled else None
     last_error = (rt or {}).get("last_error") if enabled else None
 
+    # daily_limit — то, что рисуется в кольце прогресса: у платного это дневной
+    # кап, у бесплатного — суммарный (дневного у него нет), при выключенном
+    # биллинге лимита нет вовсе и остаётся ориентир.
+    daily_limit = limits["daily"] or limits["total"] or settings.PAID_DAILY_APPLIES
+
     return StatusResponse(
         state=state,
         agent_state=agent_state,
         today_count=db_today,
-        daily_limit=DAILY_LIMIT,
+        daily_limit=daily_limit,
         queued=queued,
         next_run_at=next_run_at,
         last_error=last_error,
+        mode=limits["mode"],
+        limit_total=limits["total"],
+        total_used=used_total,
     )
