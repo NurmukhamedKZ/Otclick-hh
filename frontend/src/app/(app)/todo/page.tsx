@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Btn, Card, EmptyState, PageHeader, Skeleton } from "@/components/otclick/ui";
+import { Btn, Card, EmptyState, PageHeader, SegmentedTabs, Skeleton } from "@/components/otclick/ui";
 import { ICheck, IDoc, IMail } from "@/components/otclick/icons";
 import { useRecruiter, type Draft } from "@/hooks/useRecruiter";
 import { useFormDrafts, type FormAnswer, type FormDraft } from "@/hooks/useFormDrafts";
+import { useChats, useChatMessages, type ChatSummary } from "@/hooks/useChats";
 
 const SECTIONS = [
   { id: "forms", label: "Анкеты" },
@@ -14,10 +15,6 @@ const SECTIONS = [
 ] as const;
 
 type SectionId = (typeof SECTIONS)[number]["id"];
-
-function isSectionId(v: string): v is SectionId {
-  return SECTIONS.some((s) => s.id === v);
-}
 
 function FormDraftCard({
   draft,
@@ -132,12 +129,67 @@ function FormDraftCard({
   );
 }
 
+function ChatHistory({ negotiationId, vacancyId }: { negotiationId: string; vacancyId: string | null }) {
+  const { messages, loading, error } = useChatMessages(negotiationId, vacancyId);
+
+  if (loading && !messages) return <Skeleton h={16} count={3} />;
+  if (error) return null;
+  if (!messages || messages.length === 0) return null;
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gap: 8,
+        maxHeight: 260,
+        overflowY: "auto",
+        padding: "10px 12px",
+        borderRadius: 10,
+        background: "var(--bg-deep)",
+        border: "1px solid var(--line)",
+      }}
+    >
+      <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase" }}>
+        История переписки
+      </div>
+      {messages.map((m) => (
+        <div
+          key={m.id}
+          style={{
+            justifySelf: m.from_employer ? "start" : "end",
+            maxWidth: "85%",
+            display: "grid",
+            gap: 2,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 13,
+              lineHeight: 1.4,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              padding: "6px 10px",
+              borderRadius: 10,
+              background: m.from_employer ? "var(--surface)" : "var(--ink)",
+              color: m.from_employer ? "var(--ink)" : "#F5F1E6",
+            }}
+          >
+            {m.text}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function DraftCard({
   draft,
+  meta,
   onSend,
   onDiscard,
 }: {
   draft: Draft;
+  meta?: ChatSummary;
   onSend: (id: string, msg: string) => void;
   onDiscard: (id: string) => void;
 }) {
@@ -146,6 +198,19 @@ function DraftCard({
   const [buf, setBuf] = useState(draft.draft_text);
   return (
     <Card style={{ display: "grid", gap: 10, gridTemplateColumns: "minmax(0, 1fr)" }}>
+      {(meta?.vacancy_name || meta?.employer_name) && (
+        <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
+          {meta.vacancy_name && (
+            <div style={{ fontWeight: 600, overflowWrap: "anywhere" }}>{meta.vacancy_name}</div>
+          )}
+          {meta.employer_name && (
+            <div style={{ fontSize: 13, color: "var(--muted)", overflowWrap: "anywhere" }}>
+              {meta.employer_name}
+            </div>
+          )}
+        </div>
+      )}
+      <ChatHistory negotiationId={draft.negotiation_id} vacancyId={meta?.vacancy_id ?? null} />
       {draft.question_text && (
         <div
           style={{
@@ -287,6 +352,109 @@ function DraftCard({
   );
 }
 
+function FormsSection({
+  formDrafts,
+  approveForm,
+  discardForm,
+}: {
+  formDrafts: FormDraft[];
+  approveForm: (id: string, answers: FormAnswer[], letter: string) => void;
+  discardForm: (id: string) => void;
+}) {
+  return (
+    <div style={{ display: "grid", gap: 12, minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}>
+      {formDrafts.length === 0 && (
+        <EmptyState icon={<IDoc size={22} />} title="Анкет нет" description="Когда вакансия попросит пройти тест, ИИ заполнит его и покажет здесь на проверку." />
+      )}
+      {formDrafts.map((f) => (
+        <FormDraftCard key={f.id} draft={f} onApprove={approveForm} onDiscard={discardForm} />
+      ))}
+    </div>
+  );
+}
+
+function DraftsSection({
+  drafts,
+  sendDraft,
+  discardDraft,
+}: {
+  drafts: Draft[];
+  sendDraft: (id: string, msg: string) => void;
+  discardDraft: (id: string) => void;
+}) {
+  // Reuses the /api/chats list (already fetched for the Chats page) purely for
+  // its vacancy_name/employer_name — same data the Анкеты tab already shows.
+  const { chats } = useChats(false);
+  const metaById = useMemo(() => {
+    const map = new Map<string, ChatSummary>();
+    for (const c of chats ?? []) map.set(c.id, c);
+    return map;
+  }, [chats]);
+
+  return (
+    <div style={{ display: "grid", gap: 12, minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}>
+      {drafts.length === 0 && (
+        <EmptyState icon={<IMail size={22} />} title="Черновиков нет" description="Если ИИ не уверен в ответе рекрутёру, черновик появится здесь." action={{ label: "Открыть чаты", href: "/chats" }} />
+      )}
+      {drafts.map((d) => (
+        <DraftCard
+          key={d.id}
+          draft={d}
+          meta={metaById.get(d.negotiation_id)}
+          onSend={sendDraft}
+          onDiscard={discardDraft}
+        />
+      ))}
+    </div>
+  );
+}
+
+function TasksSection({
+  todos,
+  resolveTodo,
+}: {
+  todos: { id: string; title: string; detail: string | null; link: string | null }[];
+  resolveTodo: (id: string, action: "done" | "dismiss") => void;
+}) {
+  return (
+    <div style={{ display: "grid", gap: 12, minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}>
+      {todos.length === 0 && (
+        <EmptyState icon={<ICheck size={22} />} title="Задач нет" description="ИИ-агент создаёт задачи, когда рекрутёр просит что-то сделать вне переписки." />
+      )}
+      {todos.map((t) => (
+        <Card key={t.id} style={{ display: "grid", gap: 6, gridTemplateColumns: "minmax(0, 1fr)" }}>
+          <div style={{ fontWeight: 600, overflowWrap: "anywhere" }}>{t.title}</div>
+          {t.detail && <div style={{ fontSize: 14, overflowWrap: "anywhere" }}>{t.detail}</div>}
+          {t.link && (
+            <a
+              href={t.link}
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                fontSize: 14,
+                color: "var(--coral)",
+                textDecoration: "underline",
+                wordBreak: "break-all",
+                overflowWrap: "anywhere",
+              }}
+            >
+              {t.link}
+            </a>
+          )}
+          <div style={{ display: "flex", gap: 8, paddingTop: 4 }}>
+            <Btn kind="primary" size="sm" onClick={() => resolveTodo(t.id, "done")}>
+              Готово
+            </Btn>
+            <Btn kind="ghost" size="sm" onClick={() => resolveTodo(t.id, "dismiss")}>
+              Скрыть
+            </Btn>
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
 export default function RecruiterPage() {
   const { drafts, todos, loading, error, sendDraft, discardDraft, resolveTodo } = useRecruiter();
   const {
@@ -297,114 +465,38 @@ export default function RecruiterPage() {
     discard: discardForm,
   } = useFormDrafts();
 
+  const [active, setActive] = useState<SectionId>("forms");
+
   const counts: Record<SectionId, number> = {
     forms: formDrafts.length,
     drafts: drafts.length,
     tasks: todos.length,
   };
 
-  const [active, setActive] = useState<SectionId>("forms");
-
-  // also on hashchange, not just on mount: navigating between #anchors — including
-  // via back/forward — stays in the same document and never remounts this component
-  useEffect(() => {
-    function sync() {
-      const hash = window.location.hash.replace("#", "");
-      if (isSectionId(hash)) setActive(hash);
-    }
-    sync();
-    window.addEventListener("hashchange", sync);
-    return () => window.removeEventListener("hashchange", sync);
-  }, []);
-
   return (
     <>
       <PageHeader title="Todo" subtitle="что ждёт твоего решения" crumbs={[{ label: "Главная", href: "/dashboard" }, { label: "Todo" }]} />
-      {/* jump links, not tabs: all three sections stay on screen, so tab/tabpanel
-          semantics would promise a panel switch that never happens */}
-      <nav className="oc-seg" aria-label="Разделы Todo">
-        {SECTIONS.map((s) => (
-          <a
-            key={s.id}
-            href={`#${s.id}`}
-            className="oc-seg__item"
-            aria-current={active === s.id ? "true" : undefined}
-            onClick={() => setActive(s.id)}
-          >
-            {s.label}
-            <span className="oc-seg__count">{counts[s.id]}</span>
-          </a>
-        ))}
-      </nav>
+      <div style={{ padding: "0 16px" }}>
+        <SegmentedTabs
+          label="Разделы Todo"
+          items={SECTIONS.map((s) => ({ id: s.id, label: s.label, count: counts[s.id] }))}
+          value={active}
+          onChange={(id) => setActive(id as SectionId)}
+        />
+      </div>
       {error && <div style={{ color: "var(--err)", padding: 16 }}>{error}</div>}
       {formError && <div style={{ color: "var(--err)", padding: 16 }}>{formError}</div>}
       {loading || formLoading ? (
         <Skeleton h={120} count={3} />
       ) : (
-        <div style={{ display: "grid", gap: 28, padding: 16, gridTemplateColumns: "minmax(0, 1fr)" }}>
-          <section id="forms" style={{ display: "grid", gap: 12, minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}>
-            <h2 style={{ fontSize: 16, fontWeight: 700 }}>
-              Тесты вакансий на аппрув ({formDrafts.length})
-            </h2>
-            {formDrafts.length === 0 && (
-              <EmptyState icon={<IDoc size={22} />} title="Анкет нет" description="Когда вакансия попросит пройти тест, ИИ заполнит его и покажет здесь на проверку." />
-            )}
-            {formDrafts.map((f) => (
-              <FormDraftCard
-                key={f.id}
-                draft={f}
-                onApprove={approveForm}
-                onDiscard={discardForm}
-              />
-            ))}
-          </section>
-
-          <section id="drafts" style={{ display: "grid", gap: 12, minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}>
-            <h2 style={{ fontSize: 16, fontWeight: 700 }}>Черновики ответов ({drafts.length})</h2>
-            {drafts.length === 0 && (
-              <EmptyState icon={<IMail size={22} />} title="Черновиков нет" description="Если ИИ не уверен в ответе рекрутёру, черновик появится здесь." action={{ label: "Открыть чаты", href: "/chats" }} />
-            )}
-            {drafts.map((d) => (
-              <DraftCard key={d.id} draft={d} onSend={sendDraft} onDiscard={discardDraft} />
-            ))}
-          </section>
-
-          <section id="tasks" style={{ display: "grid", gap: 12, minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}>
-            <h2 style={{ fontSize: 16, fontWeight: 700 }}>Задачи ({todos.length})</h2>
-            {todos.length === 0 && (
-              <EmptyState icon={<ICheck size={22} />} title="Задач нет" description="ИИ-агент создаёт задачи, когда рекрутёр просит что-то сделать вне переписки." />
-            )}
-            {todos.map((t) => (
-              <Card key={t.id} style={{ display: "grid", gap: 6, gridTemplateColumns: "minmax(0, 1fr)" }}>
-                <div style={{ fontWeight: 600, overflowWrap: "anywhere" }}>{t.title}</div>
-                {t.detail && <div style={{ fontSize: 14, overflowWrap: "anywhere" }}>{t.detail}</div>}
-                {t.link && (
-                  <a
-                    href={t.link}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{
-                      fontSize: 14,
-                      color: "var(--coral)",
-                      textDecoration: "underline",
-                      wordBreak: "break-all",
-                      overflowWrap: "anywhere",
-                    }}
-                  >
-                    {t.link}
-                  </a>
-                )}
-                <div style={{ display: "flex", gap: 8, paddingTop: 4 }}>
-                  <Btn kind="primary" size="sm" onClick={() => resolveTodo(t.id, "done")}>
-                    Готово
-                  </Btn>
-                  <Btn kind="ghost" size="sm" onClick={() => resolveTodo(t.id, "dismiss")}>
-                    Скрыть
-                  </Btn>
-                </div>
-              </Card>
-            ))}
-          </section>
+        <div style={{ padding: 16 }}>
+          {active === "forms" && (
+            <FormsSection formDrafts={formDrafts} approveForm={approveForm} discardForm={discardForm} />
+          )}
+          {active === "drafts" && (
+            <DraftsSection drafts={drafts} sendDraft={sendDraft} discardDraft={discardDraft} />
+          )}
+          {active === "tasks" && <TasksSection todos={todos} resolveTodo={resolveTodo} />}
         </div>
       )}
     </>
