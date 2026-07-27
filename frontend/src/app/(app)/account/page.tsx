@@ -19,7 +19,6 @@ type HHStatus = {
 
 type BillingStatusShape = {
   plan: string;
-  trial_ends: string | null;
   plan_expires_at: string | null;
   next_charge_at: string | null;
 };

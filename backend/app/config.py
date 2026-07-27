@@ -70,10 +70,10 @@ settings = Settings()
 # stays only because the UI prints it; the access window comes from the
 # subscription's current_period_end, not from a local period_days.
 # The Polar product id per plan lives in POLAR_PRODUCT_<PLAN> (see billing.py).
-# NB: prices below are placeholders in ₸ until the real ones are set in the
-# Polar dashboard (HYBRID.md phase 4) — they are printed, never charged.
+# `price` is in ₸ and is only printed in the UI — the charge itself comes from
+# the Polar product, so these two must be kept in sync by hand.
 PLANS: dict[str, dict] = {
-    "sprint": {"id": "sprint", "name": "Otclick Спринт", "price": 11000},
-    "month": {"id": "month", "name": "Otclick Месяц", "price": 22000},
+    "sprint": {"id": "sprint", "name": "Otclick Спринт", "price": 1000},
+    "month": {"id": "month", "name": "Otclick Месяц", "price": 3000},
 }
 DEFAULT_PLAN_ID = "month"

@@ -37,7 +37,7 @@ const JSON_LD = {
       operatingSystem: "Web",
       description:
         "AI-ассистент для поиска работы на hh.ru и hh.kz: отклики, ответы рекрутёрам, сопроводительные письма, ведение задач до оффера.",
-      offers: { "@type": "Offer", price: "0", priceCurrency: "RUB", category: "free trial" },
+      offers: { "@type": "Offer", price: "0", priceCurrency: "KZT", category: "free" },
       featureList: [
         "Авто-отклики на hh.ru и hh.kz",
         "AI-ответы рекрутёрам с подтверждением",

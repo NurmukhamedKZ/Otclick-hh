@@ -68,7 +68,7 @@ export type BlacklistCreate = {
 };
 
 export type WorkerStatus = {
-  state: "starting" | "running" | "paused_captcha" | "paused_limit" | "stopped";
+  state: "starting" | "running" | "paused_captcha" | "paused_limit" | "idle" | "stopped";
   agent_state: "running" | "stopped";
   today_count: number;
   daily_limit: number;
@@ -76,6 +76,10 @@ export type WorkerStatus = {
   next_run_at: string | null;
   last_error: string | null;
   skipped_has_test: number;
+  /** "manual" = бесплатный тир: одна пачка по кнопке, суммарный лимит. */
+  mode: "manual" | "auto";
+  limit_total: number | null;
+  total_used: number;
 };
 
 export type WorkerStartResponse = {
@@ -128,15 +132,12 @@ export type CaptchaRequest = {
   solved_at: string | null;
 };
 
-export type SubscribeParams = {
-  public_id: string;
-  amount: number;
-  currency: string;
-  description: string;
-  account_id: string;
-  invoice_id: string;
-  interval: string;
-  period: number;
+export type SubscribeResponse = {
+  checkout_url: string;
+};
+
+export type PortalResponse = {
+  portal_url: string;
 };
 
 export type PaymentEntry = {
@@ -148,7 +149,6 @@ export type PaymentEntry = {
 
 export type BillingStatus = {
   plan: string;
-  trial_ends: string | null;
   plan_expires_at: string | null;
   next_charge_at: string | null;
   has_access: boolean;

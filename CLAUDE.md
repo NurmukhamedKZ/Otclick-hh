@@ -239,7 +239,7 @@ Negotiation states (used only for the «Отказ» tag) are cached per user fo
 
 ## Frontend (`frontend/src/`)
 
-Next.js App Router. Authed pages under `app/(app)/` (dashboard, applications, analytics, billing, account, notifications, chats, todo) behind `(app)/layout.tsx`; public `auth/`, `onboarding/`, landing `page.tsx`. Supabase SSR auth split across `lib/supabase/{client,server,middleware}.ts`.
+Next.js App Router. Authed pages under `app/(app)/` (dashboard, applications, analytics, billing + billing/success, account, notifications, chats, todo) behind `(app)/layout.tsx`; public `auth/`, `onboarding/`, landing `page.tsx`. Supabase SSR auth split across `lib/supabase/{client,server,middleware}.ts`.
 
 - `lib/api.ts` — `apiFetch`: attaches the Supabase session JWT as `Bearer` to every backend call (backend `deps.get_current_user` validates it). Base URL from `NEXT_PUBLIC_API_URL`.
 - `hooks/` — `useHHConnect`, `useFilters`, `useBlacklist`, `useChats`, `useRecruiter`, `useFormDrafts`, `useNavCounts` wrap the backend endpoints.
