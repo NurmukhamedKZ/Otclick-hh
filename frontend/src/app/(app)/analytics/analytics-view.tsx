@@ -205,11 +205,8 @@ function RelevanceLog() {
                 rel="noopener noreferrer"
                 style={{ color: "var(--ink)", fontWeight: 600 }}
               >
-                {v.vacancy_name || `вакансия ${v.vacancy_id}`}
+                {v.vacancy_name}
               </a>
-              {v.employer_name && (
-                <span style={{ color: "var(--muted)" }}> · {v.employer_name}</span>
-              )}
               {v.reason && (
                 <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>{v.reason}</div>
               )}

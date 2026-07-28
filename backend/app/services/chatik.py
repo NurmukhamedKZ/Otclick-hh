@@ -90,13 +90,15 @@ def _chats_map(session) -> dict[str, dict]:
     return out
 
 
-def _chat_data(session, chat_id: str, applicant_id: str) -> dict:
+def _chat_data(session, chat_id: str, applicant_id: str, track: bool = False) -> dict:
     r = session.get(
         f"{CHATIK}/chat_data",
         params={
             "chatId": chat_id,
             "applicantId": applicant_id,
-            "do_not_track_session_events": "true",
+            # hh only marks a chat as read when this is "false" (what a real
+            # browser sends opening /chat/<id>) — "true" is our background poll.
+            "do_not_track_session_events": "false" if track else "true",
         },
         headers={**_HEADERS, "Referer": f"https://hh.ru/chat/{chat_id}"},
         timeout=15,
@@ -126,8 +128,8 @@ def _norm(m: dict, applicant_id: str) -> dict:
     }
 
 
-def _messages(session, chat_id: str, applicant_id: str) -> list[dict]:
-    data = _chat_data(session, chat_id, applicant_id)
+def _messages(session, chat_id: str, applicant_id: str, track: bool = False) -> list[dict]:
+    data = _chat_data(session, chat_id, applicant_id, track=track)
     items = (((data or {}).get("chat") or {}).get("messages") or {}).get("items") or []
     return [_norm(m, applicant_id) for m in items]
 
@@ -187,7 +189,9 @@ async def fetch_messages(user_id: str, nid: str) -> list[dict] | None:
         ref = _chats_map(session).get(str(nid))
         if not ref:
             return None
-        return _messages(session, ref["chat_id"], ref["applicant_id"])
+        # track=True: viewing a chat in our UI marks it read on hh, same as opening
+        # https://hh.ru/chat/<id> for real.
+        return _messages(session, ref["chat_id"], ref["applicant_id"], track=True)
 
     try:
         return await loop.run_in_executor(None, _q)
@@ -197,3 +201,31 @@ async def fetch_messages(user_id: str, nid: str) -> list[dict] | None:
     except Exception:
         logger.warning("chatik: fetch_messages failed for nid=%s", nid, exc_info=True)
         return None
+
+
+async def mark_all_read(user_id: str, nids: list[str] | None = None) -> int:
+    """Mark chats as read on hh (same chat_data call a real browser makes opening
+    each chat). `nids` restricts to those negotiation ids; None marks every chat
+    currently in the chatik list. Returns how many were marked."""
+    loop = asyncio.get_running_loop()
+    session = await load_web_session(user_id)
+
+    def _q() -> int:
+        refs = _chats_map(session)
+        targets = (
+            [refs[n] for n in nids if n in refs] if nids is not None else list(refs.values())
+        )
+        marked = 0
+        for ref in targets:
+            _chat_data(session, ref["chat_id"], ref["applicant_id"], track=True)
+            marked += 1
+        return marked
+
+    try:
+        return await loop.run_in_executor(None, _q)
+    except WebSessionExpired as ex:
+        await report_dead_session(user_id, ex)
+        raise
+    except Exception:
+        logger.warning("chatik: mark_all_read failed for user=%s", user_id, exc_info=True)
+        raise

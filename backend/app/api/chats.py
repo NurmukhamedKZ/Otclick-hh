@@ -11,10 +11,15 @@ from app.schemas.recruiter import OkResponse, SendDraftRequest
 from app.services import chatik
 from app.services.hh_credentials import load_api_client, persist_if_refreshed
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/chats", tags=["chats"])
+
+
+class MarkReadRequest(BaseModel):
+    nids: list[str] | None = None
 
 
 def _chat_summary(item: dict) -> dict:
@@ -177,6 +182,18 @@ async def get_messages(
                 first["text"] = db_letter["text"]
 
     return {"items": items}
+
+
+@router.post("/read-all")
+async def read_all(
+    body: MarkReadRequest,
+    user_id: str = Depends(get_current_user),
+) -> dict:
+    try:
+        marked = await chatik.mark_all_read(user_id, body.nids)
+    except Exception as ex:
+        raise HTTPException(status_code=502, detail="hh mark-as-read failed") from ex
+    return {"ok": True, "marked": marked}
 
 
 @router.post("/{negotiation_id}/messages", response_model=OkResponse)
