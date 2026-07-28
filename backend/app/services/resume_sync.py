@@ -22,18 +22,6 @@ def _extract_status(item: dict) -> str | None:
     return None
 
 
-def _extract_roles(item: dict) -> list[int] | None:
-    """Int professional_role ids from an hh resume item ({id, name} dicts)."""
-    out: list[int] = []
-    for r in item.get("professional_roles") or []:
-        rid = r.get("id") if isinstance(r, dict) else r
-        try:
-            out.append(int(rid))
-        except (TypeError, ValueError):
-            continue
-    return out or None
-
-
 def _upsert_resumes(user_id: str, items: list[dict]) -> list[dict]:
     now = datetime.now(timezone.utc).isoformat()
     rows = [
@@ -41,7 +29,6 @@ def _upsert_resumes(user_id: str, items: list[dict]) -> list[dict]:
             "user_id": user_id,
             "hh_resume_id": str(item["id"]),
             "title": item.get("title"),
-            "professional_roles": _extract_roles(item),
             "status": _extract_status(item),
             "synced_at": now,
         }

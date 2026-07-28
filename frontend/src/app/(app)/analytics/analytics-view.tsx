@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
-import type { Analytics, AnalyticsBreakdown } from "@/lib/types";
+import type { Analytics, AnalyticsBreakdown, RelevanceVerdict } from "@/lib/types";
 import { STATUS_LABEL } from "@/lib/status";
 import { Card, EmptyState, SegmentedTabs, Skeleton, Tag } from "@/components/otclick/ui";
 import { IChart } from "@/components/otclick/icons";
@@ -172,6 +172,55 @@ function BreakdownTable({
   );
 }
 
+const VERDICT_TABS = [
+  { id: "false", label: "Отсеяно" },
+  { id: "true", label: "Оставлено" },
+];
+
+function RelevanceLog() {
+  const [relevant, setRelevant] = useState("false");
+  const { data, isPending } = useQuery({
+    queryKey: ["relevance-log", relevant],
+    queryFn: () =>
+      apiFetch<RelevanceVerdict[]>(`/api/analytics/relevance?relevant=${relevant}&limit=100`),
+    staleTime: 60_000,
+  });
+
+  return (
+    <Section title="Решения AI-фильтра" hint="какие вакансии ИИ оставил, а какие убрал — и почему">
+      <SegmentedTabs items={VERDICT_TABS} value={relevant} onChange={setRelevant} label="Вердикт" />
+      {isPending ? (
+        <Skeleton h={40} count={3} />
+      ) : !data || data.length === 0 ? (
+        <div style={{ fontSize: 13, color: "var(--muted)" }}>
+          пусто — AI-фильтр ещё не выносил таких решений
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 420, overflowY: "auto" }}>
+          {data.map((v) => (
+            <div key={v.vacancy_id} style={{ fontSize: 13, borderTop: "1px solid var(--bg-deep)", paddingTop: 8 }}>
+              <a
+                href={`https://hh.ru/vacancy/${v.vacancy_id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: "var(--ink)", fontWeight: 600 }}
+              >
+                {v.vacancy_name || `вакансия ${v.vacancy_id}`}
+              </a>
+              {v.employer_name && (
+                <span style={{ color: "var(--muted)" }}> · {v.employer_name}</span>
+              )}
+              {v.reason && (
+                <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>{v.reason}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </Section>
+  );
+}
+
 export default function AnalyticsView() {
   const [days, setDays] = useState("30");
   const { data, isPending, error } = useQuery({
@@ -209,6 +258,9 @@ export default function AnalyticsView() {
             action={{ label: "На главную", href: "/dashboard" }}
           />
         </Card>
+        <div style={{ marginTop: 18 }}>
+          <RelevanceLog />
+        </div>
       </>
     );
   }
@@ -296,6 +348,8 @@ export default function AnalyticsView() {
           )}
         </Section>
       </div>
+
+      <RelevanceLog />
 
       <Section title="Молчащие работодатели" hint="3+ отклика без единого ответа — кандидаты в чёрный список">
         {data.silent_employers.length === 0 ? (

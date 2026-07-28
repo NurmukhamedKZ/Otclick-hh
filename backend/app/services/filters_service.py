@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -17,9 +16,9 @@ logger = logging.getLogger(__name__)
 PREVIEW_PER_PAGE = 20
 
 _FILTER_COLUMNS = (
-    "id,user_id,resume_id,name,text,area,salary_min,experience,"
-    "schedule,employment,professional_role,excluded_regex,enabled,"
-    "ai_filter_enabled,created_at"
+    "id,user_id,resume_id,name,text,area,experience,work_format,"
+    "employment_form,search_field,period,excluded_text,"
+    "enabled,ai_filter_enabled,created_at"
 )
 
 
@@ -40,10 +39,10 @@ def _check_resume_ownership(user_id: str, resume_id: str) -> None:
 
 
 def _fetch_resume_for_seed(user_id: str, resume_id: str) -> dict:
-    """Owned resume row (title + professional_roles) to seed a new filter."""
+    """Owned resume row (title) to seed a new filter's search text."""
     res = (
         service_client.table("resumes")
-        .select("id,title,professional_roles")
+        .select("id,title")
         .eq("user_id", user_id)
         .eq("id", resume_id)
         .maybe_single()
@@ -99,11 +98,9 @@ async def create_filter(user_id: str, payload: dict) -> dict:
         # Seed search from the resume so a bare filter narrows to the
         # candidate's profession instead of matching every vacancy (which
         # floods the queue with cashier/cleaner roles). Only when the client
-        # left these unset.
+        # left it unset.
         if not payload.get("text") and resume.get("title"):
             payload["text"] = resume["title"]
-        if not payload.get("professional_role") and resume.get("professional_roles"):
-            payload["professional_role"] = resume["professional_roles"]
     row = {**payload, "user_id": user_id}
 
     def _insert():
@@ -184,17 +181,19 @@ def _filter_to_search_params(f: dict) -> dict[str, Any]:
         params["text"] = f["text"]
     if f.get("area") is not None:
         params["area"] = f["area"]
-    if f.get("salary_min") is not None:
-        params["salary"] = f["salary_min"]
-        params["only_with_salary"] = "true"
+    if f.get("excluded_text"):
+        params["excluded_text"] = f["excluded_text"]
     if f.get("experience"):
         params["experience"] = f["experience"]
-    if f.get("schedule"):
-        params["schedule"] = f["schedule"]
-    if f.get("employment"):
-        params["employment"] = f["employment"]
-    if f.get("professional_role"):
-        params["professional_role"] = f["professional_role"]
+    # work_format / employment_form replace hh's deprecated schedule / employment.
+    if f.get("work_format"):
+        params["work_format"] = f["work_format"]
+    if f.get("employment_form"):
+        params["employment_form"] = f["employment_form"]
+    if f.get("search_field"):
+        params["search_field"] = f["search_field"]
+    if f.get("period"):
+        params["period"] = f["period"]
     return params
 
 
@@ -210,28 +209,8 @@ async def preview_filter(user_id: str, filter_id: str) -> dict:
         )
     finally:
         await persist_if_refreshed(user_id, client, original_access)
+    # excluded_text is applied by hh itself — nothing to filter locally.
     items = payload.get("items", []) if isinstance(payload, dict) else []
-    excluded_pat = None
-    if f.get("excluded_regex"):
-        try:
-            excluded_pat = re.compile(f["excluded_regex"], re.IGNORECASE)
-        except re.error as ex:
-            raise HTTPException(
-                status_code=400, detail=f"invalid excluded_regex: {ex}"
-            )
-
-    def _is_excluded(v: dict) -> bool:
-        if not excluded_pat:
-            return False
-        haystack = " ".join(filter(None, [
-            v.get("name") or "",
-            (v.get("employer") or {}).get("name") or "",
-            ((v.get("snippet") or {}).get("requirement") or ""),
-            ((v.get("snippet") or {}).get("responsibility") or ""),
-        ]))
-        return bool(excluded_pat.search(haystack))
-
-    kept = [v for v in items if not _is_excluded(v)]
     return {
         "found": payload.get("found", 0) if isinstance(payload, dict) else 0,
         "items": [
@@ -243,6 +222,6 @@ async def preview_filter(user_id: str, filter_id: str) -> dict:
                 "salary": v.get("salary"),
                 "url": v.get("alternate_url"),
             }
-            for v in kept
+            for v in items
         ],
     }

@@ -34,48 +34,41 @@ def test_filter_to_search_params_full():
     params = _filter_to_search_params({
         "text": "python backend",
         "area": 40,
-        "salary_min": 500000,
+        "excluded_text": "продажи, стажёр",
         "experience": "between1And3",
-        "schedule": "remote",
-        "employment": "full",
-        "professional_role": [96, 124],
+        "work_format": "REMOTE",
+        "employment_form": "FULL",
+        "search_field": "name",
+        "period": 7,
     })
     assert params["text"] == "python backend"
     assert params["area"] == 40
-    assert params["salary"] == 500000
-    assert params["only_with_salary"] == "true"
+    assert params["excluded_text"] == "продажи, стажёр"
     assert params["experience"] == "between1And3"
-    assert params["schedule"] == "remote"
-    assert params["employment"] == "full"
-    assert params["professional_role"] == [96, 124]
+    assert params["work_format"] == "REMOTE"
+    assert params["employment_form"] == "FULL"
+    assert params["search_field"] == "name"
+    assert params["period"] == 7
     assert params["per_page"] == PREVIEW_PER_PAGE
 
 
 def test_filter_to_search_params_skips_none():
     from app.services.filters_service import _filter_to_search_params
 
-    params = _filter_to_search_params({"text": None, "area": None, "salary_min": None})
+    params = _filter_to_search_params({"text": None, "area": None, "excluded_text": None})
     assert "text" not in params
     assert "area" not in params
-    assert "salary" not in params
-    assert "only_with_salary" not in params
-
-
-def test_filter_to_search_params_salary_zero_included():
-    from app.services.filters_service import _filter_to_search_params
-
-    params = _filter_to_search_params({"salary_min": 0})
-    assert params["salary"] == 0
-    assert params["only_with_salary"] == "true"
+    assert "excluded_text" not in params
 
 
 async def test_create_filter_no_resume_id():
     from app.services import filters_service
 
     table = _fluent([{
-        "id": "f1", "resume_id": None, "text": "py", "area": 40, "salary_min": None,
-        "experience": None, "schedule": None, "employment": None,
-        "professional_role": None, "excluded_regex": None, "enabled": True,
+        "id": "f1", "resume_id": None, "text": "py", "area": 40,
+        "experience": None, "work_format": None, "employment_form": None,
+        "search_field": None, "period": None,
+        "excluded_text": None, "enabled": True,
         "created_at": None,
     }])
     with patch.object(filters_service, "service_client") as sc:
@@ -110,7 +103,7 @@ async def test_create_filter_seeds_from_resume():
     from app.services import filters_service
 
     resume_chain = _fluent({
-        "id": "r1", "title": "Frontend developer", "professional_roles": [96],
+        "id": "r1", "title": "Frontend developer",
     })
     insert_chain = _fluent([{"id": "f1", "resume_id": "r1"}])
     with patch.object(filters_service, "service_client") as sc:
@@ -118,14 +111,13 @@ async def test_create_filter_seeds_from_resume():
         await filters_service.create_filter("u1", {"resume_id": "r1", "enabled": True})
     inserted = insert_chain.insert.call_args[0][0]
     assert inserted["text"] == "Frontend developer"
-    assert inserted["professional_role"] == [96]
 
 
 async def test_create_filter_does_not_override_client_text():
     from app.services import filters_service
 
     resume_chain = _fluent({
-        "id": "r1", "title": "Frontend developer", "professional_roles": [96],
+        "id": "r1", "title": "Frontend developer",
     })
     insert_chain = _fluent([{"id": "f1", "resume_id": "r1"}])
     with patch.object(filters_service, "service_client") as sc:
@@ -135,7 +127,6 @@ async def test_create_filter_does_not_override_client_text():
         )
     inserted = insert_chain.insert.call_args[0][0]
     assert inserted["text"] == "react"
-    assert inserted["professional_role"] == [96]
 
 
 async def test_create_filter_checks_resume_ownership_fail():
@@ -185,9 +176,10 @@ async def test_list_filters_returns_rows():
     from app.services import filters_service
 
     rows = [{
-        "id": "f1", "resume_id": None, "text": "py", "area": 40, "salary_min": None,
-        "experience": None, "schedule": None, "employment": None,
-        "professional_role": None, "excluded_regex": None, "enabled": True,
+        "id": "f1", "resume_id": None, "text": "py", "area": 40,
+        "experience": None, "work_format": None, "employment_form": None,
+        "search_field": None, "period": None,
+        "excluded_text": None, "enabled": True,
         "created_at": None,
     }]
     table = _fluent(rows)
@@ -195,23 +187,3 @@ async def test_list_filters_returns_rows():
         sc.table.return_value = table
         result = await filters_service.list_filters("u1")
     assert result == rows
-
-
-def test_preview_excluded_regex_filters_items():
-    """Verify excluded_regex strips matching vacancies. Sync test of pure logic via mock."""
-    import re
-
-    pat = re.compile("1c|bitrix", re.IGNORECASE)
-    items = [
-        {"name": "Python developer", "employer": {"name": "Acme"}},
-        {"name": "1C consultant", "employer": {"name": "X"}},
-        {"name": "Bitrix dev", "employer": {"name": "Y"}},
-    ]
-
-    def is_excluded(v):
-        haystack = " ".join([v.get("name", ""), (v.get("employer") or {}).get("name", "")])
-        return bool(pat.search(haystack))
-
-    kept = [v for v in items if not is_excluded(v)]
-    assert len(kept) == 1
-    assert kept[0]["name"] == "Python developer"

@@ -22,18 +22,6 @@ def test_extract_status_missing():
     assert _extract_status({}) is None
 
 
-def test_extract_roles_dicts():
-    from app.services.resume_sync import _extract_roles
-    item = {"professional_roles": [{"id": "96", "name": "Программист"}, {"id": 124}]}
-    assert _extract_roles(item) == [96, 124]
-
-
-def test_extract_roles_empty_returns_none():
-    from app.services.resume_sync import _extract_roles
-    assert _extract_roles({}) is None
-    assert _extract_roles({"professional_roles": [{"name": "no id"}]}) is None
-
-
 async def test_sync_resumes_upserts_items():
     from app.services import resume_sync
 
