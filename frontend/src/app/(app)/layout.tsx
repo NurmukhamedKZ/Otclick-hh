@@ -4,6 +4,7 @@ import { Providers } from "@/lib/providers";
 import Sidebar from "@/components/otclick/sidebar";
 import WorkerBar from "@/components/otclick/worker-bar";
 import FiltersDrawer from "@/components/filters-drawer";
+import NotificationsDrawer from "@/components/notifications-drawer";
 import CaptchaModal from "@/components/captcha-modal";
 import CommandPalette from "@/components/otclick/command-palette";
 import OnboardingModal from "@/components/otclick/onboarding-modal";
@@ -40,6 +41,7 @@ export default async function AppLayout({
           {children}
         </main>
         <FiltersDrawer />
+        <NotificationsDrawer />
         <CaptchaModal />
         <CommandPalette />
         <OnboardingModal />

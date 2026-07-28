@@ -12,9 +12,10 @@ import type {
   WorkerStopResponse,
 } from "@/lib/types";
 import { Btn, IconBtn, KeyHint, StatusDot, Tooltip } from "@/components/otclick/ui";
-import { IFilter, IPause, IPlay, IRefresh, ISearch, ISpark } from "@/components/otclick/icons";
+import { IBell, IFilter, IPause, IPlay, IRefresh, ISearch, ISpark } from "@/components/otclick/icons";
 import { pushToast } from "@/components/toaster";
 import { openFiltersDrawer } from "@/components/filters-drawer";
+import { openNotificationsDrawer } from "@/components/notifications-drawer";
 import { openCommandPalette } from "@/components/otclick/command-palette";
 
 const STATE_LABEL: Record<WorkerStatus["state"], string> = {
@@ -296,6 +297,10 @@ export default function WorkerBar() {
             <button type="button" className="oc-nav-item" onClick={() => { setMenuOpen(false); refresh(); }}>
               <span className="oc-nav-item__icon"><IRefresh size={16} /></span>
               <span className="oc-nav-item__label">Обновить</span>
+            </button>
+            <button type="button" className="oc-nav-item" onClick={() => { setMenuOpen(false); openNotificationsDrawer(); }}>
+              <span className="oc-nav-item__icon"><IBell size={16} /></span>
+              <span className="oc-nav-item__label">Уведомления</span>
             </button>
           </div>
         )}

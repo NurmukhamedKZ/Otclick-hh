@@ -1,11 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { NotificationRow } from "@/lib/types";
 import { Card, EmptyState, Skeleton } from "@/components/otclick/ui";
 import { IBell, IBolt, ICheck, ILink, IShield } from "@/components/otclick/icons";
+import { openNotificationsDrawer } from "@/components/notifications-drawer";
 
 const ICON: Record<string, React.ReactNode> = {
   captcha: <IShield size={14} />,
@@ -124,12 +124,21 @@ export default function NotificationsCard() {
           >
             прочитать все
           </button>
-          <Link
-            href="/notifications"
-            style={{ fontSize: 12, fontWeight: 600, color: "var(--ink)", textDecoration: "none" }}
+          <button
+            type="button"
+            onClick={openNotificationsDrawer}
+            style={{
+              background: "transparent",
+              border: "none",
+              fontSize: 12,
+              fontWeight: 600,
+              color: "var(--ink)",
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
           >
             все →
-          </Link>
+          </button>
         </div>
       </div>
       {error && (
@@ -148,10 +157,21 @@ export default function NotificationsCard() {
               n.type === "worker_stop" ||
               n.type === "form_approval";
             return (
-              <Link
+              <button
                 key={n.id}
-                href="/notifications"
-                style={{ textDecoration: "none", color: "inherit" }}
+                type="button"
+                onClick={openNotificationsDrawer}
+                style={{
+                  textDecoration: "none",
+                  color: "inherit",
+                  background: "transparent",
+                  border: "none",
+                  padding: 0,
+                  width: "100%",
+                  textAlign: "left",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
               >
               <div
                 style={{
@@ -204,7 +224,7 @@ export default function NotificationsCard() {
                   />
                 )}
               </div>
-              </Link>
+              </button>
             );
           })}
         </div>

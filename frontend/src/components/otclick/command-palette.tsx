@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import { apiFetch } from "@/lib/api";
 import { matchCommands, type Command, type CommandGroup } from "@/lib/command-registry";
 import { openFiltersDrawer } from "@/components/filters-drawer";
+import { openNotificationsDrawer } from "@/components/notifications-drawer";
 import { pushToast } from "@/components/toaster";
 import type { Application } from "@/lib/types";
 
@@ -90,7 +91,6 @@ export default function CommandPalette() {
       ["/applications", "Отклики", "заявки вакансии"],
       ["/chats", "Чаты", "переписка рекрутёр сообщения"],
       ["/todo", "Задания", "задачи черновики анкеты todo"],
-      ["/notifications", "Уведомления", "события"],
       ["/account", "Аккаунт", "настройки профиль hh"],
       ["/billing", "Подписка", "оплата тариф pro billing"],
     ].map(([href, label, keywords]) => ({
@@ -117,6 +117,7 @@ export default function CommandPalette() {
       { id: "act:agent-start", label: "Запустить ИИ-агента", group: "Действия", keywords: "агент ai старт", run: post("/api/worker/agent/start", "ИИ-агент запущен") },
       { id: "act:agent-stop", label: "Остановить ИИ-агента", group: "Действия", keywords: "агент ai стоп", run: post("/api/worker/agent/stop", "ИИ-агент остановлен") },
       { id: "act:filters", label: "Открыть фильтры", group: "Действия", keywords: "поиск настройки вакансий", run: openFiltersDrawer },
+      { id: "act:notifications", label: "Открыть уведомления", group: "Действия", keywords: "события bell", run: openNotificationsDrawer },
       { id: "act:sync", label: "Синхронизировать резюме", group: "Действия", keywords: "резюме hh обновить", run: post("/api/resumes/sync", "резюме синхронизированы") },
       { id: "act:refresh", label: "Обновить статус воркера", group: "Действия", keywords: "refresh статус", run: () => { qc.invalidateQueries({ queryKey: ["worker-status"] }); } },
       { id: "act:signout", label: "Выйти", group: "Действия", keywords: "logout выход", run: async () => { await supabase.auth.signOut(); router.push("/auth"); } },
