@@ -8,17 +8,16 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
-
-from fastapi import HTTPException
-from fastapi import status as status_codes
 
 from app.config import settings
 from app.db.supabase import service_client
 from app.hh.authorize import get_auth_code, get_auth_code_via_email_code
 from app.hh.client import ApiClient, OAuthClient
 from app.hh.user_agent import generate_android_useragent
+from fastapi import HTTPException
+from fastapi import status as status_codes
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +168,7 @@ async def _run_oauth(job_id: str, username: str, password: str) -> None:
                 solution = await asyncio.wait_for(
                     state.captcha_queue.get(), timeout=CAPTCHA_TIMEOUT_SECONDS
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 raise RuntimeError(
                     f"Captcha not solved within {int(CAPTCHA_TIMEOUT_SECONDS // 60)} minutes"
                 )
@@ -227,7 +226,7 @@ async def _run_oauth_email_code(job_id: str, username: str) -> None:
                 solution = await asyncio.wait_for(
                     state.captcha_queue.get(), timeout=CAPTCHA_TIMEOUT_SECONDS
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 raise RuntimeError(
                     f"Captcha not solved within {int(CAPTCHA_TIMEOUT_SECONDS // 60)} minutes"
                 )
@@ -240,7 +239,7 @@ async def _run_oauth_email_code(job_id: str, username: str) -> None:
                 code = await asyncio.wait_for(
                     state.code_queue.get(), timeout=CODE_TIMEOUT_SECONDS
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 raise RuntimeError(
                     f"Email code not provided within {int(CODE_TIMEOUT_SECONDS // 60)} minutes"
                 )
@@ -294,12 +293,12 @@ def _exchange_and_fetch_user(code: str) -> dict:
 def _persist_credentials(user_id: str, access: str, refresh: str,
                          expires_at: int, hh_user_id: str,
                          web_cookies: list[dict] | None = None) -> None:
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     row = {
         "user_id": user_id,
         "access_token_encrypted": encrypt_token(access),
         "refresh_token_encrypted": encrypt_token(refresh),
-        "expires_at": datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat(),
+        "expires_at": datetime.fromtimestamp(expires_at, tz=UTC).isoformat(),
         "hh_user_id": hh_user_id,
         "last_refreshed_at": now,
         "invalid_at": None,

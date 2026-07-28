@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.db.supabase import service_client
 from app.services.hh_credentials import load_api_client, persist_if_refreshed
@@ -23,7 +23,7 @@ def _extract_status(item: dict) -> str | None:
 
 
 def _upsert_resumes(user_id: str, items: list[dict]) -> list[dict]:
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     rows = [
         {
             "user_id": user_id,

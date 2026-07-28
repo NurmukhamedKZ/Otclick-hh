@@ -16,7 +16,7 @@ decides whether the apply worker may run at all.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal, TypedDict
 
 from app.config import settings
@@ -43,7 +43,7 @@ def _parse_ts(raw) -> datetime | None:
             dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
         except ValueError:
             return None
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 def is_paid(profile: dict) -> bool:
@@ -52,7 +52,7 @@ def is_paid(profile: dict) -> bool:
     if plan not in ("active", "cancelled"):
         return False
     exp = _parse_ts(profile.get("plan_expires_at"))
-    return exp is not None and exp > datetime.now(timezone.utc)
+    return exp is not None and exp > datetime.now(UTC)
 
 
 def has_access(profile: dict) -> bool:

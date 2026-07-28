@@ -10,9 +10,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from fastapi import HTTPException, status
-
 from app.db.supabase import service_client
+from fastapi import HTTPException, status
 
 logger = logging.getLogger(__name__)
 

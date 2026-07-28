@@ -1,4 +1,5 @@
 import os
+
 os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
 os.environ.setdefault("SUPABASE_ANON_KEY", "test-anon")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service")
@@ -12,8 +13,8 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def client():
-    from app.main import app
     from app.api.deps import get_current_user
+    from app.main import app
     app.dependency_overrides[get_current_user] = lambda: "u1"
     yield TestClient(app)
     app.dependency_overrides.clear()

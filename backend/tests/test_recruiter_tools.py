@@ -1,4 +1,5 @@
 import os
+
 os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
 os.environ.setdefault("SUPABASE_ANON_KEY", "test-anon")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service")
@@ -14,7 +15,6 @@ class _Spy:
         self.calls = []
     async def __call__(self, *args, **kwargs):
         self.calls.append(args)
-        return None
 
 
 def _ctx(client=None, labels=None):

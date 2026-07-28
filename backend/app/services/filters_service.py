@@ -6,10 +6,9 @@ import asyncio
 import logging
 from typing import Any
 
-from fastapi import HTTPException, status
-
 from app.db.supabase import service_client
 from app.services.hh_credentials import load_api_client, persist_if_refreshed
+from fastapi import HTTPException, status
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +118,7 @@ async def update_filter(user_id: str, filter_id: str, payload: dict) -> dict:
     if not payload:
         raise HTTPException(status_code=400, detail="empty update")
     loop = asyncio.get_running_loop()
-    if "resume_id" in payload and payload["resume_id"]:
+    if payload.get("resume_id"):
         await loop.run_in_executor(
             None, _check_resume_ownership, user_id, payload["resume_id"]
         )

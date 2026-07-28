@@ -5,14 +5,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import datetime, timezone
-
-from fastapi import HTTPException, status
+from datetime import UTC, datetime
 
 from app.db.supabase import service_client
 from app.hh.client import ApiClient
 from app.hh.user_agent import generate_android_useragent
 from app.services.hh_auth import decrypt_token, encrypt_token
+from fastapi import HTTPException, status
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +50,7 @@ def _load_row(user_id: str) -> dict:
 def _mark_invalid_sync(user_id: str, reason: str) -> None:
     service_client.table("hh_credentials").update(
         {
-            "invalid_at": datetime.now(timezone.utc).isoformat(),
+            "invalid_at": datetime.now(UTC).isoformat(),
             "invalid_reason": reason,
         }
     ).eq("user_id", user_id).execute()
@@ -69,7 +68,7 @@ def _build_client(row: dict) -> ApiClient:
     if isinstance(expires_at, str):
         dt = datetime.fromisoformat(expires_at)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=UTC)
         expires_ts = int(dt.timestamp())
     return ApiClient(
         user_agent=generate_android_useragent(),
@@ -84,9 +83,9 @@ def _persist_refreshed(user_id: str, client: ApiClient) -> None:
         "access_token_encrypted": encrypt_token(client.access_token),
         "refresh_token_encrypted": encrypt_token(client.refresh_token),
         "expires_at": datetime.fromtimestamp(
-            client.access_expires_at, tz=timezone.utc
+            client.access_expires_at, tz=UTC
         ).isoformat(),
-        "last_refreshed_at": datetime.now(timezone.utc).isoformat(),
+        "last_refreshed_at": datetime.now(UTC).isoformat(),
     }).eq("user_id", user_id).execute()
 
 

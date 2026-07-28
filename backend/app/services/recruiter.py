@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.db.supabase import service_client
 from app.services import qa_memory
@@ -86,7 +86,7 @@ async def upsert_cursor(
         "user_id": user_id,
         "negotiation_id": negotiation_id,
         "last_handled_message_id": message_id,
-        "last_polled_at": datetime.now(timezone.utc).isoformat(),
+        "last_polled_at": datetime.now(UTC).isoformat(),
     }
     if vacancy_id is not None:
         row["vacancy_id"] = vacancy_id
@@ -170,7 +170,7 @@ async def discard_draft(user_id: str, draft_id: str) -> None:
     def _q():
         return (
             service_client.table("recruiter_drafts")
-            .update({"status": "discarded", "resolved_at": datetime.now(timezone.utc).isoformat()})
+            .update({"status": "discarded", "resolved_at": datetime.now(UTC).isoformat()})
             .eq("user_id", user_id).eq("id", draft_id)
             .execute()
         )
@@ -181,7 +181,7 @@ async def mark_todo(user_id: str, todo_id: str, status: str) -> None:
     def _q():
         return (
             service_client.table("recruiter_todos")
-            .update({"status": status, "done_at": datetime.now(timezone.utc).isoformat()})
+            .update({"status": status, "done_at": datetime.now(UTC).isoformat()})
             .eq("user_id", user_id).eq("id", todo_id)
             .execute()
         )
@@ -231,7 +231,7 @@ async def send_draft(user_id: str, draft_id: str, message: str | None = None) ->
     def _q():
         return (
             service_client.table("recruiter_drafts")
-            .update({"status": "sent", "resolved_at": datetime.now(timezone.utc).isoformat()})
+            .update({"status": "sent", "resolved_at": datetime.now(UTC).isoformat()})
             .eq("user_id", user_id).eq("id", draft_id)
             .execute()
         )

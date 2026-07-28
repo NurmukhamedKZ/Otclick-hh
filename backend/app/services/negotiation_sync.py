@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app.db.supabase import service_client
 from app.services.hh_credentials import load_api_client, persist_if_refreshed
@@ -40,12 +40,12 @@ def _due(user_id: str) -> bool:
         ts = datetime.fromisoformat(last.replace("Z", "+00:00"))
     except ValueError:
         return True
-    return datetime.now(timezone.utc) - ts > timedelta(seconds=MIN_SYNC_INTERVAL_S)
+    return datetime.now(UTC) - ts > timedelta(seconds=MIN_SYNC_INTERVAL_S)
 
 
 def _mark_synced(user_id: str) -> None:
     service_client.table("profiles").update(
-        {"negotiations_synced_at": datetime.now(timezone.utc).isoformat()}
+        {"negotiations_synced_at": datetime.now(UTC).isoformat()}
     ).eq("id", user_id).execute()
 
 
@@ -80,7 +80,7 @@ def _persist(user_id: str, rows: list[dict]) -> int:
         .execute()
     )
     current = {r["vacancy_id"]: r for r in (res.data or [])}
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     changed = 0
     for r in rows:
         existing = current.get(r["vacancy_id"])

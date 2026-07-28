@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -14,7 +14,7 @@ from app.services import plan as plan_service
 
 
 def _iso(days: int) -> str:
-    return (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+    return (datetime.now(UTC) + timedelta(days=days)).isoformat()
 
 
 @pytest.fixture
@@ -57,7 +57,7 @@ def test_billing_disabled_grants_everything():
 
 
 def test_parse_ts_handles_zulu_and_datetime():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     assert plan_service._parse_ts(now.isoformat().replace("+00:00", "Z")) is not None
     assert plan_service._parse_ts(now) == now
     assert plan_service._parse_ts("garbage") is None

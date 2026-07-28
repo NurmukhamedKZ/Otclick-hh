@@ -9,7 +9,7 @@ os.environ.setdefault("SUPABASE_ANON_KEY", "test-anon")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service")
 os.environ.setdefault("FERNET_KEY", "kPpDeJjFqDppkMm6QHzqFkkSgFwsKtGzh4WeZ5dKZHc=")
 
-from app.services import analytics  # noqa: E402
+from app.services import analytics
 
 
 @pytest.mark.asyncio

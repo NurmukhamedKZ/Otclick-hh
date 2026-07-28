@@ -35,8 +35,8 @@ async def test_refresh_user_success_persists():
 
 
 async def test_refresh_user_hh_rejection_marks_invalid():
-    from app.services import token_refresh as tr
     from app.hh import errors
+    from app.services import token_refresh as tr
 
     client = _fake_client()
     client.refresh_access_token.side_effect = errors.BadResponse("token revoked")

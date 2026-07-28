@@ -1,7 +1,7 @@
 import base64
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -40,7 +40,7 @@ def _sign(payload: dict, secret: str = SECRET) -> tuple[bytes, dict]:
 
     body = json.dumps(payload).encode()
     msg_id = "msg_test"
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     wh = Webhook(base64.b64encode(secret.encode()).decode())
     signature = wh.sign(msg_id, now, body.decode())
     return body, {
@@ -187,9 +187,8 @@ def test_valid_signature_parses_event():
 
 
 def test_bad_signature_rejected():
-    from polar_sdk.webhooks import WebhookVerificationError
-
     from app.services import billing
+    from polar_sdk.webhooks import WebhookVerificationError
 
     body, headers = _sign(_order_paid_payload(), secret="someone-elses-secret")
     with patch.object(billing.settings, "POLAR_WEBHOOK_SECRET", SECRET):
@@ -198,9 +197,8 @@ def test_bad_signature_rejected():
 
 
 def test_missing_secret_rejected():
-    from polar_sdk.webhooks import WebhookVerificationError
-
     from app.services import billing
+    from polar_sdk.webhooks import WebhookVerificationError
 
     body, headers = _sign(_order_paid_payload())
     with patch.object(billing.settings, "POLAR_WEBHOOK_SECRET", ""):
@@ -402,10 +400,9 @@ async def test_get_status_returns_plan_and_history():
 
 @pytest.fixture
 def client():
+    from app.api import webhooks
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-
-    from app.api import webhooks
 
     app = FastAPI()
     app.include_router(webhooks.router)

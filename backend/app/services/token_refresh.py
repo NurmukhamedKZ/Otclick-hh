@@ -10,10 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import requests
-
 from app.config import settings
 from app.db.supabase import service_client
 from app.hh import errors
@@ -57,7 +56,7 @@ async def refresh_user(user_id: str) -> dict:
 
 
 def _select_due(threshold_days: int) -> list[dict]:
-    cutoff = (datetime.now(timezone.utc) + timedelta(days=threshold_days)).isoformat()
+    cutoff = (datetime.now(UTC) + timedelta(days=threshold_days)).isoformat()
     res = (
         service_client.table("hh_credentials")
         .select("user_id,expires_at")
@@ -86,7 +85,7 @@ async def refresh_due(threshold_days: int | None = None) -> dict:
         except HHCredentialsInvalid:
             summary["invalid"] += 1
             continue
-        except Exception as ex:  # noqa: BLE001 — one bad user must not abort the batch
+        except Exception as ex:
             logger.exception("unexpected error refreshing %s: %s", user_id, ex)
             summary["errors"] += 1
             continue

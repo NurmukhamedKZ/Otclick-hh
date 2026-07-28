@@ -68,8 +68,8 @@ def test_extract_xsrf_token_missing():
 
 @pytest.mark.asyncio
 async def test_load_web_session_builds_cookies():
-    from app.services.hh_auth import encrypt_token
     from app.services import form_filler
+    from app.services.hh_auth import encrypt_token
 
     cookies = [
         {"name": "_xsrf", "value": "tok", "domain": ".hh.ru", "path": "/"},
@@ -90,9 +90,8 @@ async def test_load_web_session_no_cookies_raises():
     from app.services import form_filler
 
     fake = _fluent({"web_cookies_encrypted": None})
-    with patch.object(form_filler, "service_client", fake):
-        with pytest.raises(ValueError):
-            await form_filler.load_web_session("user-1")
+    with patch.object(form_filler, "service_client", fake), pytest.raises(ValueError):
+        await form_filler.load_web_session("user-1")
 
 
 def test_parse_tests_extracts_vacancy_block():

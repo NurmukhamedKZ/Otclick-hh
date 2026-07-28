@@ -1,8 +1,7 @@
-from fastapi import APIRouter, Depends, status
-
 from app.api.deps import get_current_user
 from app.schemas.blacklist import BlacklistCreate, BlacklistResponse
 from app.services import blacklist as blacklist_service
+from fastapi import APIRouter, Depends, status
 
 router = APIRouter(prefix="/api/blacklist", tags=["blacklist"])
 

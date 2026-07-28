@@ -13,14 +13,13 @@ from urllib.parse import urlencode, urljoin
 import requests
 from requests import Session
 
-from .user_agent import generate_android_useragent
-
 from . import errors
 from .client_keys import (
     ANDROID_CLIENT_ID,
     ANDROID_CLIENT_SECRET,
 )
 from .datatypes import AccessToken
+from .user_agent import generate_android_useragent
 
 __all__ = ("ApiClient", "OAuthClient")
 

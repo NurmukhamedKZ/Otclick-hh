@@ -1,8 +1,7 @@
-from fastapi import APIRouter, Depends
-
 from app.api.deps import get_current_user
 from app.schemas.resumes import ResumeResponse, ResumesListResponse
 from app.services import resume_sync
+from fastapi import APIRouter, Depends
 
 router = APIRouter(prefix="/api/resumes", tags=["resumes"])
 

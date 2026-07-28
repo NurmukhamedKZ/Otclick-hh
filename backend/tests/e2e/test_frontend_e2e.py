@@ -21,6 +21,8 @@ from ._harness import (
     KONG_URL,
     NAV_TIMEOUT,
     requires_stack,
+)
+from ._harness import (
     sign_up as _sign_up,
 )
 

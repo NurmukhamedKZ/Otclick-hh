@@ -6,16 +6,15 @@ Mounted only when settings.DEBUG_ENDPOINTS=True. NEVER expose in production.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
-
-from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.deps import get_current_user
 from app.config import settings
 from app.db.supabase import service_client
 from app.services.notifications import notify
 from app.worker.limiter import DAILY_LIMIT, DEFAULT_TZ
+from fastapi import APIRouter, Depends, HTTPException
 
 router = APIRouter(prefix="/api/_debug", tags=["debug"])
 
@@ -33,7 +32,7 @@ async def mark_token_invalid(user_id: str = Depends(get_current_user)) -> dict:
     def _do() -> None:
         service_client.table("hh_credentials").update(
             {
-                "invalid_at": datetime.now(timezone.utc).isoformat(),
+                "invalid_at": datetime.now(UTC).isoformat(),
                 "invalid_reason": "debug: manual",
             }
         ).eq("user_id", user_id).execute()

@@ -17,18 +17,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
-
-from polar_sdk import Polar
-from polar_sdk.webhooks import (
-    WebhookVerificationError,
-    validate_event,
-)
+from datetime import UTC, datetime, timedelta
 
 from app.config import DEFAULT_PLAN_ID, PLANS, settings
 from app.db.supabase import service_client
 from app.schemas.billing import BillingStatusResponse, PaymentEntry, SubscribeResponse
 from app.services import plan as plan_service
+from polar_sdk import Polar
+from polar_sdk.webhooks import (
+    WebhookVerificationError,
+    validate_event,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -108,12 +107,12 @@ def _parse_ts(raw) -> datetime | None:
     if not raw:
         return None
     if isinstance(raw, datetime):
-        return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+        return raw if raw.tzinfo else raw.replace(tzinfo=UTC)
     try:
         dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
     except ValueError:
         return None
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 def _user_id_of(obj) -> str | None:
@@ -160,7 +159,7 @@ def _handle_order_paid(order) -> dict:
 
     subscription = getattr(order, "subscription", None)
     expires_at = _parse_ts(getattr(subscription, "current_period_end", None)) or (
-        datetime.now(timezone.utc) + timedelta(days=FALLBACK_PERIOD_DAYS)
+        datetime.now(UTC) + timedelta(days=FALLBACK_PERIOD_DAYS)
     )
     subscription_id = str(getattr(order, "subscription_id", "") or "") or None
 

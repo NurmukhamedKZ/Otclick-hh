@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 from functools import cached_property
-from typing import Any, Type
+from typing import Any
 
 from requests import Request, Response
 from requests.adapters import CaseInsensitiveDict
 
 __all__ = (
-    "BadResponse",
     "ApiError",
     "BadGateway",
     "BadRequest",
+    "BadResponse",
     "ClientError",
     "Forbidden",
     "InternalServerError",
@@ -76,7 +76,7 @@ class ApiError(BadResponse):
 
     @classmethod
     def raise_for_status(
-        cls: Type[ApiError], response: Response, data: dict
+        cls: type[ApiError], response: Response, data: dict
     ) -> None:
         match response.status_code:
             case status if 300 <= status <= 308:

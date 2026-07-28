@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Depends, Query
-
 from app.api.deps import get_current_user
 from app.services import analytics, negotiation_sync, relevance
+from fastapi import APIRouter, Depends, Query
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 

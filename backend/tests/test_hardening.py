@@ -4,13 +4,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # --- /health must fail loudly on a dead DB (blocker 3) -----------------------
 
 def test_health_raises_503_when_db_unreachable():
-    from fastapi import HTTPException
-
     from app.main import health
+    from fastapi import HTTPException
 
     with patch("app.main.service_client") as sc:
         sc.table.side_effect = RuntimeError("db down")
@@ -30,9 +28,8 @@ def test_health_ok_when_db_reachable():
 
 @pytest.mark.asyncio
 async def test_second_connect_job_for_same_user_is_rejected():
-    from fastapi import HTTPException
-
     from app.services import hh_auth
+    from fastapi import HTTPException
 
     hh_auth._jobs.clear()
     with patch.object(hh_auth, "_run_oauth", new=AsyncMock()):
@@ -45,9 +42,8 @@ async def test_second_connect_job_for_same_user_is_rejected():
 
 @pytest.mark.asyncio
 async def test_global_concurrent_job_cap():
-    from fastapi import HTTPException
-
     from app.services import hh_auth
+    from fastapi import HTTPException
 
     hh_auth._jobs.clear()
     with patch.object(hh_auth, "_run_oauth", new=AsyncMock()):
@@ -211,9 +207,8 @@ def test_unexpected_token_prefix_does_not_crash():
 
 @pytest.mark.asyncio
 async def test_get_current_user_caches_verification():
-    from fastapi.security import HTTPAuthorizationCredentials
-
     from app.api import deps
+    from fastapi.security import HTTPAuthorizationCredentials
 
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="tok-123")
     res = MagicMock(user=MagicMock(id="user-9"))
@@ -227,10 +222,9 @@ async def test_get_current_user_caches_verification():
 
 @pytest.mark.asyncio
 async def test_get_current_user_hides_upstream_error_detail():
+    from app.api import deps
     from fastapi import HTTPException
     from fastapi.security import HTTPAuthorizationCredentials
-
-    from app.api import deps
 
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="bad")
     with patch.object(deps.anon_client.auth, "get_user", side_effect=RuntimeError("secret internals")):
