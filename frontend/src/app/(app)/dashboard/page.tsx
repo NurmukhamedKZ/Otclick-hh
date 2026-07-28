@@ -1,4 +1,3 @@
-import { PageHeader } from "@/components/otclick/ui";
 import CaptchaBanner from "@/components/otclick/captcha-banner";
 import HHBanner from "@/components/otclick/hh-banner";
 import LimitRing from "./limit-ring";
@@ -12,7 +11,6 @@ import FunnelCard from "./funnel-card";
 export default async function DashboardPage() {
   return (
     <>
-      <PageHeader title="Главная" subtitle="обзор автоотклика и последних событий" crumbs={[{ label: "Главная" }]} />
       <HHBanner />
       <CaptchaBanner />
       <div

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { NotificationRow } from "@/lib/types";
-import { Btn, Card, PageHeader } from "@/components/otclick/ui";
+import { Btn, Card } from "@/components/otclick/ui";
 import { IBolt, ICheck, IClose, ILink, IShield, ITrash } from "@/components/otclick/icons";
 
 const ICON: Record<string, React.ReactNode> = {
@@ -134,7 +134,6 @@ export default function NotificationsPage() {
 
   return (
     <>
-      <PageHeader title="Уведомления" subtitle="события воркера и ИИ-агента" crumbs={[{ label: "Главная", href: "/dashboard" }, { label: "Уведомления" }]} />
       <Card>
         <div
           style={{

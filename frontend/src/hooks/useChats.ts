@@ -57,6 +57,17 @@ export function useChats(unreadOnly: boolean, options?: { enabled?: boolean }) {
     [qc, unreadOnly],
   );
 
+  const markAllRead = useCallback(
+    async (nids: string[]) => {
+      await apiFetch("/api/chats/read-all", {
+        method: "POST",
+        body: JSON.stringify({ nids }),
+      });
+      await refresh();
+    },
+    [refresh],
+  );
+
   return {
     // on failure report "no chats" rather than a permanent loading state
     chats: error ? [] : (data?.items ?? null),
@@ -64,6 +75,7 @@ export function useChats(unreadOnly: boolean, options?: { enabled?: boolean }) {
     error: error instanceof Error ? error.message : null,
     loading: isFetching,
     refresh,
+    markAllRead,
   };
 }
 

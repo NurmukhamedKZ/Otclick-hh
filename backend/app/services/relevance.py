@@ -135,6 +135,8 @@ def list_verdicts(user_id: str, relevant: bool | None, limit: int) -> list[dict]
             service_client.table("relevance_cache")
             .select("vacancy_id,vacancy_name,employer_name,relevant,reason,created_at")
             .eq("user_id", user_id)
+            # без названия строка выглядит как "вакансия 135546768" — прячем её
+            .not_.is_("vacancy_name", "null")
         )
         if relevant is not None:
             q = q.eq("relevant", relevant)

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { Btn, Card, PageHeader, Tag, Toggle, type TagTone } from "@/components/otclick/ui";
+import { Btn, Card, Tag, Toggle, type TagTone } from "@/components/otclick/ui";
 import { IRefresh, ISearch } from "@/components/otclick/icons";
 import {
   useChats,
@@ -511,7 +511,21 @@ export default function ChatsPage() {
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const { chats, found, error, loading, refresh } = useChats(unreadOnly);
+  const { chats, found, error, loading, refresh, markAllRead } = useChats(unreadOnly);
+  const [markingRead, setMarkingRead] = useState(false);
+  const unreadIds = useMemo(() => (chats ?? []).filter((c) => c.has_updates).map((c) => c.id), [chats]);
+
+  async function onMarkAllRead() {
+    if (unreadIds.length === 0 || markingRead) return;
+    setMarkingRead(true);
+    try {
+      await markAllRead(unreadIds);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "mark as read failed");
+    } finally {
+      setMarkingRead(false);
+    }
+  }
 
   const filtered = useMemo(() => {
     if (!chats) return null;
@@ -560,11 +574,8 @@ export default function ChatsPage() {
       : null;
   const selected = fromList ?? stubForDeepLink;
 
-  const chatName = selected?.employer_name;
-
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <PageHeader title="Чаты" subtitle="переписка с работодателями" crumbs={[{ label: "Главная", href: "/dashboard" }, { label: "Чаты" }, ...(chatName ? [{ label: chatName }] : [])]} />
       <Card
         className="oc-chat-card"
         style={{
@@ -616,24 +627,46 @@ export default function ChatsPage() {
                   {found}
                 </span>
               </div>
-              <button
-                type="button"
-                onClick={() => refresh()}
-                title="Обновить"
-                style={{
-                  background: "transparent",
-                  border: "1px solid var(--line)",
-                  borderRadius: 999,
-                  width: 32,
-                  height: 32,
-                  display: "grid",
-                  placeItems: "center",
-                  cursor: "pointer",
-                  color: "var(--ink)",
-                }}
-              >
-                <IRefresh size={15} />
-              </button>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {unreadIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={onMarkAllRead}
+                    disabled={markingRead}
+                    title="Отметить все чаты прочитанными на hh.ru"
+                    style={{
+                      background: "transparent",
+                      border: "1px solid var(--line)",
+                      borderRadius: 999,
+                      padding: "6px 12px",
+                      fontSize: 13,
+                      cursor: markingRead ? "default" : "pointer",
+                      color: "var(--ink)",
+                      opacity: markingRead ? 0.6 : 1,
+                    }}
+                  >
+                    {markingRead ? "…" : "Прочитать все"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => refresh()}
+                  title="Обновить"
+                  style={{
+                    background: "transparent",
+                    border: "1px solid var(--line)",
+                    borderRadius: 999,
+                    width: 32,
+                    height: 32,
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: "pointer",
+                    color: "var(--ink)",
+                  }}
+                >
+                  <IRefresh size={15} />
+                </button>
+              </div>
             </div>
             <div
               style={{
