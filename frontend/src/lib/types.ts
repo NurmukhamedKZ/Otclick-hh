@@ -14,12 +14,12 @@ export type Filter = {
   name: string | null;
   text: string | null;
   area: number | null;
-  salary_min: number | null;
   experience: string | null;
-  schedule: string | null;
-  employment: string | null;
-  professional_role: number[] | null;
-  excluded_regex: string | null;
+  work_format: string | null;
+  employment_form: string | null;
+  search_field: string | null;
+  period: number | null;
+  excluded_text: string | null;
   enabled: boolean;
   ai_filter_enabled: boolean;
   created_at: string | null;
@@ -30,11 +30,12 @@ export type FilterCreate = {
   name?: string | null;
   text?: string | null;
   area?: number | null;
-  salary_min?: number | null;
   experience?: string | null;
-  schedule?: string | null;
-  employment?: string | null;
-  excluded_regex?: string | null;
+  work_format?: string | null;
+  employment_form?: string | null;
+  search_field?: string | null;
+  period?: number | null;
+  excluded_text?: string | null;
   enabled?: boolean;
   ai_filter_enabled?: boolean;
 };
@@ -174,6 +175,15 @@ export type AnalyticsBreakdown = {
   invited: number;
   reply_rate: number | null;
   invite_rate: number | null;
+};
+
+export type RelevanceVerdict = {
+  vacancy_id: string;
+  vacancy_name: string | null;
+  employer_name: string | null;
+  relevant: boolean;
+  reason: string | null;
+  created_at: string | null;
 };
 
 export type Analytics = {

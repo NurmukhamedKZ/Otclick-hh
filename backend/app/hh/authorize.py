@@ -8,7 +8,7 @@ hh-applicant-tool/operations/authorize.py — the upstream selectors are stale
 from __future__ import annotations
 
 import asyncio
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from playwright.async_api import async_playwright

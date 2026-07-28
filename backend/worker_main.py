@@ -71,7 +71,7 @@ async def main() -> None:
             logger.exception("reconcile failed")
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=POLL_INTERVAL_S)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
     logger.info("stopping all runners")

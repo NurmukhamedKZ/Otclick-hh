@@ -1,8 +1,22 @@
-from fastapi import APIRouter
-
-from app.api import analytics, auth, billing, blacklist, captcha, chats, filters, forms, internal, qa, recruiter, resumes, webhooks, worker
-from app.api import _debug
+from app.api import (
+    _debug,
+    analytics,
+    auth,
+    billing,
+    blacklist,
+    captcha,
+    chats,
+    filters,
+    forms,
+    internal,
+    qa,
+    recruiter,
+    resumes,
+    webhooks,
+    worker,
+)
 from app.config import settings
+from fastapi import APIRouter
 
 api_router = APIRouter()
 api_router.include_router(auth.router)

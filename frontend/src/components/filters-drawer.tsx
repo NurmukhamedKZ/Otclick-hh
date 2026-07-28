@@ -30,13 +30,41 @@ const EXPERIENCE = [
   { value: "moreThan6", label: "> 6 лет" },
 ];
 
-const SCHEDULE = [
-  { value: "", label: "любое" },
-  { value: "fullDay", label: "полный день" },
-  { value: "remote", label: "удалённо" },
-  { value: "flexible", label: "гибкий" },
-  { value: "shift", label: "сменный" },
+// hh deprecated `schedule`/`employment` in favour of these.
+const WORK_FORMAT = [
+  { value: "", label: "любой" },
+  { value: "ON_SITE", label: "в офисе" },
+  { value: "REMOTE", label: "удалённо" },
+  { value: "HYBRID", label: "гибрид" },
+  { value: "FIELD_WORK", label: "разъездная" },
 ];
+
+const EMPLOYMENT_FORM = [
+  { value: "", label: "любая" },
+  { value: "FULL", label: "полная" },
+  { value: "PART", label: "частичная" },
+  { value: "PROJECT", label: "проект" },
+  { value: "SIDE_JOB", label: "подработка" },
+];
+
+const SEARCH_FIELD = [
+  { value: "name", label: "в названии вакансии" },
+  { value: "", label: "везде (название, компания, описание)" },
+];
+
+const PERIOD = [
+  { value: "7", label: "за неделю" },
+  { value: "14", label: "за 2 недели" },
+  { value: "30", label: "за месяц" },
+  { value: "", label: "за всё время" },
+];
+
+const WORK_FORMAT_LABEL: Record<string, string> = Object.fromEntries(
+  WORK_FORMAT.filter((w) => w.value).map((w) => [w.value, w.label]),
+);
+const EXPERIENCE_LABEL: Record<string, string> = Object.fromEntries(
+  EXPERIENCE.filter((e) => e.value).map((e) => [e.value, e.label]),
+);
 
 type Tab = "filters" | "blacklist";
 
@@ -48,7 +76,6 @@ function filterTitle(f: Filter, resumes: Resume[] = []): string {
   const parts: string[] = [];
   if (f.area === 40) parts.push("KZ");
   if (f.area === 113) parts.push("RU");
-  if (f.salary_min) parts.push(`от ${f.salary_min}`);
   return parts.length ? parts.join(" · ") : "пустой фильтр";
 }
 
@@ -278,7 +305,11 @@ export default function FiltersDrawer() {
                         marginTop: 2,
                       }}
                     >
-                      {[f.area === 40 ? "KZ" : f.area === 113 ? "RU" : null, f.schedule, f.experience]
+                      {[
+                        f.area === 40 ? "KZ" : f.area === 113 ? "RU" : null,
+                        f.work_format ? WORK_FORMAT_LABEL[f.work_format] : null,
+                        f.experience ? EXPERIENCE_LABEL[f.experience] : null,
+                      ]
                         .filter(Boolean)
                         .join(" · ") || "—"}
                     </div>
@@ -504,9 +535,12 @@ function FilterEditor({
   const [name, setName] = useState(filter.name ?? "");
   const [editingName, setEditingName] = useState(false);
   const [text, setText] = useState(filter.text ?? "");
-  const [salaryMin, setSalaryMin] = useState(filter.salary_min ? String(filter.salary_min) : "");
+  const [excludedText, setExcludedText] = useState(filter.excluded_text ?? "");
   const [area, setArea] = useState(filter.area ? String(filter.area) : "");
-  const [schedule, setSchedule] = useState(filter.schedule ?? "");
+  const [workFormat, setWorkFormat] = useState(filter.work_format ?? "");
+  const [employmentForm, setEmploymentForm] = useState(filter.employment_form ?? "");
+  const [searchField, setSearchField] = useState(filter.search_field ?? "");
+  const [period, setPeriod] = useState(filter.period ? String(filter.period) : "");
   const [experience, setExperience] = useState(filter.experience ?? "");
   const [resumeId, setResumeId] = useState(filter.resume_id ?? "");
 
@@ -606,20 +640,57 @@ function FilterEditor({
       </EditorField>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 150px), 1fr))", gap: 14 }}>
-        <EditorField label="зарплата от" hint="можно оставить пустым — без ограничения">
-          <input
-            type="number"
-            min={0}
-            value={salaryMin}
-            onChange={(e) => setSalaryMin(e.target.value)}
-            onBlur={() =>
-              salaryMin !== (filter.salary_min ? String(filter.salary_min) : "") &&
-              commit({ salary_min: salaryMin ? Number(salaryMin) : null })
-            }
-            placeholder="любая"
+        <EditorField label="где искать" hint="«везде» ловит вакансии, где слово мелькнуло в описании">
+          <select
+            value={searchField}
+            onChange={(e) => {
+              setSearchField(e.target.value);
+              commit({ search_field: e.target.value || null });
+            }}
             style={inputStyle}
-          />
+          >
+            {SEARCH_FIELD.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </select>
         </EditorField>
+        <EditorField label="свежесть" hint="чем короче период, тем меньше запросов к hh">
+          <select
+            value={period}
+            onChange={(e) => {
+              setPeriod(e.target.value);
+              commit({ period: e.target.value ? Number(e.target.value) : null });
+            }}
+            style={inputStyle}
+          >
+            {PERIOD.map((p) => (
+              <option key={p.value} value={p.value}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </EditorField>
+      </div>
+
+      <EditorField
+        label="исключить слова"
+        hint="Через запятую. hh уберёт из выдачи вакансии с этими словами."
+      >
+        <input
+          value={excludedText}
+          onChange={(e) => setExcludedText(e.target.value)}
+          onBlur={() =>
+            excludedText !== (filter.excluded_text ?? "") &&
+            commit({ excluded_text: excludedText.trim() || null })
+          }
+          placeholder="продажи, стажёр, 1С"
+          style={inputStyle}
+        />
+      </EditorField>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 150px), 1fr))", gap: 14 }}>
         <EditorField label="регион">
           <select
             value={area}
@@ -636,21 +707,37 @@ function FilterEditor({
             ))}
           </select>
         </EditorField>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 150px), 1fr))", gap: 14 }}>
-        <EditorField label="график">
+        <EditorField label="формат работы">
           <select
-            value={schedule}
+            value={workFormat}
             onChange={(e) => {
-              setSchedule(e.target.value);
-              commit({ schedule: e.target.value || null });
+              setWorkFormat(e.target.value);
+              commit({ work_format: e.target.value || null });
             }}
             style={inputStyle}
           >
-            {SCHEDULE.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
+            {WORK_FORMAT.map((w) => (
+              <option key={w.value} value={w.value}>
+                {w.label}
+              </option>
+            ))}
+          </select>
+        </EditorField>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 150px), 1fr))", gap: 14 }}>
+        <EditorField label="занятость">
+          <select
+            value={employmentForm}
+            onChange={(e) => {
+              setEmploymentForm(e.target.value);
+              commit({ employment_form: e.target.value || null });
+            }}
+            style={inputStyle}
+          >
+            {EMPLOYMENT_FORM.map((f) => (
+              <option key={f.value} value={f.value}>
+                {f.label}
               </option>
             ))}
           </select>

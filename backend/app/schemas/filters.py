@@ -11,14 +11,14 @@ class FilterCreate(BaseModel):
     name: str | None = None
     text: str | None = None
     area: int | None = None
-    salary_min: int | None = Field(default=None, ge=0)
     experience: str | None = None
-    schedule: str | None = None
-    employment: str | None = None
-    professional_role: list[int] | None = None
-    excluded_regex: str | None = None
+    work_format: str | None = None
+    employment_form: str | None = None
+    search_field: str | None = None
+    period: int | None = Field(default=None, ge=1, le=30)
+    excluded_text: str | None = None
     enabled: bool = True
-    ai_filter_enabled: bool = True
+    ai_filter_enabled: bool = False
 
 
 class FilterUpdate(BaseModel):
@@ -26,12 +26,12 @@ class FilterUpdate(BaseModel):
     name: str | None = None
     text: str | None = None
     area: int | None = None
-    salary_min: int | None = Field(default=None, ge=0)
     experience: str | None = None
-    schedule: str | None = None
-    employment: str | None = None
-    professional_role: list[int] | None = None
-    excluded_regex: str | None = None
+    work_format: str | None = None
+    employment_form: str | None = None
+    search_field: str | None = None
+    period: int | None = Field(default=None, ge=1, le=30)
+    excluded_text: str | None = None
     enabled: bool | None = None
     ai_filter_enabled: bool | None = None
 
@@ -48,14 +48,14 @@ class FilterResponse(BaseModel):
     name: str | None = None
     text: str | None = None
     area: int | None = None
-    salary_min: int | None = None
     experience: str | None = None
-    schedule: str | None = None
-    employment: str | None = None
-    professional_role: list[int] | None = None
-    excluded_regex: str | None = None
+    work_format: str | None = None
+    employment_form: str | None = None
+    search_field: str | None = None
+    period: int | None = None
+    excluded_text: str | None = None
     enabled: bool = True
-    ai_filter_enabled: bool = True
+    ai_filter_enabled: bool = False
     created_at: datetime | None = None
 
 

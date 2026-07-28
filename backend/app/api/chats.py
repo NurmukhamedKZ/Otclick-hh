@@ -5,13 +5,12 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-
 from app.api.deps import get_current_user
 from app.db.supabase import service_client
 from app.schemas.recruiter import OkResponse, SendDraftRequest
 from app.services import chatik
 from app.services.hh_credentials import load_api_client, persist_if_refreshed
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 logger = logging.getLogger(__name__)
 

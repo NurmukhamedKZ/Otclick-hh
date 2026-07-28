@@ -12,10 +12,9 @@ from __future__ import annotations
 import hmac
 import logging
 
-from fastapi import APIRouter, Header, HTTPException, status
-
 from app.config import settings
 from app.services import retention, token_refresh
+from fastapi import APIRouter, Header, HTTPException, status
 
 logger = logging.getLogger(__name__)
 

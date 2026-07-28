@@ -29,8 +29,9 @@ async def test_has_test_vacancy_is_queued_not_skipped():
 
     a_filter = {
         "id": "f1", "resume_id": "r1", "text": "AI engineer", "area": None,
-        "salary_min": None, "experience": None, "schedule": None,
-        "employment": None, "professional_role": None, "excluded_regex": None,
+        "experience": None, "work_format": None,
+        "employment_form": None, "search_field": "name", "period": 30,
+        "excluded_text": None,
     }
     filters_chain = _chain([a_filter])
     apps_chain = _chain([])       # nothing applied yet
@@ -66,8 +67,9 @@ async def test_has_test_vacancy_is_queued_not_skipped():
 def _filter_row(**over):
     base = {
         "id": "f1", "resume_id": "r1", "text": "AI engineer", "area": None,
-        "salary_min": None, "experience": None, "schedule": None,
-        "employment": None, "professional_role": None, "excluded_regex": None,
+        "experience": None, "work_format": None,
+        "employment_form": None, "search_field": "name", "period": 30,
+        "excluded_text": None,
         "ai_filter_enabled": True,
     }
     base.update(over)
@@ -184,6 +186,42 @@ async def test_round_robin_interleaves_filters():
     queue = get_user_queue("u1")
     order = [queue.get_nowait().vacancy_id for _ in range(6)]
     assert order == ["a0", "b0", "a1", "b1", "a2", "b2"]
+
+
+@pytest.mark.asyncio
+async def test_overlapping_filters_queue_each_vacancy_once():
+    """Two filters over the same role (different region) return overlapping
+    pages. Queuing the same vacancy twice burns a push slot for nothing —
+    apply_one would just answer 'skipped' on the second copy."""
+    from app.services import vacancy_producer as vp
+    from app.worker.queue import drop_user_queue, get_user_queue
+    drop_user_queue("u1")
+
+    f1 = _filter_row(id="f1", text="A", ai_filter_enabled=False)
+    f2 = _filter_row(id="f2", text="B", ai_filter_enabled=False)
+
+    def _table(name):
+        return {"filters": _chain([f1, f2]), "applications": _chain([]),
+                "blacklist": _chain([])}[name]
+
+    def _get(path, params):
+        # both filters see v1; only the second also sees v2
+        ids = ["v1"] if params.get("text") == "A" else ["v1", "v2"]
+        return {"items": [{"id": i, "employer": {"id": f"e{i}"}} for i in ids],
+                "found": len(ids)}
+
+    client = MagicMock()
+    client.access_token = "tok"
+    client.get.side_effect = _get
+
+    with patch.object(vp.service_client, "table", side_effect=_table), \
+         patch.object(vp, "load_api_client", new=AsyncMock(return_value=client)), \
+         patch.object(vp, "persist_if_refreshed", new=AsyncMock()):
+        pushed, _ = await vp.produce_jobs("u1")
+
+    assert pushed == 2
+    queue = get_user_queue("u1")
+    assert sorted(queue.get_nowait().vacancy_id for _ in range(2)) == ["v1", "v2"]
 
 
 @pytest.mark.asyncio

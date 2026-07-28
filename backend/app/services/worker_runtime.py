@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from app.db.supabase import service_client
@@ -29,7 +29,7 @@ async def heartbeat(
 ) -> None:
     payload: dict[str, Any] = {
         "user_id": user_id,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(UTC).isoformat(),
     }
     if state is not None:
         payload["state"] = state

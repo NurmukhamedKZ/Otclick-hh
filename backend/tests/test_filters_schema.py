@@ -6,9 +6,9 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service")
 os.environ.setdefault("FERNET_KEY", "kPpDeJjFqDppkMm6QHzqFkkSgFwsKtGzh4WeZ5dKZHc=")
 
 
-def test_filter_create_defaults_ai_filter_enabled_true():
+def test_filter_create_defaults_ai_filter_enabled_false():
     from app.schemas.filters import FilterCreate
-    assert FilterCreate(resume_id="r1").ai_filter_enabled is True
+    assert FilterCreate(resume_id="r1").ai_filter_enabled is False
 
 
 def test_filter_update_accepts_ai_filter_enabled():

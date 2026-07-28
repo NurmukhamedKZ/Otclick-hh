@@ -14,15 +14,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 
+from app.ai.agent import HHAgent
 from app.db.supabase import service_client
 from app.hh import errors as hh_errors
 from app.services import captcha as captcha_service
-from app.services import form_drafts
-from app.services import notifications
-from app.ai.agent import HHAgent
+from app.services import form_drafts, notifications
 from app.services.hh_credentials import (
     HHCredentialsInvalid,
     load_api_client,
@@ -167,7 +166,7 @@ def _record_application(
     if filter_id:
         row["filter_id"] = filter_id
     if status in ("sent", "form_sent"):
-        row["applied_at"] = datetime.now(timezone.utc).isoformat()
+        row["applied_at"] = datetime.now(UTC).isoformat()
     if form_answers:
         row["form_answers"] = form_answers
     try:

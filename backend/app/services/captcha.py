@@ -9,10 +9,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import requests
-
 from app.db.supabase import service_client
 
 logger = logging.getLogger(__name__)
@@ -69,7 +68,7 @@ def _mark_solved_sync(user_id: str) -> None:
     (
         service_client.table("captcha_requests")
         .update(
-            {"solved": True, "solved_at": datetime.now(timezone.utc).isoformat()}
+            {"solved": True, "solved_at": datetime.now(UTC).isoformat()}
         )
         .eq("user_id", user_id)
         .eq("solved", False)

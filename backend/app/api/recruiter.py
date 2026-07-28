@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
-
 from app.api.deps import get_current_user
 from app.schemas.recruiter import OkResponse, SendDraftRequest
 from app.services import recruiter
+from fastapi import APIRouter, Depends
 
 router = APIRouter(prefix="/api/recruiter", tags=["recruiter"])
 

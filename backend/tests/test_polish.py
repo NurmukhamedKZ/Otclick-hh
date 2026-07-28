@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # --- 429 from hh is transient, not a failed apply ---------------------------
 
 def _resp(status: int) -> MagicMock:

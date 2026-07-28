@@ -11,12 +11,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from langchain.tools import ToolRuntime, tool
-
 from app.ai.prompts import sanitize_ai_text
 from app.hh.client import ApiClient
 from app.services import recruiter
 from app.services.notifications import notify
+from langchain.tools import ToolRuntime, tool
 
 
 @dataclass

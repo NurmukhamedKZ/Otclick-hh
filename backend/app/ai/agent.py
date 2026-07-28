@@ -9,10 +9,6 @@ from __future__ import annotations
 
 import logging
 
-from langchain.agents import create_agent
-from langchain_core.rate_limiters import InMemoryRateLimiter
-from langchain_openai import ChatOpenAI
-
 from app.ai.prompts import build_recruiter_prompt
 from app.ai.recruiter_tools import RECRUITER_TOOLS, RecruiterContext, do_escalate
 from app.config import settings
@@ -20,6 +16,9 @@ from app.services import qa_memory
 from app.services.cover_letter import generate as _generate_cover_letter
 from app.services.form_filler import FillStatus, prepare_form_answers
 from app.services.relevance import Verdict, filter_relevant
+from langchain.agents import create_agent
+from langchain_core.rate_limiters import InMemoryRateLimiter
+from langchain_openai import ChatOpenAI
 
 logger = logging.getLogger(__name__)
 

@@ -31,6 +31,15 @@ dev = [
 line-length = 100
 target-version = "py313"
 
+[tool.ruff.lint]
+# Explicit select: ruff's own default (with no [tool.ruff.lint] section) is much
+# wider than E4/E7/E9/F and pulls in opinionated families (BLE/TRY/SIM/FURB/S/...)
+# that fight this codebase's documented fail-open/broad-except conventions
+# (see CLAUDE.md: "never crash the loop", "fail-open"). Keep it to the
+# uncontroversial, already-clean set: pyflakes, pycodestyle errors, import
+# sorting, and stdlib modernization.
+select = ["E4", "E7", "E9", "F", "I", "UP"]
+
 [tool.ruff.lint.per-file-ignores]
 # `load_dotenv()` must run before app imports read settings; tests must set
 # env vars before importing app modules (see CLAUDE.md).

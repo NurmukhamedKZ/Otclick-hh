@@ -95,10 +95,19 @@ def get_cached_verdicts(resume_id: str, vacancy_ids: list[str]) -> dict[str, Ver
     }
 
 
-def store_verdicts(user_id: str, resume_id: str, verdicts: dict[str, Verdict]) -> None:
-    """Persist verdicts to relevance_cache (idempotent upsert). Never raises."""
+def store_verdicts(
+    user_id: str,
+    resume_id: str,
+    verdicts: dict[str, Verdict],
+    items: list[dict] | None = None,
+) -> None:
+    """Persist verdicts to relevance_cache (idempotent upsert). Never raises.
+
+    items (the judged candidates) supply vacancy/employer names for the UI log.
+    """
     if not verdicts:
         return
+    meta = {str(it["id"]): it for it in (items or []) if it.get("id")}
     rows = [
         {
             "user_id": user_id,
@@ -106,6 +115,8 @@ def store_verdicts(user_id: str, resume_id: str, verdicts: dict[str, Verdict]) -
             "vacancy_id": vid,
             "relevant": relevant,
             "reason": reason or None,
+            "vacancy_name": meta.get(vid, {}).get("name") or None,
+            "employer_name": meta.get(vid, {}).get("employer_name") or None,
         }
         for vid, (relevant, reason) in verdicts.items()
     ]
@@ -115,3 +126,20 @@ def store_verdicts(user_id: str, resume_id: str, verdicts: dict[str, Verdict]) -
         ).execute()
     except Exception:
         logger.warning("relevance: cache write failed", exc_info=True)
+
+
+def list_verdicts(user_id: str, relevant: bool | None, limit: int) -> list[dict]:
+    """Recent AI verdicts for the UI log. Empty list on any failure."""
+    try:
+        q = (
+            service_client.table("relevance_cache")
+            .select("vacancy_id,vacancy_name,employer_name,relevant,reason,created_at")
+            .eq("user_id", user_id)
+        )
+        if relevant is not None:
+            q = q.eq("relevant", relevant)
+        res = q.order("created_at", desc=True).limit(limit).execute()
+    except Exception:
+        logger.warning("relevance: log read failed", exc_info=True)
+        return []
+    return res.data or []

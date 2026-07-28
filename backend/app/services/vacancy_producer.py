@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 
 from app.db.supabase import service_client
 from app.services import relevance
@@ -25,8 +24,8 @@ def _load_enabled_filters(user_id: str) -> list[dict]:
     res = (
         service_client.table("filters")
         .select(
-            "id,resume_id,text,area,salary_min,experience,schedule,"
-            "employment,professional_role,excluded_regex,ai_filter_enabled"
+            "id,resume_id,text,area,experience,work_format,employment_form,"
+            "search_field,period,excluded_text,ai_filter_enabled"
         )
         .eq("user_id", user_id)
         .eq("enabled", True)
@@ -68,18 +67,6 @@ def _blacklisted_employer_ids(user_id: str, employer_ids: list[str]) -> set[str]
     return {r["employer_id"] for r in (res.data or [])}
 
 
-def _matches_excluded(item: dict, pat: re.Pattern | None) -> bool:
-    if not pat:
-        return False
-    hay = " ".join(filter(None, [
-        item.get("name") or "",
-        (item.get("employer") or {}).get("name") or "",
-        ((item.get("snippet") or {}).get("requirement") or ""),
-        ((item.get("snippet") or {}).get("responsibility") or ""),
-    ]))
-    return bool(pat.search(hay))
-
-
 async def _relevant_ids(
     loop, agent, user_id: str, resume_id: str, candidates: list[dict]
 ) -> set[str]:
@@ -99,7 +86,7 @@ async def _relevant_ids(
     if uncached:
         fresh = await agent.filter_relevant_vacancies(resume_id, uncached)
         await loop.run_in_executor(
-            None, relevance.store_verdicts, user_id, resume_id, fresh
+            None, relevance.store_verdicts, user_id, resume_id, fresh, uncached
         )
     verdicts = {**cached, **fresh}
     # Default missing verdicts to relevant (fail-open / conservative).
@@ -109,21 +96,14 @@ async def _relevant_ids(
 async def _filter_candidate_stream(loop, agent, client, user_id: str, f: dict):
     """Yield vacancy ids for one filter, lazily paged.
 
-    Applies dedup / blacklist / excluded_regex / AI relevance per page, then
+    Applies dedup / blacklist / AI relevance per page (excluded words are
+    applied by hh itself via the excluded_text search param), then
     yields surviving candidate ids one at a time so the caller can round-robin
     across filters. On completion (incl. early aclose) flushes the
     relations-based auto-blacklist and logs a per-filter summary.
     """
-    excluded_pat: re.Pattern | None = None
-    if f.get("excluded_regex"):
-        try:
-            excluded_pat = re.compile(f["excluded_regex"], re.IGNORECASE)
-        except re.error:
-            logger.warning("invalid excluded_regex on filter %s", f.get("id"))
-
     skipped_already = 0
     skipped_blacklist = 0
-    skipped_excluded = 0
     skipped_relations = 0
     relations_blacklist: dict[str, str | None] = {}
     pages = 0
@@ -191,13 +171,11 @@ async def _filter_candidate_stream(loop, agent, client, user_id: str, f: dict):
                 if emp_id and str(emp_id) in blacklisted:
                     skipped_blacklist += 1
                     continue
-                if _matches_excluded(it, excluded_pat):
-                    skipped_excluded += 1
-                    continue
                 snippet = it.get("snippet") or {}
                 page_candidates.append({
                     "id": vid,
                     "name": it.get("name") or "",
+                    "employer_name": (it.get("employer") or {}).get("name") or "",
                     "snippet_requirement": snippet.get("requirement") or "",
                     "snippet_responsibility": snippet.get("responsibility") or "",
                 })
@@ -229,9 +207,9 @@ async def _filter_candidate_stream(loop, agent, client, user_id: str, f: dict):
             )
         logger.info(
             "producer: user=%s filter=%s pages=%d skipped already=%d blacklist=%d "
-            "excluded=%d relations=%d",
+            "relations=%d",
             user_id, f.get("id"), pages,
-            skipped_already, skipped_blacklist, skipped_excluded, skipped_relations,
+            skipped_already, skipped_blacklist, skipped_relations,
         )
 
 
@@ -240,6 +218,9 @@ async def produce_jobs(user_id: str, agent=None) -> tuple[int, int]:
 
     Each filter gets an equal turn (one candidate per turn) so no single
     filter can starve the others out of the shared MAX_PUSH_PER_RUN budget.
+    Overlapping filters (same role, different region) yield the same vacancy
+    twice; `seen` keeps the second copy out of the queue, where it would burn a
+    push slot only for apply_one to answer "skipped".
     Returns (pushed, skipped_has_test_total) — the second value is always 0
     (has_test vacancies are queued, not skipped); kept for the caller's API.
     """
@@ -269,6 +250,7 @@ async def produce_jobs(user_id: str, agent=None) -> tuple[int, int]:
     meta = [(f["resume_id"], f.get("id")) for f in filters]
     active = list(range(len(streams)))
     cursor = 0
+    seen: set[str] = set()
 
     try:
         while pushed < MAX_PUSH_PER_RUN and active:
@@ -278,6 +260,10 @@ async def produce_jobs(user_id: str, agent=None) -> tuple[int, int]:
             except StopAsyncIteration:
                 active.remove(idx)
                 continue  # list shrank — keep cursor, next turn picks the shifted item
+            if vid in seen:
+                cursor += 1  # another filter already queued it — pass the turn on
+                continue
+            seen.add(vid)
             resume_id, filter_id = meta[idx]
             await queue.put(
                 ApplyJob(

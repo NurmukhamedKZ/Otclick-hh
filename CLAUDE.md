@@ -157,8 +157,8 @@ services/
   hh_credentials.py          — load ApiClient from stored creds; persist if auto-refreshed
   token_refresh.py           — refresh_user (one) + refresh_due (near-expiry cron batch)
   resume_sync.py             — pull /resumes/mine → upsert resumes table
-  filters_service.py         — filters CRUD + vacancy preview with excluded_regex
-  vacancy_producer.py        — search per enabled filter → dedup/blacklist/exclude → AI relevance filter (if filter.ai_filter_enabled) → queue
+  filters_service.py         — filters CRUD + vacancy preview (excluded words go to hh as `excluded_text`)
+  vacancy_producer.py        — search per enabled filter → round-robin + cross-filter dedup/blacklist → AI relevance filter (if filter.ai_filter_enabled) → queue
   apply.py                   — apply_one: one /negotiations submit; maps hh errors → ApplyStatus
   form_filler.py             — solve vacancy tests over hh.ru web session (no browser); returns answers, no submit
   form_drafts.py             — form-draft persistence + approval; approve() re-fetches xsrf, posts to hh
@@ -255,8 +255,8 @@ Migrations live in `infra/supabase/migrations/` (numbered SQL files, `001`–`02
 
 - `profiles` — user profiles + plan state (`plan`, `trial_ends`, `plan_expires_at`, `polar_customer_id`/`polar_subscription_id`, legacy `cp_subscription_id`), `worker_enabled` / `agent_enabled`, `onboarded`, `timezone`, `negotiations_synced_at`. **`authenticated` may UPDATE only `onboarded` and `timezone`** (migration 024) — every billing/worker field is service_role-only, since PostgREST is exposed to the browser through Kong
 - `hh_credentials` — encrypted hh tokens + `web_cookies_encrypted` per user (full RLS denial, service_role only)
-- `resumes` — user resume list synced from hh, unique on `(user_id, hh_resume_id)`; `professional_roles int[]` seeds a new filter's search (migration 019)
-- `filters` — saved vacancy search filters per user (`name`, `ai_filter_enabled`); `resume_id` is `ON DELETE SET NULL` (migration 021 — CASCADE used to wipe filters on reconnect)
+- `resumes` — user resume list synced from hh, unique on `(user_id, hh_resume_id)`; a new filter seeds its `text` from `title`
+- `filters` — saved vacancy search filters per user (`name`, `ai_filter_enabled`); `resume_id` is `ON DELETE SET NULL` (migration 021 — CASCADE used to wipe filters on reconnect). Search fields track hh's live params (migrations 029–031): `excluded_text` (hh-side word exclusion, replaced the client-side `excluded_regex`), `search_field` (default `name` — matching descriptions too was the main source of junk), `period` (default 30 days), `work_format`/`employment_form` (hh deprecated `schedule`/`employment`). No `professional_role`: it was seeded from the resume and AND-ed on top of `text`, dropping correct vacancies the employer had tagged loosely (migration 031). No salary filter: hh reads `salary` as RUR unless `currency` is passed, so a tenge number silently searched for ~4× the money
 - `applications` — apply attempts/results, unique on `(user_id, vacancy_id)`; stores status, cover_letter, `form_answers`; `resume_id` is `ON DELETE SET NULL` (migration 020)
 - `blacklist` — blacklisted employers per user, unique on `(user_id, employer_id)`
 - `apply_counters` — per-user daily/hourly apply tallies (limiter)

@@ -11,22 +11,21 @@ import asyncio
 import logging
 import random
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 import requests as _requests
-
 from app.ai.agent import HHAgent
 from app.hh import errors as hh_errors
 from app.services import apply as apply_service
 from app.services import captcha as captcha_service
+from app.services import plan as plan_service
+from app.services import worker_control
 from app.services.hh_credentials import (
     load_api_client,
     mark_invalid,
     persist_if_refreshed,
 )
-from app.services import plan as plan_service
-from app.services import worker_control
 from app.services.notifications import notify
 from app.services.worker_runtime import heartbeat
 from app.worker import limiter, throttle
@@ -234,7 +233,7 @@ async def _run_loop(handle: RunnerHandle) -> None:
                     await asyncio.wait_for(
                         handle.captcha_event.wait(), timeout=CAPTCHA_POLL_S
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     pass
                 handle.captcha_event.clear()
                 if handle.state != "paused_captcha":
@@ -292,7 +291,7 @@ async def _run_loop(handle: RunnerHandle) -> None:
             sleep_s = await asyncio.get_running_loop().run_in_executor(
                 None, _seconds_until_next_local_midnight, user_id
             )
-            handle.next_run_at = datetime.now(timezone.utc) + timedelta(seconds=sleep_s)
+            handle.next_run_at = datetime.now(UTC) + timedelta(seconds=sleep_s)
             await notify(
                 user_id, "limit_reached", {"source": "local_day", "sleep_s": int(sleep_s)}
             )
@@ -321,7 +320,7 @@ async def _run_loop(handle: RunnerHandle) -> None:
                 if manual:
                     await _finish_batch(handle)
                     return
-                handle.next_run_at = datetime.now(timezone.utc) + timedelta(
+                handle.next_run_at = datetime.now(UTC) + timedelta(
                     seconds=idle_sleep
                 )
                 logger.info(
@@ -337,7 +336,7 @@ async def _run_loop(handle: RunnerHandle) -> None:
         # UI shows "работает" for the whole break.
         if handle.cluster.should_break():
             break_s = handle.cluster.next_break_seconds()
-            handle.next_run_at = datetime.now(timezone.utc) + timedelta(seconds=break_s)
+            handle.next_run_at = datetime.now(UTC) + timedelta(seconds=break_s)
             logger.info("user %s: cluster break %.0fs", user_id, break_s)
             await _hb()
             await asyncio.sleep(break_s)
@@ -347,13 +346,13 @@ async def _run_loop(handle: RunnerHandle) -> None:
         # Pull next job.
         try:
             job = await asyncio.wait_for(queue.get(), timeout=30.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.debug("runner: user=%s queue.get() timeout — re-loop", user_id)
             continue
 
         # Throttle pre-apply.
         delay = throttle.next_delay(rng)
-        handle.next_run_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
+        handle.next_run_at = datetime.now(UTC) + timedelta(seconds=delay)
         logger.info(
             "runner: user=%s applying vacancy=%s (resume=%s) after %.1fs delay",
             user_id, job.vacancy_id, job.resume_id, delay,
@@ -382,7 +381,7 @@ async def _run_loop(handle: RunnerHandle) -> None:
             sleep_s = await asyncio.get_running_loop().run_in_executor(
                 None, _seconds_until_next_local_midnight, user_id
             )
-            handle.next_run_at = datetime.now(timezone.utc) + timedelta(seconds=sleep_s)
+            handle.next_run_at = datetime.now(UTC) + timedelta(seconds=sleep_s)
             handle.last_error = "hh daily limit"
             await notify(
                 user_id, "limit_reached", {"source": "hh", "sleep_s": int(sleep_s)}
@@ -413,9 +412,7 @@ async def _run_loop(handle: RunnerHandle) -> None:
             await _hb()
             logger.error("user %s: account banned — stopping runner", user_id)
             return
-        elif status == "form_required":
-            handle.skipped_has_test += 1
-        elif status == "form_pending":
+        elif status == "form_required" or status == "form_pending":
             handle.skipped_has_test += 1
         elif status == "vacancy_gone":
             pass
@@ -448,7 +445,7 @@ async def _recruiter_loop(handle: RunnerHandle) -> None:
             await asyncio.wait_for(
                 handle.agent_stop.wait(), timeout=RECRUITER_POLL_INTERVAL_S
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
     logger.info("recruiter loop: user=%s STOP", user_id)
 

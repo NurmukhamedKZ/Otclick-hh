@@ -1,8 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-
 from app.api.deps import get_current_user
 from app.schemas.billing import BillingStatusResponse, PortalResponse, SubscribeResponse
 from app.services import billing as billing_service
+from fastapi import APIRouter, Depends, HTTPException, status
 
 router = APIRouter(prefix="/api/billing", tags=["billing"])
 
