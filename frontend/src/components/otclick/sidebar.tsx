@@ -29,7 +29,7 @@ const NAV: Item[] = [
   { id: "applications", href: "/applications", icon: <IList />, label: "Отклики" },
   { id: "analytics", href: "/analytics", icon: <IChart />, label: "Аналитика" },
   { id: "chats", href: "/chats", icon: <IMail />, label: "Чаты", badge: "chats" },
-  { id: "todo", href: "/todo", icon: <IDoc />, label: "Todo", badge: "todo" },
+  { id: "todo", href: "/todo", icon: <IDoc />, label: "Задания", badge: "todo" },
   { id: "notifications", href: "/notifications", icon: <IBell />, label: "Уведомления", badge: "notifications" },
   { id: "account", href: "/account", icon: <IUser />, label: "Аккаунт" },
 ];

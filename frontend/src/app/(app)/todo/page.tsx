@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Btn, Card, EmptyState, PageHeader, SegmentedTabs, Skeleton } from "@/components/otclick/ui";
+import { Btn, Card, EmptyState, SegmentedTabs, Skeleton } from "@/components/otclick/ui";
 import { ICheck, IDoc, IMail } from "@/components/otclick/icons";
 import { useRecruiter, type Draft, type Todo } from "@/hooks/useRecruiter";
 import { useFormDrafts, type FormAnswer, type FormDraft } from "@/hooks/useFormDrafts";
@@ -511,10 +511,9 @@ export default function RecruiterPage() {
 
   return (
     <>
-      <PageHeader title="Todo" subtitle="что ждёт твоего решения" crumbs={[{ label: "Главная", href: "/dashboard" }, { label: "Todo" }]} />
       <div style={{ padding: "0 16px" }}>
         <SegmentedTabs
-          label="Разделы Todo"
+          label="Разделы Заданий"
           items={SECTIONS.map((s) => ({ id: s.id, label: s.label, count: counts[s.id] }))}
           value={active}
           onChange={(id) => setActive(id as SectionId)}

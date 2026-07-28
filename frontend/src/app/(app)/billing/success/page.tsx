@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
-import { Btn, Card, PageHeader } from "@/components/otclick/ui";
+import { Btn, Card } from "@/components/otclick/ui";
 import type { BillingStatus } from "@/lib/types";
 
 // Polar редиректит сюда сразу после оплаты, а план активирует вебхук — он может
@@ -48,15 +48,6 @@ export default function BillingSuccessPage() {
 
   return (
     <>
-      <PageHeader
-        title="Оплата прошла"
-        subtitle="подключаем тариф"
-        crumbs={[
-          { label: "Главная", href: "/dashboard" },
-          { label: "Подписка", href: "/billing" },
-          { label: "Оплата" },
-        ]}
-      />
       <Card>
         <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 8 }}>
           {active ? "Тариф активирован" : "Платёж принят"}
