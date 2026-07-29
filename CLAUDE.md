@@ -52,7 +52,7 @@ cd backend && python -m pytest tests/test_hh_auth.py::test_encrypt_decrypt_round
 playwright install chromium
 
 # ─── Local Supabase stack (the ONLY environment — see below) ───
-python3 infra/supabase/gen-keys.py     # once: JWT/API keys for the root .env
+python3 infra/bootstrap.py             # once: writes the root .env, all secrets generated
 docker compose up -d                   # db, migrate, auth, kong, storage, realtime, api, worker, frontend
 docker compose ps                      # kong + db must be (healthy)
 
@@ -74,7 +74,7 @@ There is **no hosted Supabase project** anymore — the stack in `docker-compose
 
 - **Migrations run through one idempotent script**, `infra/supabase/migrate.sh`: it applies every `infra/supabase/migrations/*.sql` not yet recorded in `public.schema_migrations`, each in its own transaction. It runs from two places — the `docker-entrypoint-initdb.d` hook (`init/zz2-run-app-migrations.sh`, fresh volume only) and the one-shot `migrate` compose service that `api` depends on (`service_completed_successfully`). So on an existing volume a new migration lands on the next `docker compose up`; nothing is ever replayed. A pre-ledger database is **baselined** on first run (every file on disk recorded as applied, nothing executed) — if you upgraded code and DB in one step, verify the newest migrations really landed. No `supabase db push`, no MCP `apply_migration`: those talk to hosted projects and are useless here.
 - **Two URLs, on purpose**: `SUPABASE_URL=http://kong:8000` is in-network (backend/worker containers). `SUPABASE_PUBLIC_URL` / `NEXT_PUBLIC_SUPABASE_URL=http://localhost:54321` is browser-side. Swapping them breaks whichever side got the wrong one, and the failure looks like a network error, not a config error.
-- **Keys come from `infra/supabase/gen-keys.py`**, not from a dashboard: one `JWT_SECRET` + HS256 anon/service tokens signed with it (10-year exp, rotate by re-running the script). All three must move together — `ANON_KEY`/`SERVICE_ROLE_KEY` (stack-level, consumed by auth/rest/kong) have to equal `SUPABASE_ANON_KEY`/`SUPABASE_SERVICE_ROLE_KEY` (app-level), and any of them signed by a different secret gives blanket 401s.
+- **Keys come from `infra/bootstrap.py`** (which fills the whole `.env`; `infra/supabase/gen-keys.py` prints just the triple), not from a dashboard: one `JWT_SECRET` + HS256 anon/service tokens signed with it (10-year exp, rotate by re-running the script). All three must move together — `ANON_KEY`/`SERVICE_ROLE_KEY` (stack-level, consumed by auth/rest/kong) have to equal `SUPABASE_ANON_KEY`/`SUPABASE_SERVICE_ROLE_KEY` (app-level), and any of them signed by a different secret gives blanket 401s.
 - `NEXT_PUBLIC_API_URL=http://localhost:8000` is the FastAPI backend, **not** Kong on 54321. Next bakes it at build time.
 - Full setup walkthrough lives in README Quick Start (it's the public-facing self-host guide); don't duplicate it here.
 
