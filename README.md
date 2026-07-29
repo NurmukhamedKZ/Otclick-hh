@@ -164,14 +164,18 @@ self-hosted Supabase stack (Postgres + Auth + Storage + Realtime) — is
 Docker Compose:
 
 ```bash
-# 1. Write .env — every secret generated and pasted into all the slots that
+# 1. Get the code
+git clone https://github.com/NurmukhamedKZ/Otclick-hh.git
+cd Otclick-hh
+
+# 2. Write .env — every secret generated and pasted into all the slots that
 #    must agree (JWT keys, Postgres password, Fernet key, cron token)
 python3 infra/bootstrap.py
 
-# 2. Build and start everything
+# 3. Build and start everything
 docker compose up -d --build
 
-# 3. Open http://localhost:3000 — sign up, connect hh, start applying
+# 4. Open http://localhost:3000 — sign up, connect hh, start applying
 ```
 
 Nothing to fill in by hand. AI features are optional — add `OPENAI_API_KEY` to
