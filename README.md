@@ -164,21 +164,20 @@ self-hosted Supabase stack (Postgres + Auth + Storage + Realtime) — is
 Docker Compose:
 
 ```bash
-# 1. Generate JWT/API keys for the local Supabase stack
-python3 infra/supabase/gen-keys.py
+# 1. Write .env — every secret generated and pasted into all the slots that
+#    must agree (JWT keys, Postgres password, Fernet key, cron token)
+python3 infra/bootstrap.py
 
-# 2. One env file for everything — copy and fill it in (see .env.example)
-cp .env.example .env
-# Paste JWT_SECRET/ANON_KEY/SERVICE_ROLE_KEY into the matching vars,
-# copy ANON_KEY → SUPABASE_ANON_KEY + NEXT_PUBLIC_SUPABASE_ANON_KEY,
-# SERVICE_ROLE_KEY → SUPABASE_SERVICE_ROLE_KEY
-# Set POSTGRES_PASSWORD and FERNET_KEY
-
-# 3. Build and start everything
+# 2. Build and start everything
 docker compose up -d --build
 
-# 4. Open http://localhost:3000 — sign up, connect hh, start applying
+# 3. Open http://localhost:3000 — sign up, connect hh, start applying
 ```
+
+Nothing to fill in by hand. AI features are optional — add `OPENAI_API_KEY` to
+`.env` when you want them (empty key → template fallbacks, nothing breaks).
+Re-run with `--force` to rotate every secret (existing sessions and encrypted
+hh tokens become unreadable).
 
 No cloud account needed. Everything runs locally — there is no hosted Supabase
 project, this stack is the only environment. There is exactly **one** env file:
@@ -217,10 +216,8 @@ source .venv/bin/activate
 # Install Playwright browser
 playwright install chromium
 
-# Generate keys and configure environment (single root .env)
-python3 infra/supabase/gen-keys.py
-cp .env.example .env
-# Fill in the generated keys and start the local Supabase stack:
+# Configure environment (single root .env) and start the local Supabase stack
+python3 infra/bootstrap.py
 docker compose up -d db migrate auth rest realtime storage kong
 
 # Start the development server
@@ -235,7 +232,7 @@ npm install
 
 # Copy and configure environment
 cp .env.local.example .env.local
-# Edit .env.local with your ANON_KEY from gen-keys.py
+# Edit .env.local with the ANON_KEY from the root .env
 
 # Start the development server
 npm run dev
@@ -257,20 +254,20 @@ python worker_main.py
 ### Everything (`.env` in the repo root — see `.env.example` for the full list)
 
 ```env
-# Local Supabase stack — generate keys with: python3 infra/supabase/gen-keys.py
+# Local Supabase stack — all of these are written by: python3 infra/bootstrap.py
 SUPABASE_URL=http://kong:8000
 SUPABASE_PUBLIC_URL=http://localhost:54321
-SUPABASE_ANON_KEY=<paste ANON_KEY from gen-keys.py>
-SUPABASE_SERVICE_ROLE_KEY=<paste SERVICE_ROLE_KEY from gen-keys.py>
-JWT_SECRET=<paste JWT_SECRET from gen-keys.py>
+SUPABASE_ANON_KEY=<generated>
+SUPABASE_SERVICE_ROLE_KEY=<generated>
+JWT_SECRET=<generated — signs both keys above>
 ANON_KEY=<same as SUPABASE_ANON_KEY>
 SERVICE_ROLE_KEY=<same as SUPABASE_SERVICE_ROLE_KEY>
-POSTGRES_PASSWORD=<any strong local secret>
+POSTGRES_PASSWORD=<generated>
 
-# Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-FERNET_KEY=your-fernet-key
+# Encrypts hh tokens at rest — also generated
+FERNET_KEY=<generated>
 
-# AI — all fields optional. Empty → fallback templates.
+# AI — see "AI features" below. Empty key → fallback templates.
 OPENAI_API_KEY=sk-...
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-5.4-nano
@@ -284,11 +281,38 @@ POLAR_WEBHOOK_SECRET=
 POLAR_SERVER=sandbox
 ```
 
+### AI features
+
+The only value `infra/bootstrap.py` can't generate is the model key. Without it
+the stack runs, but degrades:
+
+| Feature | No `OPENAI_API_KEY` |
+|---|---|
+| Auto-apply | Works |
+| Cover letters | Template fallback (`rand_text`) instead of AI |
+| AI relevance filter | Fails open — keeps every vacancy |
+| Vacancy tests | Not solved → `form_required`, fill them in by hand |
+| Recruiter agent | Skips every chat |
+
+Any OpenAI-compatible endpoint works — `OPENAI_BASE_URL` is a base URL, not a
+full path. A local model costs nothing and keeps resumes off third-party
+servers:
+
+```env
+# Ollama on the host (from inside Docker use host.docker.internal)
+OPENAI_BASE_URL=http://host.docker.internal:11434/v1
+OPENAI_MODEL=qwen3:8b
+OPENAI_API_KEY=ollama   # must be non-empty — the value itself is ignored
+```
+
+Tracing is off by default on purpose: `LANGSMITH_TRACING=true` ships resumes,
+recruiter chats and test answers to a third party.
+
 ### Frontend (`frontend/.env.local`)
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=http://localhost:54321
-NEXT_PUBLIC_SUPABASE_ANON_KEY=<paste ANON_KEY from gen-keys.py>
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<same ANON_KEY as the root .env>
 NEXT_PUBLIC_API_URL=http://localhost:8000
 NEXT_PUBLIC_GOOGLE_AUTH_ENABLED=false
 ```
@@ -394,6 +418,7 @@ otclick/
 │   ├── Dockerfile
 │   └── package.json
 ├── infra/
+│   ├── bootstrap.py             # Writes a ready-to-run root .env (all secrets)
 │   ├── nginx.conf               # Reverse proxy
 │   └── supabase/
 │       ├── migrate.sh           # Migration runner (ledger: public.schema_migrations)
