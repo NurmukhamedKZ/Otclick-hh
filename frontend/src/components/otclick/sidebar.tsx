@@ -10,7 +10,7 @@ import { apiFetch } from "@/lib/api";
 import { IconBtn, LinkBtn } from "@/components/otclick/ui";
 import { useQuery } from "@tanstack/react-query";
 import {
-  IHome, IList, IBell, IMail, IDoc, IUser, ISettings, ILogo, ILogout,
+  IHome, IList, IMail, IDoc, IUser, ISettings, ILogo, ILogout,
   ITelegram, IBolt, IChevRight, IChart,
 } from "@/components/otclick/icons";
 
@@ -30,7 +30,6 @@ const NAV: Item[] = [
   { id: "analytics", href: "/analytics", icon: <IChart />, label: "Аналитика" },
   { id: "chats", href: "/chats", icon: <IMail />, label: "Чаты", badge: "chats" },
   { id: "todo", href: "/todo", icon: <IDoc />, label: "Задания", badge: "todo" },
-  { id: "notifications", href: "/notifications", icon: <IBell />, label: "Уведомления", badge: "notifications" },
   { id: "account", href: "/account", icon: <IUser />, label: "Аккаунт" },
 ];
 
