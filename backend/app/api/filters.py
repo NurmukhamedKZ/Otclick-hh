@@ -1,3 +1,5 @@
+from fastapi import APIRouter, Depends, status
+
 from app.api.deps import get_current_user
 from app.schemas.filters import (
     FilterCreate,
@@ -6,7 +8,6 @@ from app.schemas.filters import (
     FilterUpdate,
 )
 from app.services import filters_service
-from fastapi import APIRouter, Depends, status
 
 router = APIRouter(prefix="/api/filters", tags=["filters"])
 

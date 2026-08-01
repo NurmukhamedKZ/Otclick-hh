@@ -1,0 +1,13 @@
+# WXT build + generated artifacts
+.output
+.wxt
+stats.html
+stats-*.json
+*.zip
+
+# local env (committed: .env.production, .env.example)
+.env
+.env.local
+
+# deps
+node_modules

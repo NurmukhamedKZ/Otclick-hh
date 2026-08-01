@@ -162,8 +162,9 @@ def test_internal_token_uses_constant_time_compare():
 
 
 def test_internal_token_rejects_wrong_and_empty_values():
-    from app.api import internal
     from fastapi import HTTPException
+
+    from app.api import internal
 
     with patch.object(internal.settings, "INTERNAL_CRON_TOKEN", "s3cret"):
         for bad in (None, "", "nope", "s3cre"):
@@ -173,8 +174,9 @@ def test_internal_token_rejects_wrong_and_empty_values():
 
 
 def test_internal_endpoints_closed_when_no_token_configured():
-    from app.api import internal
     from fastapi import HTTPException
+
+    from app.api import internal
 
     with patch.object(internal.settings, "INTERNAL_CRON_TOKEN", ""):
         with pytest.raises(HTTPException):

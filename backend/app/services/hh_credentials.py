@@ -7,11 +7,12 @@ import logging
 import time
 from datetime import UTC, datetime
 
+from fastapi import HTTPException, status
+
 from app.db.supabase import service_client
 from app.hh.client import ApiClient
 from app.hh.user_agent import generate_android_useragent
 from app.services.hh_auth import decrypt_token, encrypt_token
-from fastapi import HTTPException, status
 
 logger = logging.getLogger(__name__)
 

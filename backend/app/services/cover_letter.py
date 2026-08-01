@@ -12,11 +12,12 @@ import logging
 import random
 import re
 
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from app.ai.prompts import COVER_LETTER_SYSTEM_PROMPT, sanitize_ai_text
 from app.config import settings
 from app.db.supabase import service_client
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage
 
 logger = logging.getLogger(__name__)
 

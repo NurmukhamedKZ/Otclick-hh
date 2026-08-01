@@ -13,6 +13,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 import requests
+
 from app.config import settings
 from app.db.supabase import service_client
 from app.hh import errors

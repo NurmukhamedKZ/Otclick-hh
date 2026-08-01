@@ -16,7 +16,7 @@ def _reply(text):
 
 
 def test_build_recruiter_prompt_embeds_resume_and_rules():
-    from backend.app.ai.prompts import build_recruiter_prompt
+    from app.ai.prompts import build_recruiter_prompt
     p = build_recruiter_prompt("Python dev, 3 года опыта")
     assert "Python dev, 3 года опыта" in p
     assert "answer_recruiter_question" in p

@@ -10,9 +10,10 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from app.services import billing as billing_service
 from fastapi import APIRouter, HTTPException, Request, status
 from polar_sdk.webhooks import WebhookVerificationError
+
+from app.services import billing as billing_service
 
 logger = logging.getLogger(__name__)
 

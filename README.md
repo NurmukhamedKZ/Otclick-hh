@@ -106,6 +106,12 @@
       Funnel view (AI-checked → sent → viewed → replied → invited) with reply/invite rates,
       breakdowns by filter/resume/cover-letter, and a failures report — powered by mirrored hh negotiation state.
     </td>
+    <td width="50%">
+      <h3>🦊 Firefox Autofill Extension</h3>
+      Fills Google Forms, Yandex Forms and Microsoft Forms from your hh resume, attaches the resume PDF,
+      and answers open questions with the same AI and Q&A memory. You review and submit — it never clicks send.
+      See <a href="ext/README.md"><code>ext/</code></a>.
+    </td>
   </tr>
 </table>
 
@@ -164,14 +170,18 @@ self-hosted Supabase stack (Postgres + Auth + Storage + Realtime) — is
 Docker Compose:
 
 ```bash
-# 1. Write .env — every secret generated and pasted into all the slots that
+# 1. Get the code
+git clone https://github.com/NurmukhamedKZ/Otclick-hh.git
+cd Otclick-hh
+
+# 2. Write .env — every secret generated and pasted into all the slots that
 #    must agree (JWT keys, Postgres password, Fernet key, cron token)
 python3 infra/bootstrap.py
 
-# 2. Build and start everything
+# 3. Build and start everything
 docker compose up -d --build
 
-# 3. Open http://localhost:3000 — sign up, connect hh, start applying
+# 4. Open http://localhost:3000 — sign up, connect hh, start applying
 ```
 
 Nothing to fill in by hand. AI features are optional — add `OPENAI_API_KEY` to
@@ -370,6 +380,7 @@ otclick/
 │   │   │   ├── billing.py       # Subscription management
 │   │   │   ├── webhooks.py      # Polar webhook
 │   │   │   ├── qa.py            # User-curated Q&A memory
+│   │   │   ├── extension.py     # Firefox extension: context/fill/chat/qa/resume-file
 │   │   │   └── internal.py      # Cron endpoints (token refresh, retention)
 │   │   ├── ai/
 │   │   │   ├── agent.py         # Centralized HHAgent (ChatOpenAI)
@@ -417,6 +428,11 @@ otclick/
 │   │   └── lib/                 # API client, types, Supabase config
 │   ├── Dockerfile
 │   └── package.json
+├── ext/                         # Firefox extension (WXT, MV2)
+│   ├── entrypoints/             # background, content script, session adoption
+│   ├── lib/                     # snapshot, form filler, panel, api client
+│   ├── tests/                   # vitest units
+│   └── README.md                # Setup + how it works
 ├── infra/
 │   ├── bootstrap.py             # Writes a ready-to-run root .env (all secrets)
 │   ├── nginx.conf               # Reverse proxy
@@ -424,7 +440,7 @@ otclick/
 │       ├── migrate.sh           # Migration runner (ledger: public.schema_migrations)
 │       ├── gen-keys.py          # JWT/anon/service keys for the local stack
 │       └── migrations/          # 25 SQL migrations, applied by the `migrate` service
-├── .github/workflows/ci.yml     # CI: ruff + pytest, tsc + frontend unit tests
+├── .github/workflows/ci.yml     # CI: ruff + pytest, tsc + unit tests (frontend and ext)
 ├── docs/                        # Documentation
 ├── hh-applicant-tool/           # Reference CLI tool (read-only)
 ├── docker-compose.yml           # Backend + worker + frontend

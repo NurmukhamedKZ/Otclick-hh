@@ -6,9 +6,10 @@ import asyncio
 import logging
 from typing import Any
 
+from fastapi import HTTPException, status
+
 from app.db.supabase import service_client
 from app.services.hh_credentials import load_api_client, persist_if_refreshed
-from fastapi import HTTPException, status
 
 logger = logging.getLogger(__name__)
 

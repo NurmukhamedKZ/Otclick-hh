@@ -187,8 +187,9 @@ def test_valid_signature_parses_event():
 
 
 def test_bad_signature_rejected():
-    from app.services import billing
     from polar_sdk.webhooks import WebhookVerificationError
+
+    from app.services import billing
 
     body, headers = _sign(_order_paid_payload(), secret="someone-elses-secret")
     with patch.object(billing.settings, "POLAR_WEBHOOK_SECRET", SECRET):
@@ -197,8 +198,9 @@ def test_bad_signature_rejected():
 
 
 def test_missing_secret_rejected():
-    from app.services import billing
     from polar_sdk.webhooks import WebhookVerificationError
+
+    from app.services import billing
 
     body, headers = _sign(_order_paid_payload())
     with patch.object(billing.settings, "POLAR_WEBHOOK_SECRET", ""):
@@ -400,9 +402,10 @@ async def test_get_status_returns_plan_and_history():
 
 @pytest.fixture
 def client():
-    from app.api import webhooks
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
+
+    from app.api import webhooks
 
     app = FastAPI()
     app.include_router(webhooks.router)

@@ -4,11 +4,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+
 from app.api.router import api_router
 from app.config import settings
 from app.db.supabase import service_client
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),

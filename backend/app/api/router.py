@@ -1,3 +1,5 @@
+from fastapi import APIRouter
+
 from app.api import (
     _debug,
     analytics,
@@ -6,6 +8,7 @@ from app.api import (
     blacklist,
     captcha,
     chats,
+    extension,
     filters,
     forms,
     internal,
@@ -16,7 +19,6 @@ from app.api import (
     worker,
 )
 from app.config import settings
-from fastapi import APIRouter
 
 api_router = APIRouter()
 api_router.include_router(auth.router)
@@ -33,6 +35,7 @@ api_router.include_router(chats.router)
 api_router.include_router(forms.router)
 api_router.include_router(qa.router)
 api_router.include_router(analytics.router)
+api_router.include_router(extension.router)
 
 if settings.DEBUG_ENDPOINTS:
     api_router.include_router(_debug.router)

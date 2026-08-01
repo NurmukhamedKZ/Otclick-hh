@@ -1,3 +1,5 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+
 from app.api.deps import get_current_user
 from app.schemas.auth import (
     CaptchaSolveRequest,
@@ -10,7 +12,6 @@ from app.schemas.auth import (
 )
 from app.services import hh_auth, token_refresh
 from app.services.hh_credentials import HHCredentialsInvalid
-from fastapi import APIRouter, Depends, HTTPException, status
 
 router = APIRouter(prefix="/api/hh", tags=["hh"])
 

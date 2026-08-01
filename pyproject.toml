@@ -40,6 +40,14 @@ target-version = "py313"
 # sorting, and stdlib modernization.
 select = ["E4", "E7", "E9", "F", "I", "UP"]
 
+[tool.ruff.lint.isort]
+# The backend imports its own package as top-level `app` (it runs with backend/
+# on sys.path). Ruff's automatic first-party detection answers differently
+# depending on whether a sibling `app/` directory happens to exist beside the
+# checkout, which silently flips the expected import order of every backend
+# file. Pin it so a developer's working copy and CI agree.
+known-first-party = ["app"]
+
 [tool.ruff.lint.per-file-ignores]
 # `load_dotenv()` must run before app imports read settings; tests must set
 # env vars before importing app modules (see CLAUDE.md).

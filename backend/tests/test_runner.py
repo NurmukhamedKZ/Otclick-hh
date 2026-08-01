@@ -9,6 +9,7 @@ os.environ.setdefault("FERNET_KEY", "kPpDeJjFqDppkMm6QHzqFkkSgFwsKtGzh4WeZ5dKZHc
 
 async def test_retry_once_on_transient_then_success():
     import requests as req
+
     from app.worker import runner
     from app.worker.queue import ApplyJob
 
@@ -50,6 +51,7 @@ async def test_no_retry_on_fatal():
 
 async def test_retry_once_then_give_up():
     import requests as req
+
     from app.worker import runner
     from app.worker.queue import ApplyJob
 
@@ -69,6 +71,7 @@ async def test_retry_once_then_give_up():
 
 async def test_is_transient_classification():
     import requests as req
+
     from app.hh import errors as hh_errors
     from app.worker import runner
 

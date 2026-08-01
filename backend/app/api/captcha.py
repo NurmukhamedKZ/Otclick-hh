@@ -6,10 +6,11 @@ user's pending rows; `{request_id}` is kept for REST shape only.
 
 from __future__ import annotations
 
-from app.api.deps import get_current_user
-from app.services import captcha as captcha_service
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+
+from app.api.deps import get_current_user
+from app.services import captcha as captcha_service
 
 router = APIRouter(prefix="/api/captcha", tags=["captcha"])
 

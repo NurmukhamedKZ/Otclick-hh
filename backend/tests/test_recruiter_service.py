@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 from app.services.recruiter import new_employer_message, to_lc_messages
 
 
