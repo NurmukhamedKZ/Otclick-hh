@@ -6,6 +6,7 @@ from app.api import (
     blacklist,
     captcha,
     chats,
+    extension,
     filters,
     forms,
     internal,
@@ -33,6 +34,7 @@ api_router.include_router(chats.router)
 api_router.include_router(forms.router)
 api_router.include_router(qa.router)
 api_router.include_router(analytics.router)
+api_router.include_router(extension.router)
 
 if settings.DEBUG_ENDPOINTS:
     api_router.include_router(_debug.router)
