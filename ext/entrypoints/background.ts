@@ -1,5 +1,6 @@
 import { defineBackground } from "wxt/sandbox";
 import { browser } from "wxt/browser";
+import { buildFillPayload, callFill } from "../lib/api";
 import { getValidJwt, openWebSignIn, persistExternalSession, signOut } from "../lib/auth";
 import { debug, error } from "../lib/log";
 
@@ -62,6 +63,14 @@ async function handle(msg: Msg): Promise<unknown> {
         return { ok: false };
       }
     }
+    case "FILL_PAGE":
+      return await callFill(
+        buildFillPayload({
+          url: String(msg.url ?? ""),
+          pageText: String(msg.page_text ?? ""),
+          frames: (msg.frames ?? []) as { frame_id: number; snapshot: unknown[] }[],
+        }),
+      );
     default:
       return { error: `unknown message: ${msg?.type}` };
   }
