@@ -36,7 +36,7 @@ Firefox                                     Otclick-HH backend (FastAPI)
 │   snapshot() ─ поля страницы │            │   get_current_user (Supabase JWT)│
 │   applyFill() + marks        │            │                                 │
 │   sidebar (3 вкладки)        │            │ services/candidate_context.py   │
-└───────┬──────────────────────┘            │   профиль + resumes.raw +       │
+└───────┬──────────────────────┘            │   load_resume(hh) + факты +     │
         │ browser.runtime                   │   qa_memory.prompt_block        │
 ┌───────▼──────────────────────┐   HTTPS    │                                 │
 │ background.ts (event page)   ├───────────►│ ai/agent.py  HHAgent            │
