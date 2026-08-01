@@ -1,6 +1,6 @@
 import { defineBackground } from "wxt/sandbox";
 import { browser } from "wxt/browser";
-import { buildFillPayload, callFill } from "../lib/api";
+import { buildFillPayload, callFill, fetchContext, resumeFileUrl } from "../lib/api";
 import { getValidJwt, openWebSignIn, persistExternalSession, signOut } from "../lib/auth";
 import { debug, error } from "../lib/log";
 
@@ -62,6 +62,34 @@ async function handle(msg: Msg): Promise<unknown> {
         error("background: session adoption failed:", e);
         return { ok: false };
       }
+    }
+    case "CONTEXT": {
+      const ctx = await fetchContext();
+      return {
+        facts: ctx.facts,
+        resume: ctx.has_resume_file
+          ? { url: resumeFileUrl(), filename: ctx.resume_filename ?? "resume.pdf" }
+          : null,
+      };
+    }
+    case "FETCH_FILE": {
+      // The page can't send our Authorization header (and the API origin is
+      // cross-origin to the form), so the download happens here and the bytes
+      // travel back base64-encoded — see snapshot.ts fetchFileViaBackground.
+      const url = String(msg.url ?? "");
+      if (!url.startsWith(resumeFileUrl())) return { ok: false };
+      const jwt = await getValidJwt();
+      if (!jwt) return { ok: false };
+      const r = await fetch(url, { headers: { Authorization: `Bearer ${jwt}` } });
+      if (!r.ok) return { ok: false };
+      const buf = new Uint8Array(await r.arrayBuffer());
+      let bin = "";
+      for (const byte of buf) bin += String.fromCharCode(byte);
+      return {
+        ok: true,
+        b64: btoa(bin),
+        contentType: r.headers.get("content-type") ?? "application/pdf",
+      };
     }
     case "FILL_PAGE":
       return await callFill(
