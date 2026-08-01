@@ -1,4 +1,5 @@
 import { getValidJwt } from "./auth";
+import type { ChatMsg } from "./chat-store";
 
 const API_BASE = (import.meta.env.VITE_API_BASE as string) ?? "http://localhost:8000";
 
@@ -84,3 +85,11 @@ export const callFill = (payload: ReturnType<typeof buildFillPayload>) =>
     method: "POST",
     body: JSON.stringify(payload),
   });
+
+// ── Chat ────────────────────────────────────────────────────────────────────
+
+export const callChat = (messages: ChatMsg[], pageText?: string) =>
+  apiFetch<{ answer: string }>("/api/extension/chat", {
+    method: "POST",
+    body: JSON.stringify({ messages, page_text: pageText ?? null }),
+  }).then((r) => r.answer);

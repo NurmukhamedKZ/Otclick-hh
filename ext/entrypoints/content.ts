@@ -5,6 +5,7 @@ import { mergeFrameFields, withLabels, type FillResponse, type FilledField } fro
 import { renderMarks } from "../lib/marks";
 import { deterministicFields } from "../lib/deterministic-fill";
 import { mountPanel, type PanelController } from "../lib/panel";
+import { appendMessage, loadHistory } from "../lib/chat-store";
 import { error } from "../lib/log";
 
 /** Fields applied by the last run, kept for the qa_memory edit diff. */
@@ -31,12 +32,27 @@ export default defineContentScript({
         void browser.runtime.sendMessage({ type: "SIGN_OUT" });
         panel?.setAuth(false, "");
       },
-      onSend: async () => "Чат подключается в следующей задаче.",
+      onSend: sendChat,
       onSaveEdits: () => void 0,
     });
+    for (const m of await loadHistory()) panel.appendChat(m.role, m.content);
     await refreshAuth();
   },
 });
+
+/** One chat turn: the transcript lives here, the backend stays stateless. The
+ *  open page's text goes along so "что тут ответить?" works without pasting. */
+async function sendChat(text: string): Promise<string> {
+  const history = await appendMessage({ role: "user", content: text });
+  const resp = (await browser.runtime.sendMessage({
+    type: "CHAT",
+    messages: history,
+    page_text: document.body.innerText.slice(0, 20_000),
+  })) as { answer?: string; error?: string };
+  const answer = resp?.answer ?? "Не удалось получить ответ.";
+  await appendMessage({ role: "assistant", content: answer });
+  return answer;
+}
 
 async function refreshAuth(): Promise<void> {
   const auth = (await browser.runtime.sendMessage({ type: "AUTH_STATUS" })) as {

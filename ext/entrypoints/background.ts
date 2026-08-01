@@ -1,6 +1,6 @@
 import { defineBackground } from "wxt/sandbox";
 import { browser } from "wxt/browser";
-import { buildFillPayload, callFill, fetchContext, resumeFileUrl } from "../lib/api";
+import { buildFillPayload, callChat, callFill, fetchContext, resumeFileUrl } from "../lib/api";
 import { getValidJwt, openWebSignIn, persistExternalSession, signOut } from "../lib/auth";
 import { debug, error } from "../lib/log";
 
@@ -91,6 +91,13 @@ async function handle(msg: Msg): Promise<unknown> {
         contentType: r.headers.get("content-type") ?? "application/pdf",
       };
     }
+    case "CHAT":
+      return {
+        answer: await callChat(
+          (msg.messages ?? []) as { role: "user" | "assistant"; content: string }[],
+          msg.page_text ? String(msg.page_text) : undefined,
+        ),
+      };
     case "FILL_PAGE":
       return await callFill(
         buildFillPayload({
