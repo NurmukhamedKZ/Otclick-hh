@@ -116,3 +116,57 @@ async def test_fill_form_fields_survives_llm_error():
 
     agent.llm.with_structured_output.return_value.ainvoke = boom
     assert await agent.fill_form_fields("ctx", "page", SNAPSHOT) == []
+
+
+@pytest.mark.asyncio
+async def test_chat_without_llm_returns_message():
+    from app.ai.agent import HHAgent
+
+    agent = HHAgent("u1")
+    agent.llm = None
+    out = await agent.chat("ctx", [{"role": "user", "content": "привет"}])
+    assert "OPENAI_API_KEY" in out
+
+
+@pytest.mark.asyncio
+async def test_chat_passes_history_and_sanitizes():
+    from app.ai.agent import HHAgent
+
+    agent = HHAgent("u1")
+    seen = {}
+
+    async def fake_ainvoke(msgs, *a, **kw):
+        seen["msgs"] = msgs
+        return type("R", (), {"content": "**Готово** — вот ответ"})()
+
+    agent.llm = MagicMock()
+    agent.llm.ainvoke = fake_ainvoke
+    out = await agent.chat(
+        "резюме кандидата",
+        [
+            {"role": "user", "content": "первый"},
+            {"role": "assistant", "content": "ага"},
+            {"role": "user", "content": "второй"},
+        ],
+        page_text="текст вакансии",
+    )
+    assert out == "Готово - вот ответ"
+    roles = [m[0] for m in seen["msgs"]]
+    assert roles == ["system", "human", "ai", "human"]
+    assert "резюме кандидата" in seen["msgs"][0][1]
+    assert "текст вакансии" in seen["msgs"][0][1]
+
+
+@pytest.mark.asyncio
+async def test_chat_survives_llm_error():
+    from app.ai.agent import HHAgent
+
+    agent = HHAgent("u1")
+
+    async def boom(*a, **kw):
+        raise RuntimeError("openai down")
+
+    agent.llm = MagicMock()
+    agent.llm.ainvoke = boom
+    out = await agent.chat("ctx", [{"role": "user", "content": "привет"}])
+    assert "Не удалось" in out

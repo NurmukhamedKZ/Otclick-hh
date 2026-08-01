@@ -11,6 +11,7 @@ import logging
 
 from app.ai.prompts import (
     FILL_SYSTEM_PROMPT,
+    build_chat_prompt,
     build_fill_prompt,
     build_recruiter_prompt,
     sanitize_ai_text,
@@ -167,6 +168,33 @@ class HHAgent:
                 }
             )
         return out
+
+    MAX_CHAT_TURNS = 20
+
+    async def chat(
+        self, context: str, messages: list[dict], page_text: str | None = None
+    ) -> str:
+        """Free-form chat grounded in the candidate's resume + Q&A memory.
+
+        History comes from the extension (nothing is stored server-side), so
+        only the last MAX_CHAT_TURNS messages are forwarded."""
+        if not self.llm:
+            return "ИИ недоступен: не настроен OPENAI_API_KEY."
+        msgs: list[tuple[str, str]] = [("system", build_chat_prompt(context, page_text))]
+        for m in messages[-self.MAX_CHAT_TURNS :]:
+            role = "ai" if m.get("role") == "assistant" else "human"
+            content = str(m.get("content") or "").strip()
+            if content:
+                msgs.append((role, content))
+        try:
+            resp = await self.llm.ainvoke(msgs)
+        except Exception:
+            logger.warning("extension chat: llm call failed", exc_info=True)
+            return "Не удалось получить ответ. Попробуйте ещё раз."
+        content = resp.content
+        if isinstance(content, list):  # some models return content parts
+            content = " ".join(str(c) for c in content)
+        return sanitize_ai_text(content)
 
     async def _summary_for(self, resume_id: str) -> str:
         """Resume summary for a specific resume_id, cached. '' on failure."""
