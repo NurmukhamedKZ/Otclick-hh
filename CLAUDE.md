@@ -9,6 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **`backend/`** — FastAPI service (active build) + standalone worker (`worker_main.py`)
 - **`frontend/`** — Next.js 16 + React 19 + Tailwind v4 (Supabase SSR auth)
 - **`hh-applicant-tool/`** — existing Python CLI tool (source to copy from, not modify)
+- **`ext/`** — Firefox extension (WXT, MV2): autofills Google/Yandex/MS Forms + an AI chat tab, served by `/api/extension/*`. Forked from `extension/` (a gitignored copy of the OtclickUS extension kept as a porting source — never edit that copy). See `ext/README.md`
 - **`AUDIT.md`** — production-readiness audit: what's fixed, what's still open (older items; the CloudPayments amount-check and manual-cancel entries are obsolete — billing is Polar now). Read it before shipping anything near billing or the worker.
 
 Open-source implications for this file:
@@ -16,7 +17,7 @@ Open-source implications for this file:
 - Contributions come from external contributors via PR — surface conventions here (Simplicity First, Surgical Changes, etc.) apply doubly since reviewers may not have full context.
 - Never commit secrets/`.env` values — repo is public. `.env.example` (repo root, the single env file) and `frontend/.env.local.example` are the templates contributors copy.
 - `docker-compose.yml` (repo root) is the single-command self-host path (backend + worker + frontend) referenced in README Quick Start.
-- CI lives in `.github/workflows/ci.yml`: ruff + pytest for the backend, `tsc --noEmit` + `npm test` for the frontend, on every PR.
+- CI lives in `.github/workflows/ci.yml`: ruff + pytest for the backend, `tsc --noEmit` + `npm test` for the frontend and for `ext/` (plus a Firefox build), on every PR.
 
 Key discovery: hh.ru password grant OAuth is **broken** (`unsupported_grant_type`). Playwright headless browser is the only working login method. Two Playwright flows: password (`authorize.get_auth_code`) and passwordless email-code (`authorize.get_auth_code_via_email_code`).
 
@@ -128,6 +129,7 @@ api/
   chats.py                   — /api/chats (list negotiations, get messages, send message)
   recruiter.py               — /api/recruiter (escalation drafts send/discard, todos done/dismiss)
   analytics.py               — /api/analytics?days= (syncs hh negotiation states, then one RPC)
+  extension.py               — /api/extension/* (context, fill, chat, qa, resume-file) for the Firefox extension
   billing.py                 — /api/billing/* (subscribe→Polar checkout URL, portal, status)
   webhooks.py                — /api/webhooks/polar (Standard Webhooks signature, no JWT)
   internal.py                — /internal/cron/* (X-Internal-Token via hmac.compare_digest, no JWT) → refresh-tokens, prune-notifications
@@ -177,6 +179,8 @@ services/
   notifications.py           — insert notifications rows (UI reads via Realtime)
   qa_memory.py               — user-curated Q&A store + prompt_block injected into form-test/recruiter prompts
   retention.py               — prune_notifications (called from /internal/cron/prune-notifications)
+  candidate_context.py       — extension candidate context: load_resume + _resume_summary + qa_memory.prompt_block, plus the verbatim `facts` dict
+  extension_resume.py        — hh resume PDF bytes for the extension's <input type=file>
 schemas/
   auth.py, resumes.py, filters.py, blacklist.py, billing.py, recruiter.py — Pydantic models
 ```
@@ -218,6 +222,8 @@ Negotiation states (used only for the «Отказ» tag) are cached per user fo
 **Plan → limits (no trial, migration 026)**: gating is not a gate anymore, it's "which caps apply". `plan.limits_for(profile)` → `{mode, daily, total}`: `active`/`cancelled` inside `plan_expires_at` → `auto` + `PAID_DAILY_APPLIES`/day; everything else (`free`, expired paid) → `manual` + a lifetime `FREE_TOTAL_APPLIES`. `BILLING_ENABLED=False` (self-host default) short-circuits to unlimited+auto and never reads the plan — without it a self-hoster is capped at 30 applies inside their own instance. The free total is counted straight off `applications` where `status in ('sent','form_sent')` (no counter column; `form_required`/`failed`/`captcha` never reached hh and must not burn quota) and surfaces as `limiter.check` → `"limit_total"`. `has_access` survives only as "is this a paying customer" — billing status and `require_active_plan`, which now gates just the recruiter agent, not worker start. In `manual` mode the runner does **one** producer pass, drains the queue, then clears `worker_enabled` and stops (`_finish_batch`, state `idle`) — the flag must be cleared first or `worker_main` respawns it every 15 s and "one batch" becomes the old infinite loop. `limit_total` stops the runner the same way. `worker_main` gates only the agent loop on `plan.filter_paid`; the apply loop runs for free users too.
 
 **Billing (Polar.sh, merchant of record)**: `/api/billing/subscribe` → `billing.polar_checkout_url` creates a hosted Checkout Session with `external_customer_id = user_id` → the frontend redirects there. Polar charges the card and POSTs to `/api/webhooks/polar`, verified by the SDK's `validate_event` (Standard Webhooks — never hand-rolled HMAC; note it base64-encodes the secret internally). Events handled: `order.paid` (records the payment idempotently — Polar order id → `payments.provider_payment_id` UNIQUE — then activates), `subscription.active`/`uncanceled` (activate), `subscription.canceled` (plan `cancelled`, paid period kept), `subscription.revoked` (back to `free`, **not** to a locked account). The access window is the subscription's `current_period_end`, taken from the provider — the old code guessed it from the charged amount and could not tell two same-priced plans apart. The user is matched by `customer.external_id`. In SDK models the event type field is `TYPE` (alias `type`), so `process_polar_event` reads both. The endpoint always answers 200 once the signature is valid, or Polar retries forever. Cancellation is the Polar **customer portal** (`/api/billing/portal`), which closes the old "real cancel is manual via support" debt.
+
+**Browser extension (`ext/`)**: the Firefox add-on fills third-party application forms — a separate surface from the hh worker, sharing the same account and Q&A memory. `snapshot.ts` (ported from OtclickUS) collects the page's fields across shadow DOM and ARIA widgets; `deterministic-fill.ts` fills verbatim facts and attaches the hh resume PDF with no LLM call; everything else goes to `POST /api/extension/fill`, where `candidate_context.build` assembles resume + `qa_memory` and `HHAgent.fill_form_fields` decides one value per field. A value that matches no real option, or that the context doesn't support, is **dropped** rather than guessed, and the extension never clicks submit. Whatever the user corrects afterwards is posted to `/api/extension/qa` and lands in the same `qa_memory` the hh form drafts read. The chat tab is stateless server-side: the transcript lives in `browser.storage.local` and travels with each request. Auth reuses the web session — a content script on the Otclick origin reads the Supabase cookie and hands it to the background (Firefox has no `externally_connectable`).
 
 **Cron endpoints** (`/internal/cron/*`, guarded by `X-Internal-Token` compared with `hmac.compare_digest`, no JWT — trigger from system cron):
 - `refresh-tokens` → `token_refresh.refresh_due`, refreshes only creds expiring within `REFRESH_THRESHOLD_DAYS` (hh refresh tokens are single-use and only usable after the access token expires).
