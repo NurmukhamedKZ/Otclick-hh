@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { Btn, Card, EmptyState, Skeleton, Tag, TextInput } from "@/components/otclick/ui";
 import { IDoc } from "@/components/otclick/icons";
+import { pushToast } from "@/components/toaster";
 
 export type QAItem = {
   id: string;
@@ -62,10 +63,22 @@ export function QAMemoryCard() {
     }
   }
 
+  async function copyAll() {
+    if (!items || items.length === 0) return;
+    const text = items
+      .map((i) => `Вопрос: ${i.question}\nОтвет: ${i.answer}`)
+      .join("\n\n");
+    await navigator.clipboard.writeText(text);
+    pushToast({ kind: "success", title: "Скопировано", body: `${items.length} пар вопрос-ответ` });
+  }
+
   return (
     <Card style={{ gridColumn: "1 / -1" }}>
-      <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 4 }}>
-        Вопросы и ответы
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 4 }}>
+        <div style={{ fontSize: 17, fontWeight: 700 }}>Вопросы и ответы</div>
+        <Btn kind="ghost" size="sm" disabled={!items || items.length === 0} onClick={copyAll}>
+          скопировать всё
+        </Btn>
       </div>
       <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 18 }}>
         Здесь копятся ответы, которые ты правишь в тестах и формах. ИИ использует
