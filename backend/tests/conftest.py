@@ -18,10 +18,9 @@ import pytest
 @pytest.fixture(autouse=True)
 def _clear_process_caches():
     def _clear():
-        from app.worker import recruiter_poll
-
         from app.api import deps
         from app.services import form_filler, hh_credentials, notifications
+        from app.worker import recruiter_poll
 
         form_filler._sessions.clear()
         hh_credentials._clients.clear()

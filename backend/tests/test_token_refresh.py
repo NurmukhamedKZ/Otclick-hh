@@ -36,7 +36,6 @@ async def test_refresh_user_success_persists():
 
 async def test_refresh_user_hh_rejection_marks_invalid():
     from app.hh import errors
-
     from app.services import token_refresh as tr
 
     client = _fake_client()
@@ -104,9 +103,8 @@ async def test_refresh_due_selects_near_expiry_and_aggregates():
 
 
 async def test_refresh_due_one_bad_user_does_not_abort_batch():
-    from app.services.hh_credentials import HHCredentialsInvalid
-
     from app.services import token_refresh as tr
+    from app.services.hh_credentials import HHCredentialsInvalid
 
     chain = MagicMock()
     chain.select.return_value = chain

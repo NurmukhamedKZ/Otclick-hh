@@ -98,7 +98,6 @@ async def test_apply_one_captcha():
     from unittest.mock import AsyncMock
 
     from app.hh import errors as hh_errors
-
     from app.services import apply as apply_mod
 
     sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
@@ -123,7 +122,6 @@ async def test_apply_one_captcha():
 
 async def test_apply_one_limit_exceeded():
     from app.hh import errors as hh_errors
-
     from app.services import apply as apply_mod
 
     sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
@@ -146,7 +144,6 @@ async def test_apply_one_limit_exceeded():
 
 async def test_apply_one_token_dead_on_forbidden():
     from app.hh import errors as hh_errors
-
     from app.services import apply as apply_mod
 
     sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
@@ -175,9 +172,8 @@ async def test_apply_one_token_dead_on_forbidden():
 
 
 async def test_apply_one_token_dead_when_creds_invalid():
-    from app.services.hh_credentials import HHCredentialsInvalid
-
     from app.services import apply as apply_mod
+    from app.services.hh_credentials import HHCredentialsInvalid
 
     sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
 
@@ -306,7 +302,6 @@ async def test_apply_one_generates_letter_when_required():
 
 async def test_apply_one_vacancy_gone():
     from app.hh import errors as hh_errors
-
     from app.services import apply as apply_mod
 
     sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1", "title": "T"})
@@ -327,7 +322,6 @@ async def test_apply_one_vacancy_gone():
 
 async def test_apply_one_form_required_on_hh_forbidden_marker():
     from app.hh import errors as hh_errors
-
     from app.services import apply as apply_mod
 
     sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1", "title": "T"})
@@ -355,7 +349,6 @@ async def test_apply_one_form_required_on_hh_forbidden_marker():
 
 async def test_apply_one_account_banned_on_negotiations_forbidden():
     from app.hh import errors as hh_errors
-
     from app.services import apply as apply_mod
 
     sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
@@ -385,7 +378,6 @@ async def test_apply_one_account_banned_on_negotiations_forbidden():
 
 async def test_apply_one_account_banned_on_vacancy_fetch():
     from app.hh import errors as hh_errors
-
     from app.services import apply as apply_mod
 
     sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
@@ -412,7 +404,6 @@ async def test_apply_one_account_banned_on_vacancy_fetch():
 
 async def test_apply_one_resume_gone_on_hh_disables_filters():
     from app.hh import errors as hh_errors
-
     from app.services import apply as apply_mod
 
     sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
@@ -444,7 +435,6 @@ async def test_apply_one_resume_gone_on_hh_disables_filters():
 
 async def test_apply_one_failed_on_generic_client_error():
     from app.hh import errors as hh_errors
-
     from app.services import apply as apply_mod
 
     sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
