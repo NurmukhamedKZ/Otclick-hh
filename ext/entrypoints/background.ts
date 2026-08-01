@@ -10,6 +10,7 @@ import {
 } from "../lib/api";
 import { getValidJwt, openWebSignIn, persistExternalSession, signOut } from "../lib/auth";
 import { debug, error } from "../lib/log";
+import { toolbarButtonApi } from "../lib/browser-compat";
 
 const APP_BASE = (import.meta.env.VITE_APP_BASE as string) ?? "http://localhost:3000";
 
@@ -26,16 +27,30 @@ export default defineBackground(() => {
     return true; // keep the channel open for the async response
   });
 
-  browser.action.onClicked.addListener(async (tab) => {
-    if (tab.id != null) await browser.tabs.sendMessage(tab.id, { type: "TOGGLE_PANEL" });
+  const toolbarButton = toolbarButtonApi<typeof browser.action>(
+    browser as unknown as { browserAction?: typeof browser.action; action?: typeof browser.action },
+  );
+  toolbarButton.onClicked.addListener((tab) => {
+    if (tab.id != null) void toTab(tab.id, "TOGGLE_PANEL");
   });
 
   browser.commands.onCommand.addListener(async (command) => {
     if (command !== "trigger-autofill") return;
     const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id != null) await browser.tabs.sendMessage(tab.id, { type: "TRIGGER_AUTOFILL" });
+    if (tab?.id != null) await toTab(tab.id, "TRIGGER_AUTOFILL");
   });
 });
+
+/** Talk to the tab's content script. It is absent on pages loaded before the
+ *  add-on (and on about:/view-source: pages), where the click would otherwise
+ *  fail silently — say so instead. */
+async function toTab(tabId: number, type: string): Promise<void> {
+  try {
+    await browser.tabs.sendMessage(tabId, { type });
+  } catch (e) {
+    error(`no content script in tab ${tabId} (reload the page): `, e);
+  }
+}
 
 async function handle(msg: Msg): Promise<unknown> {
   switch (msg?.type) {
