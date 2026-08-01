@@ -4,27 +4,56 @@ import { applyFill, snapshotWithOptions } from "../lib/snapshot";
 import { mergeFrameFields, withLabels, type FillResponse, type FilledField } from "../lib/api";
 import { renderMarks } from "../lib/marks";
 import { deterministicFields } from "../lib/deterministic-fill";
+import { mountPanel, type PanelController } from "../lib/panel";
 import { error } from "../lib/log";
+
+/** Fields applied by the last run, kept for the qa_memory edit diff. */
+let lastApplied: (FilledField & { label: string })[] = [];
+let panel: PanelController | null = null;
 
 export default defineContentScript({
   matches: ["<all_urls>"],
   allFrames: true,
-  main() {
+  async main() {
     browser.runtime.onMessage.addListener((msg: unknown) => {
       const type = (msg as { type?: string })?.type;
-      if (type === "TOGGLE_PANEL" || type === "TRIGGER_AUTOFILL") void runFill();
+      if (type === "TOGGLE_PANEL") panel?.toggle();
+      if (type === "TRIGGER_AUTOFILL") void runFill();
       return undefined;
     });
+
+    // The panel lives in the top frame only; nested frames just fill.
+    if (window.top !== window) return;
+    panel = mountPanel({
+      onFill: () => void runFill(),
+      onSignIn: () => void browser.runtime.sendMessage({ type: "SIGN_IN" }),
+      onSignOut: () => {
+        void browser.runtime.sendMessage({ type: "SIGN_OUT" });
+        panel?.setAuth(false, "");
+      },
+      onSend: async () => "Чат подключается в следующей задаче.",
+      onSaveEdits: () => void 0,
+    });
+    await refreshAuth();
   },
 });
 
-/** Fields applied by the last run, kept for the qa_memory edit diff. */
-let lastApplied: (FilledField & { label: string })[] = [];
+async function refreshAuth(): Promise<void> {
+  const auth = (await browser.runtime.sendMessage({ type: "AUTH_STATUS" })) as {
+    loggedIn?: boolean;
+    email?: string;
+  };
+  panel?.setAuth(Boolean(auth?.loggedIn), auth?.email ?? "");
+}
 
 async function runFill(): Promise<void> {
+  panel?.setState("working");
   try {
     const els = await snapshotWithOptions();
-    if (els.length === 0) return;
+    if (els.length === 0) {
+      panel?.setState("error", { error: "Полей на странице не найдено." });
+      return;
+    }
 
     // Verbatim facts and the resume file land first — no LLM round trip, so the
     // user sees the form move immediately.
@@ -39,24 +68,38 @@ async function runFill(): Promise<void> {
     if (quick.length > 0) {
       const appliedQuick = await applyFill(quick as never);
       lastApplied = withLabels(appliedQuick as never, els as never);
-      renderMarks(lastApplied);
+      show();
     }
 
     const remaining = els.filter((el) => !quick.some((q) => q.ref === el.ref));
-    if (remaining.length === 0) return;
-    const resp = (await browser.runtime.sendMessage({
-      type: "FILL_PAGE",
-      url: location.href,
-      page_text: document.body.innerText,
-      // frame_id 0 only: v1 fills the top frame. The frames[] envelope is
-      // already in place on both sides for the cross-frame fan-out.
-      frames: [{ frame_id: 0, snapshot: remaining }],
-    })) as FillResponse & { error?: string };
-    if (resp?.error) throw new Error(resp.error);
-    const applied = await applyFill(mergeFrameFields(resp, 0) as never);
-    lastApplied = [...lastApplied, ...withLabels(applied as never, els as never)];
-    renderMarks(lastApplied);
+    if (remaining.length > 0) {
+      const resp = (await browser.runtime.sendMessage({
+        type: "FILL_PAGE",
+        url: location.href,
+        page_text: document.body.innerText,
+        // frame_id 0 only: v1 fills the top frame. The frames[] envelope is
+        // already in place on both sides for the cross-frame fan-out.
+        frames: [{ frame_id: 0, snapshot: remaining }],
+      })) as FillResponse & { error?: string };
+      if (resp?.error) throw new Error(resp.error);
+      const applied = await applyFill(mergeFrameFields(resp, 0) as never);
+      lastApplied = [...lastApplied, ...withLabels(applied as never, els as never)];
+      show();
+    }
+    panel?.setState("done", { filled: lastApplied.length });
   } catch (e) {
     error("autofill failed:", e);
+    if (String(e).includes("unauthorized")) {
+      panel?.setState("error", { error: "Войдите в аккаунт Otclick." });
+      panel?.setTab("settings");
+    } else {
+      panel?.setState("error", { error: "Не удалось заполнить. Попробуйте ещё раз." });
+    }
   }
+}
+
+/** Push the current applied set to both surfaces: in-page badges and the panel. */
+function show(): void {
+  renderMarks(lastApplied);
+  panel?.setFilled(lastApplied);
 }
