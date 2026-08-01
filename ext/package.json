@@ -1,0 +1,23 @@
+{
+  "name": "otclick-ext",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wxt -b firefox",
+    "build": "wxt build -b firefox",
+    "zip": "wxt zip -b firefox",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0"
+  },
+  "devDependencies": {
+    "@types/jsdom": "^28.0.3",
+    "jsdom": "^29.1.1",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0",
+    "wxt": "^0.19.0"
+  }
+}
