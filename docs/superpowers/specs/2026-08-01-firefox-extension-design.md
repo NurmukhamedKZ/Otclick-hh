@@ -130,12 +130,17 @@ ATS-ветки в `detect.ts`, блоки fit-score / ATS / tailor / квот / 
 
 ### `backend/app/services/candidate_context.py` — новый
 
-Порт `CandidateContext` из OtclickUS (~80 строк): собирает строку контекста из
-профиля, полного тела hh-резюме (`resumes.raw`) и `qa_memory.prompt_block(user_id)`.
-Одно место, где задаётся формат контекста для всех вызовов LLM расширения.
-Дополнительно отдаёт `known_values()` — множество вербатим-фактов; значение с
-`source=profile`, не совпавшее ни с одним, понижается до `ai` (защита от выдумок
-в паспортных полях).
+Собирает строку контекста для LLM из того, что уже есть в проекте:
+`form_filler.load_resume(user_id)` (полное тело резюме с hh, живой запрос),
+`form_filler._resume_summary(resume)` (готовый текстовый рендер) и
+`qa_memory.prompt_block(user_id)`. Порт `CandidateContext` из OtclickUS **не
+нужен** — эти две функции покрывают его целиком.
+
+Дополнительно отдаёт `facts(resume)` — словарь вербатим-фактов (ФИО, email,
+телефон, город, ссылки) из `resume["contact"]` и корневых полей. Значение с
+`source=profile`, не совпавшее ни с одним фактом, понижается до `ai` (защита от
+выдумок в паспортных полях). Те же факты уходят в `GET /api/extension/context`
+для детерминированного заполнения без LLM.
 
 ### `backend/app/ai/agent.py` — два новых метода на `HHAgent`
 
@@ -150,11 +155,17 @@ ATS-ветки в `detect.ts`, блоки fit-score / ATS / tailor / квот / 
 Пустой `OPENAI_API_KEY` → `fill_form_fields` возвращает `[]`, `chat` — понятную
 заглушку. Никаких падений (инвариант проекта).
 
-### Миграция 032 + `resume_sync`
+### Миграций нет
 
-`ALTER TABLE resumes ADD COLUMN raw jsonb;` — `resume_sync` дополнительно тянет
-`GET /resumes/{id}` по каждому резюме и кладёт тело в `raw`. Оттуда
-`candidate_context` берёт опыт, навыки, контакты и ссылку `download.pdf.url`.
+Хранить тело резюме в БД не требуется: `load_resume` берёт его с hh по запросу,
+`HHAgent` уже кэширует результат на время жизни объекта. Ссылка на PDF
+(`download.pdf.url`) лежит в том же ответе. `qa_memory` тоже существует
+(миграция 022). Схема БД не меняется.
+
+PDF отдаётся отдельным маленьким сервисом `services/extension_resume.py`:
+`ApiClient.request` всегда декодирует ответ как JSON, поэтому байты качаются
+прямым `requests.get(url, headers={"Authorization": f"Bearer {access_token}"})`
+в executor'е — токен берётся у того же `load_api_client`.
 
 ## Обработка ошибок
 
@@ -179,10 +190,11 @@ ATS-ветки в `detect.ts`, блоки fit-score / ATS / tailor / квот / 
 ## Риски
 
 1. **Резюме с hh может быть недоступно.** В памяти проекта есть запись, что hh
-   закрыл публичное API соискателя 15.12.2025. Первый шаг плана — живая проверка
-   `GET /resumes/{id}` и `download.pdf.url`. Если закрыто: фолбэк — загрузка PDF
-   в веб-кабинете + Supabase Storage bucket, ещё одна миграция; структура
-   `candidate_context` не меняется, меняется только источник.
+   закрыл публичное API соискателя 15.12.2025. При этом на нём же стоит весь
+   рабочий `form_filler`, так что скорее всего живо. Первый шаг плана — живая
+   проверка `GET /resumes/{id}` и `download.pdf.url`. Если закрыто: фолбэк —
+   загрузка PDF в веб-кабинете + Supabase Storage bucket и одна миграция;
+   интерфейс `candidate_context` не меняется, меняется только источник.
 2. **Google Forms может поменять разметку.** Смягчается тем, что `snapshot.ts`
    опирается на ARIA-роли, а не на классы Google.
 3. **Подписание расширения для Firefox.** Для распространения вне
