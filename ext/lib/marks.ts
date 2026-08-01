@@ -220,7 +220,9 @@ function selectContainer(el: HTMLElement): Element | null {
 }
 
 // The user's current value for a field, across native + custom controls.
-function readFieldValue(el: HTMLElement): string {
+// exported: the qa_memory edit diff reads the same field kinds (input,
+// textarea, select, contenteditable) after the user reviews the form.
+export function readFieldValue(el: HTMLElement): string {
   const tag = el.tagName;
   // react-select (and similar) custom comboboxes: the filter <input role="combobox">
   // this selector resolves to is a search box, not the value holder — its native

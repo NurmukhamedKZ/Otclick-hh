@@ -1,11 +1,12 @@
 import { defineContentScript } from "wxt/sandbox";
 import { browser } from "wxt/browser";
-import { applyFill, snapshotWithOptions } from "../lib/snapshot";
+import { applyFill, findEl, snapshotWithOptions } from "../lib/snapshot";
 import { mergeFrameFields, withLabels, type FillResponse, type FilledField } from "../lib/api";
-import { renderMarks } from "../lib/marks";
+import { readFieldValue, renderMarks } from "../lib/marks";
 import { deterministicFields } from "../lib/deterministic-fill";
 import { mountPanel, type PanelController } from "../lib/panel";
 import { appendMessage, loadHistory } from "../lib/chat-store";
+import { collectEdits } from "../lib/edits";
 import { error } from "../lib/log";
 
 /** Fields applied by the last run, kept for the qa_memory edit diff. */
@@ -33,7 +34,7 @@ export default defineContentScript({
         panel?.setAuth(false, "");
       },
       onSend: sendChat,
-      onSaveEdits: () => void 0,
+      onSaveEdits: () => void saveEdits(),
     });
     for (const m of await loadHistory()) panel.appendChat(m.role, m.content);
     await refreshAuth();
@@ -111,6 +112,31 @@ async function runFill(): Promise<void> {
     } else {
       panel?.setState("error", { error: "Не удалось заполнить. Попробуйте ещё раз." });
     }
+  }
+}
+
+/** Whatever the user corrected after the fill becomes Q&A memory, so the next
+ *  form (and the hh worker's form drafts) reuse their wording, not the model's. */
+async function saveEdits(): Promise<void> {
+  try {
+    const current = lastApplied.map((f) => {
+      const node = findEl(f.selector);
+      return { ref: f.ref, label: f.label, value: node ? readFieldValue(node).trim() : "" };
+    });
+    const items = collectEdits(lastApplied, current);
+    if (items.length === 0) {
+      panel?.setState("saved", { filled: 0 });
+      return;
+    }
+    const resp = (await browser.runtime.sendMessage({ type: "SAVE_QA", items })) as {
+      saved?: number;
+      error?: string;
+    };
+    if (resp?.error) throw new Error(resp.error);
+    panel?.setState("saved", { filled: resp?.saved ?? 0 });
+  } catch (e) {
+    error("saving edits failed:", e);
+    panel?.setState("error", { error: "Не удалось сохранить правки." });
   }
 }
 

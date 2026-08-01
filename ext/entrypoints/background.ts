@@ -1,6 +1,13 @@
 import { defineBackground } from "wxt/sandbox";
 import { browser } from "wxt/browser";
-import { buildFillPayload, callChat, callFill, fetchContext, resumeFileUrl } from "../lib/api";
+import {
+  buildFillPayload,
+  callChat,
+  callFill,
+  fetchContext,
+  resumeFileUrl,
+  saveQA,
+} from "../lib/api";
 import { getValidJwt, openWebSignIn, persistExternalSession, signOut } from "../lib/auth";
 import { debug, error } from "../lib/log";
 
@@ -98,6 +105,8 @@ async function handle(msg: Msg): Promise<unknown> {
           msg.page_text ? String(msg.page_text) : undefined,
         ),
       };
+    case "SAVE_QA":
+      return { saved: await saveQA((msg.items ?? []) as { question: string; answer: string }[]) };
     case "FILL_PAGE":
       return await callFill(
         buildFillPayload({

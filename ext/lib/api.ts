@@ -93,3 +93,11 @@ export const callChat = (messages: ChatMsg[], pageText?: string) =>
     method: "POST",
     body: JSON.stringify({ messages, page_text: pageText ?? null }),
   }).then((r) => r.answer);
+
+// ── Q&A memory ──────────────────────────────────────────────────────────────
+
+export const saveQA = (items: { question: string; answer: string }[]) =>
+  apiFetch<{ saved: number }>("/api/extension/qa", {
+    method: "POST",
+    body: JSON.stringify({ items }),
+  }).then((r) => r.saved);

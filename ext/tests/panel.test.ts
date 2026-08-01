@@ -37,3 +37,13 @@ describe("statusText", () => {
     expect(statusText("idle")).toBe("");
   });
 });
+
+describe("statusText: saved", () => {
+  it("reports how many answers were remembered", () => {
+    expect(statusText("saved", { filled: 2 })).toContain("2");
+  });
+
+  it("says plainly when there was nothing to save", () => {
+    expect(statusText("saved", { filled: 0 })).toContain("нечего");
+  });
+});

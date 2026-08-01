@@ -4,7 +4,7 @@
 // this product doesn't have.
 
 export type Tab = "fill" | "chat" | "settings";
-export type FillState = "idle" | "working" | "done" | "error";
+export type FillState = "idle" | "working" | "done" | "saved" | "error";
 
 export interface PanelCallbacks {
   onFill: () => void;
@@ -51,6 +51,10 @@ export function statusText(s: FillState, data?: { error?: string; filled?: numbe
       return "Заполняю…";
     case "done":
       return `Готово: ${data?.filled ?? 0} полей. Проверьте и отправьте форму сами.`;
+    case "saved":
+      return data?.filled
+        ? `Сохранено ответов: ${data.filled}. В следующий раз подставим их.`
+        : "Правок не найдено — сохранять нечего.";
     case "error":
       return data?.error ?? "Ошибка";
     default:
