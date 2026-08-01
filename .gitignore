@@ -16,6 +16,10 @@ wheels/
 
 # Sub Repos
 hh-applicant-tool/
+extension/
+# Anchored: an unanchored `app/` also matched backend/app, so new backend files
+# were silently ignored. This entry is the OtclickUS copy at the repo root.
+/app/
 
 .wordstat.env
 .gstack/
