@@ -22,8 +22,9 @@ def _chain(final_data):
 async def test_has_test_vacancy_is_queued_not_skipped():
     """Regression: has_test vacancies must reach the queue so apply_one fills
     the test (form_filler). Previously they were skipped → never filled."""
-    from app.services import vacancy_producer as vp
     from app.worker.queue import drop_user_queue, get_user_queue
+
+    from app.services import vacancy_producer as vp
 
     drop_user_queue("u1")
 
@@ -78,8 +79,9 @@ def _filter_row(**over):
 
 @pytest.mark.asyncio
 async def test_relevance_drops_irrelevant():
-    from app.services import vacancy_producer as vp
     from app.worker.queue import drop_user_queue, get_user_queue
+
+    from app.services import vacancy_producer as vp
     drop_user_queue("u1")
 
     filters_chain = _chain([_filter_row()])
@@ -120,8 +122,9 @@ async def test_relevance_drops_irrelevant():
 
 @pytest.mark.asyncio
 async def test_relevance_uses_cache_no_llm_call():
-    from app.services import vacancy_producer as vp
     from app.worker.queue import drop_user_queue, get_user_queue
+
+    from app.services import vacancy_producer as vp
     drop_user_queue("u1")
 
     def _table(name):
@@ -155,8 +158,9 @@ async def test_relevance_uses_cache_no_llm_call():
 async def test_round_robin_interleaves_filters():
     """Two enabled filters must take turns — order is f1,f2,f1,f2,... — so a
     busy first filter can't starve the second out of the shared budget."""
-    from app.services import vacancy_producer as vp
     from app.worker.queue import drop_user_queue, get_user_queue
+
+    from app.services import vacancy_producer as vp
     drop_user_queue("u1")
 
     f1 = _filter_row(id="f1", text="A", ai_filter_enabled=False)
@@ -193,8 +197,9 @@ async def test_overlapping_filters_queue_each_vacancy_once():
     """Two filters over the same role (different region) return overlapping
     pages. Queuing the same vacancy twice burns a push slot for nothing —
     apply_one would just answer 'skipped' on the second copy."""
-    from app.services import vacancy_producer as vp
     from app.worker.queue import drop_user_queue, get_user_queue
+
+    from app.services import vacancy_producer as vp
     drop_user_queue("u1")
 
     f1 = _filter_row(id="f1", text="A", ai_filter_enabled=False)
@@ -226,8 +231,9 @@ async def test_overlapping_filters_queue_each_vacancy_once():
 
 @pytest.mark.asyncio
 async def test_ai_filter_disabled_bypasses_relevance():
-    from app.services import vacancy_producer as vp
     from app.worker.queue import drop_user_queue, get_user_queue
+
+    from app.services import vacancy_producer as vp
     drop_user_queue("u1")
 
     def _table(name):

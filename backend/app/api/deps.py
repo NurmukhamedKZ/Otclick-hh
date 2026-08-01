@@ -3,10 +3,11 @@ import hashlib
 import logging
 import time
 
-from app.db.supabase import anon_client
-from app.services import plan as plan_service
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+from app.db.supabase import anon_client
+from app.services import plan as plan_service
 
 logger = logging.getLogger(__name__)
 

@@ -1,3 +1,5 @@
+from fastapi import APIRouter
+
 from app.api import (
     _debug,
     analytics,
@@ -17,7 +19,6 @@ from app.api import (
     worker,
 )
 from app.config import settings
-from fastapi import APIRouter
 
 api_router = APIRouter()
 api_router.include_router(auth.router)

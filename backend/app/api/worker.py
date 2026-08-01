@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from app.api.deps import get_current_user, require_active_plan
-from app.services import filters_service, worker_control
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+
+from app.api.deps import get_current_user, require_active_plan
+from app.services import filters_service, worker_control
 
 router = APIRouter(prefix="/api/worker", tags=["worker"])
 

@@ -11,13 +11,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal
 
+from fastapi import HTTPException
+from fastapi import status as status_codes
+
 from app.config import settings
 from app.db.supabase import service_client
 from app.hh.authorize import get_auth_code, get_auth_code_via_email_code
 from app.hh.client import ApiClient, OAuthClient
 from app.hh.user_agent import generate_android_useragent
-from fastapi import HTTPException
-from fastapi import status as status_codes
 
 logger = logging.getLogger(__name__)
 

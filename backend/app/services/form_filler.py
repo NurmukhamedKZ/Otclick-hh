@@ -11,6 +11,8 @@ import time
 from typing import Literal
 
 import requests
+from langchain_core.language_models import BaseChatModel
+
 from app.ai.prompts import (
     build_form_choice_prompt,
     build_form_text_prompt,
@@ -21,7 +23,6 @@ from app.db.supabase import service_client
 from app.services import qa_memory
 from app.services.hh_auth import decrypt_token
 from app.services.hh_credentials import load_api_client, persist_if_refreshed
-from langchain_core.language_models import BaseChatModel
 
 logger = logging.getLogger(__name__)
 

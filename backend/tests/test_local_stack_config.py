@@ -40,8 +40,9 @@ def _env_value(text: str, key: str) -> str | None:
 
 
 def test_browser_reachable_rewrites_internal_host(monkeypatch):
-    from app.config import settings
     from app.services.hh_auth import _browser_reachable
+
+    from app.config import settings
 
     monkeypatch.setattr(settings, "SUPABASE_URL", "http://kong:8000")
     monkeypatch.setattr(settings, "SUPABASE_PUBLIC_URL", "http://localhost:54321")
@@ -53,8 +54,9 @@ def test_browser_reachable_rewrites_internal_host(monkeypatch):
 
 
 def test_browser_reachable_tolerates_trailing_slashes(monkeypatch):
-    from app.config import settings
     from app.services.hh_auth import _browser_reachable
+
+    from app.config import settings
 
     monkeypatch.setattr(settings, "SUPABASE_URL", "http://kong:8000/")
     monkeypatch.setattr(settings, "SUPABASE_PUBLIC_URL", "http://localhost:54321/")
@@ -65,8 +67,9 @@ def test_browser_reachable_tolerates_trailing_slashes(monkeypatch):
 
 
 def test_browser_reachable_leaves_foreign_hosts_alone(monkeypatch):
-    from app.config import settings
     from app.services.hh_auth import _browser_reachable
+
+    from app.config import settings
 
     monkeypatch.setattr(settings, "SUPABASE_URL", "http://kong:8000")
     monkeypatch.setattr(settings, "SUPABASE_PUBLIC_URL", "http://localhost:54321")
@@ -76,8 +79,9 @@ def test_browser_reachable_leaves_foreign_hosts_alone(monkeypatch):
 
 
 def test_browser_reachable_noop_when_public_url_empty(monkeypatch):
-    from app.config import settings
     from app.services.hh_auth import _browser_reachable
+
+    from app.config import settings
 
     monkeypatch.setattr(settings, "SUPABASE_URL", "http://kong:8000")
     monkeypatch.setattr(settings, "SUPABASE_PUBLIC_URL", "")

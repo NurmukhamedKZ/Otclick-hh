@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 import requests as _requests
+
 from app.ai.agent import HHAgent
 from app.hh import errors as hh_errors
 from app.services import apply as apply_service

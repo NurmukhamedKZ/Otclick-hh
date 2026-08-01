@@ -12,6 +12,7 @@ import uuid
 from datetime import UTC, datetime
 
 import requests
+
 from app.db.supabase import service_client
 
 logger = logging.getLogger(__name__)

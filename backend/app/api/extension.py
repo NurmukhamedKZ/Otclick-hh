@@ -9,11 +9,12 @@ from __future__ import annotations
 import logging
 from urllib.parse import quote
 
+from fastapi import APIRouter, Depends, HTTPException, Response
+from pydantic import BaseModel, Field
+
 from app.ai.agent import HHAgent
 from app.api.deps import get_current_user
 from app.services import candidate_context, extension_resume, qa_memory
-from fastapi import APIRouter, Depends, HTTPException, Response
-from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 

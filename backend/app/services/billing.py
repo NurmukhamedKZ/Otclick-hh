@@ -19,15 +19,16 @@ import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 
-from app.config import DEFAULT_PLAN_ID, PLANS, settings
-from app.db.supabase import service_client
-from app.schemas.billing import BillingStatusResponse, PaymentEntry, SubscribeResponse
-from app.services import plan as plan_service
 from polar_sdk import Polar
 from polar_sdk.webhooks import (
     WebhookVerificationError,
     validate_event,
 )
+
+from app.config import DEFAULT_PLAN_ID, PLANS, settings
+from app.db.supabase import service_client
+from app.schemas.billing import BillingStatusResponse, PaymentEntry, SubscribeResponse
+from app.services import plan as plan_service
 
 logger = logging.getLogger(__name__)
 

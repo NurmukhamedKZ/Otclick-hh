@@ -9,6 +9,11 @@ from __future__ import annotations
 
 import logging
 
+from langchain.agents import create_agent
+from langchain_core.rate_limiters import InMemoryRateLimiter
+from langchain_openai import ChatOpenAI
+from pydantic import BaseModel, Field
+
 from app.ai.prompts import (
     FILL_SYSTEM_PROMPT,
     build_chat_prompt,
@@ -22,10 +27,6 @@ from app.services import qa_memory
 from app.services.cover_letter import generate as _generate_cover_letter
 from app.services.form_filler import FillStatus, prepare_form_answers
 from app.services.relevance import Verdict, filter_relevant
-from langchain.agents import create_agent
-from langchain_core.rate_limiters import InMemoryRateLimiter
-from langchain_openai import ChatOpenAI
-from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 

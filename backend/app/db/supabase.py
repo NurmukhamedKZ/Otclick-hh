@@ -1,7 +1,8 @@
 import httpx
-from app.config import settings
 from supabase import Client, create_client
 from supabase.lib.client_options import SyncClientOptions
+
+from app.config import settings
 
 
 def _make_client(key: str) -> Client:

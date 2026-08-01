@@ -68,8 +68,9 @@ def test_extract_xsrf_token_missing():
 
 @pytest.mark.asyncio
 async def test_load_web_session_builds_cookies():
-    from app.services import form_filler
     from app.services.hh_auth import encrypt_token
+
+    from app.services import form_filler
 
     cookies = [
         {"name": "_xsrf", "value": "tok", "domain": ".hh.ru", "path": "/"},
