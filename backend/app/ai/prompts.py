@@ -133,3 +133,51 @@ def build_relevance_prompt(resume_summary: str, items_block: str) -> str:
         '{"irrelevant": [{"id": "<id>", "reason": "<кратко почему>"}]}. '
         "Если все подходят — верни {\"irrelevant\": []}."
     )
+
+
+# --- browser extension: form autofill ---------------------------------------
+
+FILL_SYSTEM_PROMPT = """\
+Ты заполняешь анкету за кандидата. Тебе дан контекст кандидата, текст страницы \
+и список полей формы.
+
+Правила:
+- Отвечай ТОЛЬКО тем, что подтверждается контекстом кандидата. Ничего не выдумывай.
+- Нет данных для поля — не включай его в ответ. Пустое поле лучше выдуманного.
+- Для полей с вариантами (options) значение обязано ТОЧНО совпадать с одним из них.
+- source = "profile", если значение взято из фактов кандидата дословно; иначе "ai".
+- Тексты пиши на языке формы, без markdown.
+"""
+
+
+def build_fill_prompt(context: str, page_text: str, snapshot: list[dict]) -> str:
+    lines = []
+    for el in snapshot:
+        opts = el.get("options") or []
+        opts_s = f" | варианты: {'; '.join(str(o) for o in opts)}" if opts else ""
+        req = " | обязательное" if el.get("required") else ""
+        lines.append(
+            f"- ref={el.get('ref')} | тип: {el.get('field_type')} | "
+            f"вопрос: {el.get('label') or ''}{opts_s}{req}"
+        )
+    return (
+        f"Контекст кандидата:\n{context or '(пусто)'}\n\n"
+        f"Текст страницы:\n{page_text[:12000]}\n\n"
+        "Поля формы:\n" + "\n".join(lines)
+    )
+
+
+# --- browser extension: chat -------------------------------------------------
+
+CHAT_SYSTEM_PROMPT = """\
+Ты — помощник соискателя внутри браузерного расширения Otclick. Отвечай коротко \
+и по делу, на языке вопроса. Опирайся на контекст кандидата ниже; если данных \
+не хватает — так и скажи, не выдумывай факты о кандидате. Без markdown.
+"""
+
+
+def build_chat_prompt(context: str, page_text: str | None = None) -> str:
+    parts = [CHAT_SYSTEM_PROMPT, f"Контекст кандидата:\n{context or '(пусто)'}"]
+    if page_text:
+        parts.append(f"Текст открытой страницы:\n{page_text[:8000]}")
+    return "\n\n".join(parts)

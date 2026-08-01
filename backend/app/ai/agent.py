@@ -9,7 +9,12 @@ from __future__ import annotations
 
 import logging
 
-from app.ai.prompts import build_recruiter_prompt
+from app.ai.prompts import (
+    FILL_SYSTEM_PROMPT,
+    build_fill_prompt,
+    build_recruiter_prompt,
+    sanitize_ai_text,
+)
 from app.ai.recruiter_tools import RECRUITER_TOOLS, RecruiterContext, do_escalate
 from app.config import settings
 from app.services import qa_memory
@@ -19,8 +24,35 @@ from app.services.relevance import Verdict, filter_relevant
 from langchain.agents import create_agent
 from langchain_core.rate_limiters import InMemoryRateLimiter
 from langchain_openai import ChatOpenAI
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+
+
+class _FillField(BaseModel):
+    ref: str
+    value: str
+    source: str = Field(default="ai")
+
+
+class _FillPlan(BaseModel):
+    fields: list[_FillField] = Field(default_factory=list)
+
+
+def snap_to_option(value: str, options: list[str]) -> str | None:
+    """Map the model's answer onto a real option. None ⇒ no confident match, so
+    the caller drops the field instead of typing something the widget rejects."""
+    want = (value or "").strip().lower()
+    if not want:
+        return None
+    for opt in options:
+        if str(opt).strip().lower() == want:
+            return str(opt)
+    for opt in options:
+        text = str(opt).strip().lower()
+        if want in text or text in want:
+            return str(opt)
+    return None
 
 
 class HHAgent:
@@ -78,6 +110,63 @@ class HHAgent:
         Fail-open: no llm → all relevant (handled inside filter_relevant)."""
         summary = await self._summary_for(resume_id)
         return filter_relevant(self.llm, summary, items)
+
+    # --- browser extension ---------------------------------------------------
+
+    async def fill_form_fields(
+        self,
+        context: str,
+        page_text: str,
+        snapshot: list[dict],
+        known: set[str] | None = None,
+    ) -> list[dict]:
+        """Decide one value per snapshot field for the browser extension.
+
+        Empty list when there is no LLM, the call fails, or nothing could be
+        answered confidently — the extension then leaves those fields to the
+        user. Never invents a value for a field the context doesn't cover."""
+        if not self.llm or not snapshot:
+            return []
+        try:
+            plan = await self.llm.with_structured_output(_FillPlan).ainvoke(
+                [
+                    ("system", FILL_SYSTEM_PROMPT),
+                    ("human", build_fill_prompt(context, page_text, snapshot)),
+                ]
+            )
+        except Exception:
+            logger.warning("extension fill: llm call failed", exc_info=True)
+            return []
+        plan = _FillPlan.model_validate(plan) if isinstance(plan, dict) else plan
+        by_ref = {str(el.get("ref")): el for el in snapshot}
+        out: list[dict] = []
+        for f in plan.fields:
+            el = by_ref.get(f.ref)
+            if el is None:
+                continue
+            value = sanitize_ai_text(f.value).strip()
+            if not value:
+                continue
+            options = [str(o) for o in (el.get("options") or [])]
+            if options:
+                snapped = snap_to_option(value, options)
+                if snapped is None:
+                    continue
+                value = snapped
+            source = f.source if f.source in ("profile", "ai") else "ai"
+            if source == "profile" and known is not None and value.lower() not in known:
+                source = "ai"  # not a verbatim fact — don't label it as one
+            out.append(
+                {
+                    "ref": f.ref,
+                    "selector": el.get("selector") or "",
+                    "field_type": el.get("field_type") or "text",
+                    "value": value,
+                    "source": source,
+                    "required": bool(el.get("required")),
+                }
+            )
+        return out
 
     async def _summary_for(self, resume_id: str) -> str:
         """Resume summary for a specific resume_id, cached. '' on failure."""
