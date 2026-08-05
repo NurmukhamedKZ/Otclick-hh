@@ -23,3 +23,7 @@ extension/
 
 .wordstat.env
 .gstack/
+
+# recon dumps (contain a logged-in hh page)
+backend/recon_oauth_out/
+backend/recon_web_out/
