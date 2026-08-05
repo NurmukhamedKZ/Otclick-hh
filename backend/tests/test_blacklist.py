@@ -85,9 +85,6 @@ async def test_producer_skips_relations_and_blacklists_employer():
     ]
 
     filters = [{"id": "f1", "resume_id": "r1", "text": "py"}]
-    client = MagicMock()
-    client.access_token = "tok"
-    client.get.return_value = {"items": items, "found": 2}
 
     queue = MagicMock()
 
@@ -103,8 +100,7 @@ async def test_producer_skips_relations_and_blacklists_employer():
         captured["entries"] = entries
 
     with patch.object(vp, "_load_enabled_filters", return_value=filters), \
-         patch.object(vp, "load_api_client", new=AsyncMock(return_value=client)), \
-         patch.object(vp, "persist_if_refreshed", new=AsyncMock()), \
+         patch.object(vp.web, "search_vacancies", new=AsyncMock(return_value=(items, 2))), \
          patch.object(vp, "_existing_vacancy_ids", return_value=set()), \
          patch.object(vp, "_blacklisted_employer_ids", return_value=set()), \
          patch.object(vp, "get_user_queue", return_value=queue), \

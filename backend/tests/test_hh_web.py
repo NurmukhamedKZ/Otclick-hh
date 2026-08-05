@@ -40,14 +40,13 @@ async def test_search_normalises_web_json_to_the_api_shape(monkeypatch):
     vacancies, total = await web.search_vacancies("u1", {"text": "python"})
 
     assert total == 2
-    assert vacancies[0] == {
-        "id": "1",
-        "name": "Python dev",
-        "employer": {"id": "9", "name": "Acme"},
-        "has_test": True,
-        "response_letter_required": False,
-        "archived": False,
-    }
+    v = vacancies[0]
+    assert v["id"] == "1"
+    assert v["name"] == "Python dev"
+    assert v["employer"] == {"id": "9", "name": "Acme"}
+    assert v["has_test"] is True
+    assert v["response_letter_required"] is False
+    assert v["archived"] is False
 
 
 @pytest.mark.asyncio

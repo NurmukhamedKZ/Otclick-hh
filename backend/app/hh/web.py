@@ -62,6 +62,8 @@ def _normalise_vacancy(v: dict) -> dict:
     emp = {}
     if company.get("id") is not None:
         emp = {"id": str(company["id"]), "name": company.get("name") or ""}
+    area = v.get("area")
+    links = v.get("links") or {}
     return {
         "id": str(v["vacancyId"]),
         "name": v.get("name") or "",
@@ -69,6 +71,10 @@ def _normalise_vacancy(v: dict) -> dict:
         "has_test": bool(v.get("userTestPresent")),
         "response_letter_required": bool(v.get("@responseLetterRequired")),
         "archived": bool(v.get("closedForApplicants")),
+        # preview fields (kept for filters preview; ignored by the producer)
+        "area": {"name": area.get("name")} if isinstance(area, dict) else None,
+        "salary": v.get("compensation"),
+        "url": links.get("desktop"),
     }
 
 
