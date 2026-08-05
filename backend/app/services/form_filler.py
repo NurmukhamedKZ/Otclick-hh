@@ -20,6 +20,7 @@ from app.ai.prompts import (
 )
 from app.config import settings
 from app.db.supabase import service_client
+from app.hh.page_json import find_balanced_object, find_state
 from app.services import qa_memory
 from app.services.hh_auth import decrypt_token
 from app.services.hh_credentials import load_api_client, persist_if_refreshed
@@ -173,8 +174,6 @@ async def load_resume(user_id: str, resume_row_id: str | None = None) -> dict:
 
 # --- vacancy test solving (web endpoint) -------------------------------------
 
-_TESTS_MARKER = ',"vacancyTests":'
-
 
 def _strip_tags(s: str | None) -> str:
     # Tags in the page JSON are entity-encoded (&lt;p&gt;) — unescape first.
@@ -248,52 +247,10 @@ def _resume_summary(resume: dict) -> str:
     return "\n".join(parts)
 
 
-def _find_balanced_object(text: str, obj_start: int) -> str:
-    """Return the JSON object substring starting at text[obj_start] == '{'."""
-    depth = 0
-    in_string = False
-    escaped = False
-    for i in range(obj_start, len(text)):
-        ch = text[i]
-        if in_string:
-            if escaped:
-                escaped = False
-            elif ch == "\\":
-                escaped = True
-            elif ch == '"':
-                in_string = False
-            continue
-        if ch == '"':
-            in_string = True
-        elif ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                return text[obj_start:i + 1]
-    raise ValueError("unbalanced vacancyTests object in page")
-
-
-def _decode_page(page_html: str) -> str:
-    """hh serves the inline JSON HTML-entity-encoded (&#34; instead of ") — decode.
-
-    Only when the plain marker is absent, so already-plain pages keep their
-    literal &amp; sequences intact.
-    """
-    return page_html if _TESTS_MARKER in page_html else html.unescape(page_html)
-
-
 def _parse_tests(page_html: str, vacancy_id: str) -> dict:
     """Pull the test definition for vacancy_id out of the page's inline JSON."""
-    page_html = _decode_page(page_html)
-    marker_pos = page_html.find(_TESTS_MARKER)
-    if marker_pos == -1:
-        raise ValueError("vacancyTests block not found in page")
-    obj_start = marker_pos + len(_TESTS_MARKER)
-    blob = _find_balanced_object(page_html, obj_start)
-    tests_data = json.loads(blob, strict=False)
     try:
-        return tests_data[str(vacancy_id)]
+        return find_state(page_html, "vacancyTests")[str(vacancy_id)]
     except KeyError as ex:
         raise ValueError(f"no test data for vacancy {vacancy_id}") from ex
 

@@ -18,14 +18,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.services.form_filler import _find_balanced_object  # noqa: E402
+from app.hh.page_json import find_balanced_object  # noqa: E402
 from app.services.form_filler import load_web_session  # noqa: E402
 
 OUT = Path(__file__).resolve().parent.parent / "recon_web_out"
 
 PAGES = {
-    "resumes": ("https://hh.ru/applicant/resumes", '"resumeList"'),
-    "negotiations": ("https://hh.ru/applicant/negotiations", '"negotiationsList"'),
+    "resumes": ("https://hh.ru/applicant/resumes", '"applicantResumes"'),
+    "negotiations": ("https://hh.ru/applicant/negotiations", '"applicantNegotiations"'),
     "vacancy": ("https://hh.ru/vacancy/{vacancy_id}", '"vacancyView"'),
 }
 
@@ -41,7 +41,7 @@ def dump(session, name, url, marker):
             f"open {name}.html and find the real key"
         )
         return
-    blob = _find_balanced_object(text, text.find("{", i))
+    blob = find_balanced_object(text, text.find("{", i))
     OUT.joinpath(f"{name}.json").write_text(blob, encoding="utf-8")
     print(f"{name}: ok, {len(blob)} bytes -> {name}.json")
 
