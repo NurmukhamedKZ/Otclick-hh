@@ -32,6 +32,10 @@ logger = logging.getLogger(__name__)
 WEB_BASE = "https://hh.ru"
 SEARCH_URL = f"{WEB_BASE}/search/vacancy"
 
+
+class VacancyGone(Exception):
+    """hh no longer serves this vacancy page (404/410) — archived or deleted."""
+
 # client.DEFAULT_DELAY is the API's inter-request minimum; web traffic is not
 # less fingerprintable, so we keep at least the same cadence, per user.
 _MIN_DELAY_S = 0.345
@@ -53,6 +57,8 @@ def _get(session: requests.Session, user_id: str, url: str, **kw) -> requests.Re
     _last_request_at[user_id] = time.monotonic()
     if session_looks_dead(resp):
         raise WebSessionExpired(f"hh rejected the web session ({resp.status_code})")
+    if resp.status_code in (404, 410):
+        raise VacancyGone(f"{resp.status_code} for {url}")
     resp.raise_for_status()
     return resp
 
@@ -99,3 +105,36 @@ async def search_vacancies(
     return [v for v in (_normalise_vacancy(i) for i in items) if v.get("id")], data.get(
         "totalResults", 0
     )
+
+
+async def get_vacancy(user_id: str, vacancy_id: str) -> dict:
+    """Fetch one vacancy over the web session, shaped like the old API payload.
+
+    Two blocks matter on the page. `shortVacancy` carries the same fields the
+    search results do; `applicantVacancyResponseStatuses[<id>]` is the
+    per-applicant view and is the authoritative one — `test.hasTests` reflects
+    the test as it stands now (the search flag can be stale), and a non-empty
+    `negotiations.topicList` means this user already responded. That last one
+    replaces guessing "already applied" from hh's rejection wording.
+
+    Raises VacancyGone (404/410) and WebSessionExpired (login wall).
+    """
+    loop = asyncio.get_running_loop()
+    session = await load_web_session(user_id)
+    url = f"{WEB_BASE}/vacancy/{vacancy_id}"
+    resp = await loop.run_in_executor(None, _get, session, user_id, url)
+
+    short = find_state(resp.text, "shortVacancy")
+    vacancy = _normalise_vacancy(short)
+
+    try:
+        status = find_state(resp.text, "applicantVacancyResponseStatuses").get(
+            str(vacancy_id)
+        ) or {}
+    except ValueError:  # block absent — fall back to the search-time flags
+        status = {}
+    if isinstance(status.get("test"), dict):
+        vacancy["has_test"] = bool(status["test"].get("hasTests"))
+    topics = (status.get("negotiations") or {}).get("topicList") or []
+    vacancy["already_responded"] = bool(topics)
+    return vacancy

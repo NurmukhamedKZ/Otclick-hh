@@ -37,7 +37,6 @@ def test_find_state_reads_array_valued_key():
 
 
 def test_find_balanced_object_handles_nested_arrays_and_objects():
-    import json
 
     from app.hh.page_json import find_balanced_object
 

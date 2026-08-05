@@ -42,7 +42,6 @@ async def main() -> None:
     cookies = json.loads(decrypt_token(enc))
 
     target = f"https://hh.ru/applicant/vacancy_response?vacancyId={vacancy_id}&startedWithQuestion=false&hhtmFrom=vacancy"
-    captured = {}
 
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=True)

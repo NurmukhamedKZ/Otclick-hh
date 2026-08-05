@@ -69,3 +69,52 @@ def test_normalise_vacancy_handles_missing_company():
     v = _normalise_vacancy({"vacancyId": 7, "name": "X", "company": {}})
     assert v["id"] == "7"
     assert v["employer"] == {}
+
+
+VACANCY_PAGE = (
+    '<html>{&#34;shortVacancy&#34;:{&#34;vacancyId&#34;:42,&#34;name&#34;:&#34;Dev&#34;,'
+    '&#34;company&#34;:{&#34;id&#34;:7,&#34;name&#34;:&#34;Acme&#34;},'
+    '&#34;@responseLetterRequired&#34;:true,&#34;userTestPresent&#34;:false,'
+    '&#34;closedForApplicants&#34;:false},'
+    '&#34;applicantVacancyResponseStatuses&#34;:{&#34;42&#34;:{'
+    '&#34;test&#34;:{&#34;hasTests&#34;:true},'
+    '&#34;negotiations&#34;:{&#34;topicList&#34;:[{&#34;id&#34;:1}]}}}}</html>'
+)
+
+
+@pytest.mark.asyncio
+async def test_get_vacancy_normalises_and_prefers_the_authoritative_test_flag(monkeypatch):
+    """shortVacancy.userTestPresent is the search-time flag; the per-applicant
+    block is the live one and must win, or a test vacancy gets a blind apply."""
+    from app.hh import web
+
+    async def _load_web_session(_user_id):
+        return SimpleNamespace()
+
+    monkeypatch.setattr(web, "_get", _fake_get(VACANCY_PAGE))
+    monkeypatch.setattr(web, "load_web_session", _load_web_session)
+    v = await web.get_vacancy("u1", "42")
+
+    assert v["id"] == "42"
+    assert v["name"] == "Dev"
+    assert v["employer"] == {"id": "7", "name": "Acme"}
+    assert v["response_letter_required"] is True
+    assert v["has_test"] is True          # from applicantVacancyResponseStatuses
+    assert v["already_responded"] is True  # non-empty topicList
+    assert v["archived"] is False
+
+
+@pytest.mark.asyncio
+async def test_get_vacancy_raises_vacancy_gone_on_404(monkeypatch):
+    from app.hh import web
+
+    async def _load_web_session(_user_id):
+        return SimpleNamespace()
+
+    def _get(session, user_id, url, **kw):
+        raise web.VacancyGone(url)
+
+    monkeypatch.setattr(web, "_get", _get)
+    monkeypatch.setattr(web, "load_web_session", _load_web_session)
+    with pytest.raises(web.VacancyGone):
+        await web.get_vacancy("u1", "42")

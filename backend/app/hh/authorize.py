@@ -8,15 +8,17 @@ hh-applicant-tool/operations/authorize.py — the upstream selectors are stale
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from playwright.async_api import async_playwright
 
-from .client_keys import ANDROID_CLIENT_ID
+from .client_keys import ANDROID_CLIENT_ID, REDIRECT_URI
+
+logger = logging.getLogger(__name__)
 
 HH_OAUTH_AUTHORIZE = "https://hh.ru/oauth/authorize"
-HH_ANDROID_SCHEME = "hhandroid"
 
 SEL_LOGIN_INPUT = 'input[data-qa="login-input-username"], input[name="login"], input[type="email"]'
 SEL_EXPAND_PASSWORD = (
@@ -39,8 +41,49 @@ SEL_PIN_CODE_INPUT = 'input[data-qa="magritte-pincode-input-field"]'
 
 
 def build_authorize_url() -> str:
-    qs = urlencode({"client_id": ANDROID_CLIENT_ID, "response_type": "code"})
+    qs = urlencode({
+        "client_id": ANDROID_CLIENT_ID,
+        "response_type": "code",
+        "redirect_uri": REDIRECT_URI,
+    })
     return f"{HH_OAUTH_AUTHORIZE}?{qs}"
+
+
+def _watch_redirect(page) -> asyncio.Future[str]:
+    """Resolve with the full redirect_uri URL hh sends the browser to.
+
+    Works both for the Android custom scheme (which never loads) and for a real
+    https callback of a self-registered app — we only need the URL, not its
+    response, so it does not matter whether the host resolves.
+    """
+    fut: asyncio.Future[str] = asyncio.Future()
+
+    def handle_request(request):
+        if request.url.startswith(REDIRECT_URI) and not fut.done():
+            fut.set_result(request.url)
+
+    page.on("request", handle_request)
+    return fut
+
+
+def _extract_code(redirect_url: str) -> str:
+    """Pull the OAuth code out of the redirect, or raise with what hh sent."""
+    parts = urlsplit(redirect_url)
+    params = parse_qs(parts.query)
+    params.update(parse_qs(parts.fragment))  # hh may answer in the fragment
+    code = (params.get("code") or [None])[0]
+    if code:
+        return code
+    logger.error("hh oauth: no code in redirect %s", redirect_url)
+    err = (params.get("error_description") or params.get("error") or [None])[0]
+    if err == "geo_forbidden":
+        raise RuntimeError(
+            "hh отказал в выдаче OAuth-кода для вашего региона (geo_forbidden). "
+            "Логин прошёл, но приложение hh, под которым мы авторизуемся, не "
+            "обслуживает этот регион — зарегистрируйте своё на dev.hh.kz/admin "
+            "и задайте HH_CLIENT_ID / HH_CLIENT_SECRET / HH_REDIRECT_URI."
+        )
+    raise RuntimeError(f"hh не вернул OAuth-код: {err or redirect_url}")
 
 
 async def get_auth_code(
@@ -65,16 +108,7 @@ async def get_auth_code(
             context = await browser.new_context(**device)
             page = await context.new_page()
 
-            code_future: asyncio.Future[str | None] = asyncio.Future()
-
-            def handle_request(request):
-                url = request.url
-                if url.startswith(f"{HH_ANDROID_SCHEME}://"):
-                    if not code_future.done():
-                        code = parse_qs(urlsplit(url).query).get("code", [None])[0]
-                        code_future.set_result(code)
-
-            page.on("request", handle_request)
+            redirect_future = _watch_redirect(page)
 
             await page.goto(build_authorize_url(), timeout=30000, wait_until="load")
 
@@ -112,9 +146,7 @@ async def get_auth_code(
 
             await _handle_captcha_if_present(page, on_captcha)
 
-            code = await asyncio.wait_for(code_future, timeout=120.0)
-            if not code:
-                raise RuntimeError("OAuth code empty in hhandroid:// redirect")
+            code = _extract_code(await asyncio.wait_for(redirect_future, timeout=120.0))
             cookies = await context.cookies()
             return code, cookies
         finally:
@@ -174,16 +206,7 @@ async def get_auth_code_via_email_code(
             context = await browser.new_context(**device)
             page = await context.new_page()
 
-            code_future: asyncio.Future[str | None] = asyncio.Future()
-
-            def handle_request(request):
-                url = request.url
-                if url.startswith(f"{HH_ANDROID_SCHEME}://"):
-                    if not code_future.done():
-                        code = parse_qs(urlsplit(url).query).get("code", [None])[0]
-                        code_future.set_result(code)
-
-            page.on("request", handle_request)
+            redirect_future = _watch_redirect(page)
 
             await page.goto(build_authorize_url(), timeout=30000, wait_until="load")
 
@@ -204,9 +227,7 @@ async def get_auth_code_via_email_code(
 
             await _handle_captcha_if_present(page, on_captcha)
 
-            oauth_code = await asyncio.wait_for(code_future, timeout=120.0)
-            if not oauth_code:
-                raise RuntimeError("OAuth code empty in hhandroid:// redirect")
+            oauth_code = _extract_code(await asyncio.wait_for(redirect_future, timeout=120.0))
             cookies = await context.cookies()
             return oauth_code, cookies
         finally:

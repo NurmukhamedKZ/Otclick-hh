@@ -16,6 +16,20 @@ def _fake_agent(form=("form_sent", []), letter="GENERATED"):
     return agent
 
 
+
+def _vacancy_from(client):
+    """apply_one used to fetch the vacancy through ApiClient.get; it now goes
+    through web.get_vacancy. Replay whatever the test staged on client.get."""
+
+    async def _get_vacancy(user_id, vacancy_id):
+        if client.get.side_effect is not None:
+            raise client.get.side_effect
+        return client.get.return_value
+
+    return _get_vacancy
+
+
+
 def _supabase_mock(resume_row, already_applied=False):
     """Return a fluent supabase mock that drives apply.py's three queries."""
 
@@ -68,8 +82,7 @@ async def test_apply_one_sent_success():
 
     with (
         patch.object(apply_mod, "service_client", sb),
-        patch.object(apply_mod, "load_api_client", return_value=client),
-        patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.web, "get_vacancy", new=_vacancy_from(client)),
         patch.object(apply_mod.form_filler, "submit_response", new=_submitted),
     ):
         result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
@@ -116,8 +129,7 @@ async def test_apply_one_web_session_dead_maps_to_token_dead():
 
     with (
         patch.object(apply_mod, "service_client", sb),
-        patch.object(apply_mod, "load_api_client", return_value=client),
-        patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.web, "get_vacancy", new=_vacancy_from(client)),
         patch.object(apply_mod.form_filler, "submit_response", new=_dead),
         patch.object(apply_mod, "mark_invalid", side_effect=fake_mark),
     ):
@@ -141,8 +153,7 @@ async def test_apply_one_rejection_maps_form_required():
 
     with (
         patch.object(apply_mod, "service_client", sb),
-        patch.object(apply_mod, "load_api_client", return_value=client),
-        patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.web, "get_vacancy", new=_vacancy_from(client)),
         patch.object(apply_mod.form_filler, "submit_response", new=_rej),
     ):
         result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
@@ -167,8 +178,7 @@ async def test_apply_one_rejection_maps_already_applied():
 
     with (
         patch.object(apply_mod, "service_client", sb),
-        patch.object(apply_mod, "load_api_client", return_value=client),
-        patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.web, "get_vacancy", new=_vacancy_from(client)),
         patch.object(apply_mod.form_filler, "submit_response", new=_rej),
         patch.object(apply_mod, "_auto_blacklist", side_effect=fake_blacklist),
     ):
@@ -190,57 +200,11 @@ async def test_apply_one_failed_on_unknown_rejection():
 
     with (
         patch.object(apply_mod, "service_client", sb),
-        patch.object(apply_mod, "load_api_client", return_value=client),
-        patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.web, "get_vacancy", new=_vacancy_from(client)),
         patch.object(apply_mod.form_filler, "submit_response", new=_rej),
     ):
         result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
     assert result == "failed"
-
-
-async def test_apply_one_token_dead_on_forbidden_fetch():
-    from app.hh import errors as hh_errors
-    from app.services import apply as apply_mod
-
-    sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
-    client = MagicMock()
-    client.access_token = "tok"
-
-    resp = MagicMock(status_code=403)
-    data = {"errors": [{"value": "token_dead", "type": "auth"}]}
-    client.get.side_effect = hh_errors.Forbidden(resp, data)
-
-    mark_calls = []
-
-    async def fake_mark(user_id, reason):
-        mark_calls.append((user_id, reason))
-
-    with (
-        patch.object(apply_mod, "service_client", sb),
-        patch.object(apply_mod, "load_api_client", return_value=client),
-        patch.object(apply_mod, "persist_if_refreshed"),
-        patch.object(apply_mod, "mark_invalid", side_effect=fake_mark),
-    ):
-        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
-    assert result == "token_dead"
-    assert mark_calls and mark_calls[0][0] == "u1"
-
-
-async def test_apply_one_token_dead_when_creds_invalid():
-    from app.services import apply as apply_mod
-    from app.services.hh_credentials import HHCredentialsInvalid
-
-    sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
-
-    async def raise_invalid(user_id):
-        raise HHCredentialsInvalid(user_id, "Forbidden: x")
-
-    with (
-        patch.object(apply_mod, "service_client", sb),
-        patch.object(apply_mod, "load_api_client", side_effect=raise_invalid),
-    ):
-        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
-    assert result == "token_dead"
 
 
 async def test_apply_one_form_required_on_has_test():
@@ -260,8 +224,7 @@ async def test_apply_one_form_required_on_has_test():
 
     with (
         patch.object(apply_mod, "service_client", sb),
-        patch.object(apply_mod, "load_api_client", return_value=client),
-        patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.web, "get_vacancy", new=_vacancy_from(client)),
     ):
         result = await apply_mod.apply_one("u1", "r-uuid", "v1", agent)
     assert result == "form_required"
@@ -288,8 +251,7 @@ async def test_apply_one_form_pending_when_filler_drafts_answers():
 
     with (
         patch.object(apply_mod, "service_client", sb),
-        patch.object(apply_mod, "load_api_client", return_value=client),
-        patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.web, "get_vacancy", new=_vacancy_from(client)),
         patch.object(apply_mod.form_drafts, "insert_draft", side_effect=_ok),
         patch.object(apply_mod.notifications, "notify", side_effect=_ok),
     ):
@@ -323,8 +285,7 @@ async def test_apply_one_skips_letter_when_not_required():
 
     with (
         patch.object(apply_mod, "service_client", sb),
-        patch.object(apply_mod, "load_api_client", return_value=client),
-        patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.web, "get_vacancy", new=_vacancy_from(client)),
         patch.object(apply_mod.form_filler, "submit_response", new=_submitted),
     ):
         result = await apply_mod.apply_one("u1", "r-uuid", "v1", agent)
@@ -358,33 +319,12 @@ async def test_apply_one_generates_letter_when_required():
 
     with (
         patch.object(apply_mod, "service_client", sb),
-        patch.object(apply_mod, "load_api_client", return_value=client),
-        patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.web, "get_vacancy", new=_vacancy_from(client)),
         patch.object(apply_mod.form_filler, "submit_response", new=_submitted),
     ):
         result = await apply_mod.apply_one("u1", "r-uuid", "v1", agent)
     assert result == "sent"
     assert captured["letter"] == "GENERATED"
-
-
-async def test_apply_one_vacancy_gone():
-    from app.hh import errors as hh_errors
-    from app.services import apply as apply_mod
-
-    sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1", "title": "T"})
-    client = MagicMock()
-    client.access_token = "tok"
-    resp = MagicMock(status_code=404)
-    client.get.side_effect = hh_errors.ResourceNotFound(resp, {"description": "gone"})
-
-    with (
-        patch.object(apply_mod, "service_client", sb),
-        patch.object(apply_mod, "load_api_client", return_value=client),
-        patch.object(apply_mod, "persist_if_refreshed"),
-    ):
-        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
-    assert result == "vacancy_gone"
-    client.post.assert_not_called()
 
 
 async def test_apply_one_form_required_on_rejection_marker():
@@ -405,8 +345,7 @@ async def test_apply_one_form_required_on_rejection_marker():
 
     with (
         patch.object(apply_mod, "service_client", sb),
-        patch.object(apply_mod, "load_api_client", return_value=client),
-        patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.web, "get_vacancy", new=_vacancy_from(client)),
         patch.object(apply_mod.form_filler, "submit_response", new=_rej),
     ):
         result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
@@ -431,40 +370,13 @@ async def test_apply_one_account_banned_on_rejection():
 
     with (
         patch.object(apply_mod, "service_client", sb),
-        patch.object(apply_mod, "load_api_client", return_value=client),
-        patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.web, "get_vacancy", new=_vacancy_from(client)),
         patch.object(apply_mod.form_filler, "submit_response", new=_rej),
         patch.object(apply_mod, "mark_invalid", side_effect=fake_mark),
     ):
         result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
     assert result == "account_banned"
     assert mark_calls and "banned" in mark_calls[0][1].lower()
-
-
-async def test_apply_one_account_banned_on_vacancy_fetch():
-    from app.hh import errors as hh_errors
-    from app.services import apply as apply_mod
-
-    sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
-    client = MagicMock()
-    client.access_token = "tok"
-    resp = MagicMock(status_code=403)
-    client.get.side_effect = hh_errors.Forbidden(
-        resp, {"errors": [{"type": "auth", "value": "account_blocked"}]}
-    )
-
-    async def fake_mark(user_id, reason):
-        pass
-
-    with (
-        patch.object(apply_mod, "service_client", sb),
-        patch.object(apply_mod, "load_api_client", return_value=client),
-        patch.object(apply_mod, "persist_if_refreshed"),
-        patch.object(apply_mod, "mark_invalid", side_effect=fake_mark),
-    ):
-        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
-    assert result == "account_banned"
-    client.post.assert_not_called()
 
 
 async def test_apply_one_resume_gone_disables_filters():
@@ -482,8 +394,7 @@ async def test_apply_one_resume_gone_disables_filters():
 
     with (
         patch.object(apply_mod, "service_client", sb),
-        patch.object(apply_mod, "load_api_client", return_value=client),
-        patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.web, "get_vacancy", new=_vacancy_from(client)),
         patch.object(apply_mod.form_filler, "submit_response", new=_rej),
         patch.object(
             apply_mod,
@@ -509,9 +420,121 @@ async def test_apply_one_failed_on_generic_rejection():
 
     with (
         patch.object(apply_mod, "service_client", sb),
-        patch.object(apply_mod, "load_api_client", return_value=client),
-        patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.web, "get_vacancy", new=_vacancy_from(client)),
         patch.object(apply_mod.form_filler, "submit_response", new=_rej),
     ):
         result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
     assert result == "failed"
+
+
+async def test_apply_one_vacancy_gone_when_hh_drops_the_page():
+    from app.hh import web as web_mod
+    from app.services import apply as apply_mod
+
+    sb, _, upsert = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1", "title": "T"})
+
+    async def _gone(user_id, vacancy_id):
+        raise web_mod.VacancyGone("404 for /vacancy/v1")
+
+    with (
+        patch.object(apply_mod, "service_client", sb),
+        patch.object(apply_mod.web, "get_vacancy", new=_gone),
+    ):
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
+    assert result == "vacancy_gone"
+
+
+async def test_apply_one_token_dead_when_the_web_session_died_mid_fetch():
+    """A login wall on the vacancy page must hit the terminal path, not "failed":
+    worker_main respawns the runner every 15 s otherwise."""
+    from app.services import apply as apply_mod
+    from app.services.form_filler import WebSessionExpired
+
+    sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
+    mark_calls = []
+
+    async def fake_mark(user_id, reason):
+        mark_calls.append((user_id, reason))
+
+    async def _dead(user_id, vacancy_id):
+        raise WebSessionExpired("hh rejected the web session (403)")
+
+    async def _noop_report(user_id, ex):
+        pass
+
+    with (
+        patch.object(apply_mod, "service_client", sb),
+        patch.object(apply_mod.web, "get_vacancy", new=_dead),
+        patch.object(apply_mod.form_filler, "report_dead_session", new=_noop_report),
+        patch.object(apply_mod, "mark_invalid", side_effect=fake_mark),
+    ):
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
+    assert result == "token_dead"
+    assert mark_calls and mark_calls[0][0] == "u1"
+
+
+async def test_apply_one_skips_when_hh_says_a_negotiation_already_exists():
+    """hh's own per-applicant block is authoritative — no guessing from the
+    rejection wording after we already posted."""
+    from app.services import apply as apply_mod
+
+    sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1", "title": "T"})
+
+    async def _already(user_id, vacancy_id):
+        return {
+            "id": "v1",
+            "employer": {"id": "42", "name": "Acme"},
+            "has_test": False,
+            "response_letter_required": False,
+            "already_responded": True,
+        }
+
+    posted = []
+
+    async def _submitted(user_id, resume_id, vacancy_id, letter="", answers=None):
+        posted.append(vacancy_id)
+        return "sent", None
+
+    with (
+        patch.object(apply_mod, "service_client", sb),
+        patch.object(apply_mod.web, "get_vacancy", new=_already),
+        patch.object(apply_mod.form_filler, "submit_response", new=_submitted),
+    ):
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
+    assert result == "skipped"
+    assert posted == []  # must not reach hh at all
+
+
+async def test_apply_one_captcha_does_not_fall_through_to_failed():
+    """A captcha wall classified as "failed" leaves the runner hammering hh
+    while the UI reports healthy — the fastest route to a flagged account."""
+    from app.services import apply as apply_mod
+
+    sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1", "title": "T"})
+
+    async def _vacancy(user_id, vacancy_id):
+        return {
+            "id": "v1",
+            "employer": {"id": "42", "name": "Acme"},
+            "has_test": False,
+            "response_letter_required": False,
+        }
+
+    async def _submitted(user_id, resume_id, vacancy_id, letter="", answers=None):
+        return "failed", "hh_rejected: 200 {\"error\":\"captcha required\"}"
+
+    created = []
+
+    async def _create(user_id, captcha_url):
+        created.append(user_id)
+        return {}
+
+    with (
+        patch.object(apply_mod, "service_client", sb),
+        patch.object(apply_mod.web, "get_vacancy", new=_vacancy),
+        patch.object(apply_mod.form_filler, "submit_response", new=_submitted),
+        patch.object(apply_mod.captcha_service, "create_request", new=_create),
+    ):
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
+    assert result == "captcha"
+    assert created == ["u1"]

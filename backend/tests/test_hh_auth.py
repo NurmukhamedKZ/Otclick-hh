@@ -49,3 +49,46 @@ async def test_solve_captcha_unblocks_queue():
     result = await asyncio.wait_for(solved, timeout=1.0)
     assert result == "abc123"
     _jobs.clear()
+
+
+def test_authorize_url_carries_the_configured_redirect_uri():
+    from urllib.parse import parse_qs, urlsplit
+
+    from app.hh.authorize import build_authorize_url
+    from app.hh.client_keys import ANDROID_CLIENT_ID, REDIRECT_URI
+
+    q = parse_qs(urlsplit(build_authorize_url()).query)
+    assert q["client_id"] == [ANDROID_CLIENT_ID]
+    assert q["response_type"] == ["code"]
+    # Must be present and match the token exchange, or hh rejects the code.
+    assert q["redirect_uri"] == [REDIRECT_URI]
+
+
+def test_token_exchange_sends_the_same_redirect_uri():
+    from unittest.mock import patch
+
+    from app.hh.client import OAuthClient
+    from app.hh.client_keys import REDIRECT_URI
+
+    client = OAuthClient()
+    with patch.object(OAuthClient, "post", return_value={
+        "access_token": "USERa", "refresh_token": "r", "expires_in": 60,
+    }) as post:
+        client.authenticate("CODE")
+    assert post.call_args.args[1]["redirect_uri"] == REDIRECT_URI
+
+
+def test_extract_code_reads_query_and_fragment():
+    from app.hh.authorize import _extract_code
+
+    assert _extract_code("hhandroid://oauthresponse?code=Q") == "Q"
+    assert _extract_code("https://x.test/cb#code=F") == "F"
+
+
+def test_extract_code_surfaces_geo_forbidden_not_a_blank_failure():
+    from app.hh.authorize import _extract_code
+
+    with pytest.raises(RuntimeError, match="geo_forbidden"):
+        _extract_code("hhandroid://oauthresponse?error=geo_forbidden")
+    with pytest.raises(RuntimeError, match="invalid_client"):
+        _extract_code("hhandroid://oauthresponse?error=invalid_client")

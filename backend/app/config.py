@@ -22,6 +22,13 @@ class Settings(BaseSettings):
     DEBUG_ENDPOINTS: bool = False
     LOG_LEVEL: str = "INFO"
 
+    # hh OAuth application. Empty → the official Android app's keys (see
+    # app/hh/client_keys.py), which answer `geo_forbidden` outside their region.
+    # Set all three together; HH_REDIRECT_URI must match the app's registration.
+    HH_CLIENT_ID: str = ""
+    HH_CLIENT_SECRET: str = ""
+    HH_REDIRECT_URI: str = ""
+
     # hh refresh-token cron: shared secret for /internal/cron/* + near-expiry window.
     # hh refresh token is single-use and only usable once the access token expired,
     # so the cron only refreshes creds expiring within this window (not all daily).
