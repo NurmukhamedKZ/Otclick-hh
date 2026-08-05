@@ -20,7 +20,7 @@ from app.ai.prompts import (
 )
 from app.config import settings
 from app.db.supabase import service_client
-from app.hh.page_json import find_balanced_object, find_state
+from app.hh.page_json import find_state
 from app.services import qa_memory
 from app.services.hh_auth import decrypt_token
 from app.services.hh_credentials import load_api_client, persist_if_refreshed
@@ -351,46 +351,53 @@ def _solve(
     return _build_answers(test_data, chat, resume_ctx)
 
 
-def _submit(
-    session: requests.Session,
+def _response_payload(
     vacancy_id: str,
     hh_resume_id: str,
-    answers: list[dict],
+    xsrf: str,
     letter: str,
-) -> requests.Response:
-    """Re-fetch xsrf+test meta, build payload from approved answers, POST."""
-    response_url = _response_url(vacancy_id)
-    r = session.get(response_url, timeout=15)
-    if session_looks_dead(r):
-        raise WebSessionExpired(f"hh rejected the web session ({r.status_code})")
-    r.raise_for_status()
-    page = r.text
-    test_data = _parse_tests(page, vacancy_id)
-    xsrf = extract_xsrf_token(page)
+    test_data: dict | None,
+    answers: list[dict] | None,
+) -> dict:
+    """Build the vacancy_response/popup form body.
 
+    Field set mirrors the captured real no-test POST (recon_web_out/apply_no_test
+    .json): the test-only keys (uidPk/guid/startTime/testRequired/withoutTest/
+    incomplete) are present ONLY when answers are being submitted, and _xsrf is
+    sent as the x-xsrftoken header, not as a form field.
+    """
     payload: dict = {
-        "_xsrf": xsrf,
-        "uidPk": test_data["uidPk"],
-        "guid": test_data["guid"],
-        "startTime": test_data["startTime"],
-        "testRequired": test_data["required"],
-        "vacancy_id": vacancy_id,
         "resume_hash": hh_resume_id,
+        "vacancy_id": vacancy_id,
+        "letterRequired": "true" if letter else "false",
+        "lux": "true",
         "ignore_postponed": "true",
-        "incomplete": "false",
         "mark_applicant_visible_in_vacancy_country": "false",
         "country_ids": "[]",
-        "lux": "true",
-        "withoutTest": "no",
-        "letter": letter,
     }
-    for a in answers:
+    if letter:
+        payload["letter"] = letter
+    if test_data is not None:
+        payload.update({
+            "uidPk": test_data["uidPk"],
+            "guid": test_data["guid"],
+            "startTime": test_data["startTime"],
+            "testRequired": test_data["required"],
+            "withoutTest": "no",
+            "incomplete": "false",
+        })
+    for a in answers or []:
         field = f"task_{a['task_id']}"
         if a.get("type") == "choice":
             payload[field] = str(a["answer_id"])
         else:
             payload[f"{field}_text"] = a.get("answer", "")
+    return payload
 
+
+def _post_response(
+    session: requests.Session, response_url: str, xsrf: str, payload: dict
+) -> requests.Response:
     return session.post(
         "https://hh.ru/applicant/vacancy_response/popup",
         data=payload,
@@ -403,6 +410,40 @@ def _submit(
         },
         timeout=20,
     )
+
+
+def _submit_response(
+    session: requests.Session,
+    vacancy_id: str,
+    hh_resume_id: str,
+    letter: str,
+    answers: list[dict] | None,
+) -> requests.Response:
+    """Fetch the response page (fresh xsrf; test meta only if answers given),
+    build the payload and POST."""
+    response_url = _response_url(vacancy_id)
+    r = session.get(response_url, timeout=15)
+    if session_looks_dead(r):
+        raise WebSessionExpired(f"hh rejected the web session ({r.status_code})")
+    r.raise_for_status()
+    page = r.text
+    xsrf = extract_xsrf_token(page)
+    test_data = _parse_tests(page, vacancy_id) if answers else None
+    payload = _response_payload(
+        vacancy_id, hh_resume_id, xsrf, letter, test_data, answers
+    )
+    return _post_response(session, response_url, xsrf, payload)
+
+
+def _submit(
+    session: requests.Session,
+    vacancy_id: str,
+    hh_resume_id: str,
+    answers: list[dict],
+    letter: str,
+) -> requests.Response:
+    """Re-fetch xsrf+test meta, build payload from approved answers, POST."""
+    return _submit_response(session, vacancy_id, hh_resume_id, letter, answers)
 
 
 def _is_success(resp: requests.Response) -> bool:
@@ -484,14 +525,17 @@ async def prepare_form_answers(
     return "form_pending", answers
 
 
-async def submit_prepared_form(
+async def submit_response(
     user_id: str, resume_id: str, vacancy_id: str,
-    answers: list[dict], letter: str = "",
+    letter: str = "", answers: list[dict] | None = None,
 ) -> tuple[FillStatus, str | None]:
-    """Submit previously-approved answers to hh. Re-fetches fresh xsrf each call.
+    """Post a response to an hh vacancy over the web session.
 
-    Returns (status, error). "form_sent" on accepted submit, "failed" + reason
-    otherwise (network/parse error, or hh rejected).
+    answers=None → plain response (no vacancy test, test-only fields omitted).
+    answers given → submit the solved test, same as submit_prepared_form.
+
+    Returns (status, error): "sent"/"form_sent" on accept, "failed" + reason
+    otherwise (network/parse error, dead session, or hh rejected).
     """
     loop = asyncio.get_running_loop()
     try:
@@ -506,7 +550,7 @@ async def submit_prepared_form(
 
     try:
         resp = await loop.run_in_executor(
-            None, _submit, session, vacancy_id, hh_resume_id, answers, letter
+            None, _submit_response, session, vacancy_id, hh_resume_id, letter, answers
         )
     except WebSessionExpired as ex:
         await report_dead_session(user_id, ex)
@@ -516,11 +560,28 @@ async def submit_prepared_form(
         return "failed", f"submit_error: {ex}"
 
     if _is_success(resp):
-        logger.info("fill: approved answers submitted vacancy=%s", vacancy_id)
-        return "form_sent", None
+        logger.info(
+            "fill: submitted vacancy=%s has_test=%s",
+            vacancy_id, bool(answers),
+        )
+        return ("form_sent" if answers else "sent"), None
     body = (resp.text or "")[:300]
     logger.warning(
         "fill: submit rejected vacancy=%s status=%s body=%.300s",
         vacancy_id, resp.status_code, body,
     )
     return "failed", f"hh_rejected: {resp.status_code} {body}"
+
+
+async def submit_prepared_form(
+    user_id: str, resume_id: str, vacancy_id: str,
+    answers: list[dict], letter: str = "",
+) -> tuple[FillStatus, str | None]:
+    """Submit previously-approved answers to hh. Re-fetches fresh xsrf each call.
+
+    Returns (status, error). "form_sent" on accepted submit, "failed" + reason
+    otherwise (network/parse error, or hh rejected).
+    """
+    return await submit_response(
+        user_id, resume_id, vacancy_id, letter=letter, answers=answers
+    )

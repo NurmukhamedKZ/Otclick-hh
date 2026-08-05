@@ -286,3 +286,81 @@ def test_submit_posts_approved_answers():
     assert posted["task_12_text"] == "Привет"
     assert posted["resume_hash"] == "hh-r"
     assert posted["letter"] == "L"
+
+
+def test_plain_response_payload_omits_test_only_fields():
+    from app.services.form_filler import _response_payload
+
+    payload = _response_payload(
+        vacancy_id="42", hh_resume_id="hr", xsrf="XT",
+        letter="hi", test_data=None, answers=None,
+    )
+    assert payload["vacancy_id"] == "42"
+    assert payload["letter"] == "hi"
+    assert payload["letterRequired"] == "true"
+    for key in ("_xsrf", "uidPk", "guid", "startTime", "testRequired"):
+        assert key not in payload
+    # field set matches the captured real no-test POST exactly.
+    assert set(payload) == {
+        "resume_hash", "vacancy_id", "letterRequired", "lux",
+        "ignore_postponed", "mark_applicant_visible_in_vacancy_country",
+        "country_ids", "letter",
+    }
+
+
+def test_answer_payload_adds_test_meta_and_tasks():
+    from app.services.form_filler import _response_payload
+
+    test_data = {"uidPk": "u", "guid": "g", "startTime": 1, "required": True}
+    answers = [
+        {"task_id": 11, "type": "choice", "answer_id": "1", "answer": "Да"},
+        {"task_id": 12, "type": "text", "answer": "Привет"},
+    ]
+    payload = _response_payload(
+        "42", "hr", "XT", letter="", test_data=test_data, answers=answers
+    )
+    assert payload["uidPk"] == "u"
+    assert payload["testRequired"] is True
+    assert payload["task_11"] == "1"
+    assert payload["task_12_text"] == "Привет"
+    # no letter → not sent, matching the real captured payload
+    assert "letter" not in payload
+    assert payload["letterRequired"] == "false"
+
+
+@pytest.mark.asyncio
+async def test_submit_response_plain_posts_without_test_fields(monkeypatch):
+    """The Task 5 regression: an answers=None apply must not send the test-only
+    keys (uidPk/guid/startTime/testRequired) — those only exist for tests."""
+    from app.services import form_filler
+
+    captured = {}
+
+    def _fake_post(session, response_url, xsrf, payload):
+        captured["payload"] = payload
+        captured["xsrf_header"] = xsrf
+        ok = MagicMock()
+        ok.status_code = 200
+        ok.json.return_value = {"negotiation": {"id": 1}}
+        ok.text = ""
+        return ok
+
+    async def _fake_session(user_id):
+        return MagicMock()
+
+    async def _fake_hh_resume(user_id, resume_row_id):
+        return "hr"
+
+    monkeypatch.setattr(form_filler, "_post_response", _fake_post)
+    monkeypatch.setattr(form_filler, "load_web_session", _fake_session)
+    monkeypatch.setattr(form_filler, "_get_hh_resume_id", _fake_hh_resume)
+
+    status, error = await form_filler.submit_response("u1", "r1", "42", letter="hi", answers=None)
+
+    assert status == "sent"
+    assert error is None
+    body = captured["payload"]
+    assert body["vacancy_id"] == "42" and body["letter"] == "hi"
+    for test_only in ("uidPk", "guid", "startTime", "testRequired"):
+        assert test_only not in body
+    assert captured["xsrf_header"] is not None

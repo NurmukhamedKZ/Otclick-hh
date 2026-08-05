@@ -20,8 +20,7 @@ from typing import Literal
 from app.ai.agent import HHAgent
 from app.db.supabase import service_client
 from app.hh import errors as hh_errors
-from app.services import captcha as captcha_service
-from app.services import form_drafts, notifications
+from app.services import form_drafts, form_filler, notifications
 from app.services.hh_credentials import (
     HHCredentialsInvalid,
     load_api_client,
@@ -115,10 +114,6 @@ def _already_applied(user_id: str, vacancy_id: str) -> bool:
     # form_required pre-record is not a real attempt — allow re-evaluation.
     # form_pending = AI answers waiting for user approval; do not re-queue.
     return res.data[0].get("status") not in RETRYABLE_STATUSES
-
-
-def _is_already_applied_error(ex: hh_errors.ClientError) -> bool:
-    return _match_markers(ex, _ALREADY_APPLIED_MARKERS)
 
 
 def is_ban_error(ex: Exception) -> bool:
@@ -217,7 +212,6 @@ async def apply_one(
     if resume is None:
         logger.warning("apply: resume %s not found for user %s", resume_uuid, user_id)
         return "resume_missing"
-    hh_resume_id = resume["hh_resume_id"]
 
     if await loop.run_in_executor(None, _already_applied, user_id, vacancy_id):
         logger.info("apply: user=%s already applied to vacancy=%s", user_id, vacancy_id)
@@ -359,141 +353,110 @@ async def apply_one(
                 )
                 return "failed"
 
-        params = {
-            "resume_id": hh_resume_id,
-            "vacancy_id": vacancy_id,
-        }
-        if letter_required:
-            params["message"] = cover_letter
-
         logger.info(
-            "apply: POST /negotiations user=%s vacancy=%s letter_required=%s len=%d",
+            "apply: submit_response user=%s vacancy=%s letter_required=%s len=%d",
             user_id, vacancy_id, letter_required, len(cover_letter),
         )
-        try:
-            await loop.run_in_executor(
-                None, lambda: client.post("/negotiations", params)
-            )
-        except hh_errors.CaptchaRequired as ex:
-            captcha_url = ex.captcha_url
-            await loop.run_in_executor(
-                None,
-                lambda: _record_application(
-                    user_id=user_id,
-                    resume_uuid=resume_uuid,
-                    vacancy_id=vacancy_id,
-                    status="captcha",
-                    cover_letter=cover_letter or None,
-                    error=captcha_url,
-                    employer_id=employer_id,
-                ),
-            )
-            try:
-                await captcha_service.create_request(user_id, captcha_url)
-            except Exception:
-                logger.exception("apply: failed to create captcha_request")
-            return "captcha"
-        except hh_errors.LimitExceeded:
-            logger.info("user %s: hh LimitExceeded on vacancy %s", user_id, vacancy_id)
-            return "limit_day"
-        except hh_errors.Forbidden as ex:
-            ex_str = str(ex)
-            msg = ex_str.lower()
-            if any(m in msg for m in _FORM_REQUIRED_MARKERS):
-                logger.info(
-                    "apply: user=%s vacancy=%s form_required by hh Forbidden marker",
-                    user_id, vacancy_id,
-                )
-                await loop.run_in_executor(
-                    None,
-                    lambda: _record_application(
-                        user_id=user_id,
-                        resume_uuid=resume_uuid,
-                        vacancy_id=vacancy_id,
-                        status="form_required",
-                        cover_letter=cover_letter or None,
-                        error=f"form_required: {ex_str}",
-                        employer_id=employer_id,
-                    ),
-                )
-                return "form_required"
-            if is_ban_error(ex):
-                logger.error("user %s: hh Forbidden — account banned", user_id)
-                await mark_invalid(user_id, f"account banned: {ex}")
-                return "account_banned"
-            if _match_markers(ex, _RESUME_GONE_MARKERS):
-                logger.warning(
-                    "user %s: resume %s gone on hh — disabling its filters",
-                    user_id, resume_uuid,
-                )
-                await loop.run_in_executor(
-                    None, _disable_filters_for_resume, user_id, resume_uuid
-                )
-                return "resume_missing"
-            logger.warning("user %s: hh Forbidden — marking creds invalid", user_id)
-            await mark_invalid(user_id, f"Forbidden: {ex}")
-            return "token_dead"
-        except hh_errors.ClientError as ex:
-            ex_str = str(ex)
-            ex_type = type(ex).__name__
-            if _is_already_applied_error(ex):
-                await loop.run_in_executor(
-                    None, _auto_blacklist, user_id, employer_id
-                )
-                await loop.run_in_executor(
-                    None,
-                    lambda: _record_application(
-                        user_id=user_id,
-                        resume_uuid=resume_uuid,
-                        vacancy_id=vacancy_id,
-                        status="skipped",
-                        cover_letter=cover_letter or None,
-                        error=f"already_applied: {ex_str}",
-                        employer_id=employer_id,
-                    ),
-                )
-                return "skipped"
-            if _match_markers(ex, _RESUME_GONE_MARKERS):
-                logger.warning(
-                    "user %s: resume %s gone on hh (%s) — disabling its filters",
-                    user_id, resume_uuid, ex_type,
-                )
-                await loop.run_in_executor(
-                    None, _disable_filters_for_resume, user_id, resume_uuid
-                )
-                return "resume_missing"
-            await loop.run_in_executor(
-                None,
-                lambda: _record_application(
-                    user_id=user_id,
-                    resume_uuid=resume_uuid,
-                    vacancy_id=vacancy_id,
-                    status="failed",
-                    cover_letter=cover_letter or None,
-                    error=f"{ex_type}: {ex_str}",
-                    employer_id=employer_id,
-                ),
-            )
-            return "failed"
-
-        logger.info(
-            "apply: SENT user=%s vacancy=%s employer=%s",
-            user_id, vacancy_id, employer_id,
+        status, error = await form_filler.submit_response(
+            user_id=user_id,
+            resume_id=resume_uuid,
+            vacancy_id=vacancy_id,
+            letter=cover_letter,
+            answers=None,
         )
+        if status in ("sent", "form_sent"):
+            logger.info(
+                "apply: SENT user=%s vacancy=%s employer=%s",
+                user_id, vacancy_id, employer_id,
+            )
+            await loop.run_in_executor(
+                None,
+                lambda: _record_application(
+                    user_id=user_id,
+                    resume_uuid=resume_uuid,
+                    vacancy_id=vacancy_id,
+                    status="sent",
+                    cover_letter=cover_letter or None,
+                    error=None,
+                    employer_id=employer_id,
+                    employer_name=employer_name,
+                    filter_id=filter_id,
+                ),
+            )
+            return "sent"
+
+        # A dead web session must stop the loop via the terminal path
+        # (runner._disable_worker) — otherwise worker_main respawns the runner
+        # every 15 s forever. Treat it like a dead token.
+        if error and "web_session_expired" in error:
+            logger.warning(
+                "apply: user=%s web session dead on submit — marking invalid", user_id
+            )
+            await mark_invalid(user_id, f"web session dead on apply: {error}")
+            return "token_dead"
+
+        # hh rejected the body — map it onto the same ApplyStatus literals the
+        # old POST /negotiations used.
+        err_text = (error or "").lower()
+        if any(m in err_text for m in _ALREADY_APPLIED_MARKERS):
+            await loop.run_in_executor(None, _auto_blacklist, user_id, employer_id)
+            await loop.run_in_executor(
+                None,
+                lambda: _record_application(
+                    user_id=user_id,
+                    resume_uuid=resume_uuid,
+                    vacancy_id=vacancy_id,
+                    status="skipped",
+                    cover_letter=cover_letter or None,
+                    error=f"already_applied: {error}",
+                    employer_id=employer_id,
+                ),
+            )
+            return "skipped"
+        if any(m in err_text for m in _FORM_REQUIRED_MARKERS):
+            logger.info(
+                "apply: user=%s vacancy=%s form_required by hh rejection marker",
+                user_id, vacancy_id,
+            )
+            await loop.run_in_executor(
+                None,
+                lambda: _record_application(
+                    user_id=user_id,
+                    resume_uuid=resume_uuid,
+                    vacancy_id=vacancy_id,
+                    status="form_required",
+                    cover_letter=cover_letter or None,
+                    error=f"form_required: {error}",
+                    employer_id=employer_id,
+                ),
+            )
+            return "form_required"
+        if any(m in err_text for m in _BANNED_MARKERS):
+            logger.error("user %s: hh submit banned — account banned", user_id)
+            await mark_invalid(user_id, f"account banned (submit): {error}")
+            return "account_banned"
+        if any(m in err_text for m in _RESUME_GONE_MARKERS):
+            logger.warning(
+                "user %s: resume %s gone on hh — disabling its filters",
+                user_id, resume_uuid,
+            )
+            await loop.run_in_executor(
+                None, _disable_filters_for_resume, user_id, resume_uuid
+            )
+            return "resume_missing"
+
         await loop.run_in_executor(
             None,
             lambda: _record_application(
                 user_id=user_id,
                 resume_uuid=resume_uuid,
                 vacancy_id=vacancy_id,
-                status="sent",
+                status="failed",
                 cover_letter=cover_letter or None,
-                error=None,
+                error=f"hh_submit_rejected: {error}",
                 employer_id=employer_id,
-                employer_name=employer_name,
-                filter_id=filter_id,
             ),
         )
-        return "sent"
+        return "failed"
     finally:
         await persist_if_refreshed(user_id, client, original_access)

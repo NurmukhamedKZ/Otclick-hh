@@ -60,18 +60,22 @@ async def test_apply_one_sent_success():
     sb, _, upsert = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
     client = MagicMock()
     client.access_token = "tok"
-    client.post.return_value = {}
     client.get.return_value = {"id": "v1", "employer": {"id": "42"}, "has_test": False, "response_letter_required": False}
+
+    async def _submitted(user_id, resume_id, vacancy_id, letter="", answers=None):
+        assert answers is None  # no-test plain response
+        return "sent", None
 
     with (
         patch.object(apply_mod, "service_client", sb),
         patch.object(apply_mod, "load_api_client", return_value=client),
         patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.form_filler, "submit_response", new=_submitted),
     ):
         result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
 
     assert result == "sent"
-    client.post.assert_called_once()
+    client.post.assert_not_called()
 
 
 async def test_apply_one_resume_missing():
@@ -94,10 +98,7 @@ async def test_apply_one_skipped_already_applied_locally():
     assert result == "skipped"
 
 
-async def test_apply_one_captcha():
-    from unittest.mock import AsyncMock
-
-    from app.hh import errors as hh_errors
+async def test_apply_one_web_session_dead_maps_to_token_dead():
     from app.services import apply as apply_mod
 
     sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
@@ -105,23 +106,29 @@ async def test_apply_one_captcha():
     client.access_token = "tok"
     client.get.return_value = {"id": "v1", "employer": {"id": "42"}, "has_test": False, "response_letter_required": False}
 
-    resp = MagicMock(status_code=403)
-    data = {"errors": [{"value": "captcha_required", "captcha_url": "https://hh.ru/cap.png"}]}
-    client.post.side_effect = hh_errors.CaptchaRequired(resp, data)
+    async def _dead(user_id, resume_id, vacancy_id, letter="", answers=None):
+        return "failed", "web_session_expired: hh rejected the web session (403)"
+
+    mark_calls = []
+
+    async def fake_mark(user_id, reason):
+        mark_calls.append((user_id, reason))
 
     with (
         patch.object(apply_mod, "service_client", sb),
         patch.object(apply_mod, "load_api_client", return_value=client),
         patch.object(apply_mod, "persist_if_refreshed"),
-        patch.object(apply_mod.captcha_service, "create_request", new=AsyncMock()) as create_req,
+        patch.object(apply_mod.form_filler, "submit_response", new=_dead),
+        patch.object(apply_mod, "mark_invalid", side_effect=fake_mark),
     ):
         result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
-    assert result == "captcha"
-    create_req.assert_awaited_once_with("u1", "https://hh.ru/cap.png")
+
+    # Dead web session must hit the terminal path so the runner stops the loop.
+    assert result == "token_dead"
+    assert mark_calls and mark_calls[0][0] == "u1"
 
 
-async def test_apply_one_limit_exceeded():
-    from app.hh import errors as hh_errors
+async def test_apply_one_rejection_maps_form_required():
     from app.services import apply as apply_mod
 
     sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
@@ -129,31 +136,79 @@ async def test_apply_one_limit_exceeded():
     client.access_token = "tok"
     client.get.return_value = {"id": "v1", "employer": {"id": "42"}, "has_test": False, "response_letter_required": False}
 
-    resp = MagicMock(status_code=400)
-    data = {"errors": [{"value": "limit_exceeded", "type": "bad"}]}
-    client.post.side_effect = hh_errors.LimitExceeded(resp, data)
+    async def _rej(**kwargs):
+        return "failed", "hh_rejected: 403 must process test first"
 
     with (
         patch.object(apply_mod, "service_client", sb),
         patch.object(apply_mod, "load_api_client", return_value=client),
         patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.form_filler, "submit_response", new=_rej),
     ):
         result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
-    assert result == "limit_day"
+    assert result == "form_required"
 
 
-async def test_apply_one_token_dead_on_forbidden():
-    from app.hh import errors as hh_errors
+async def test_apply_one_rejection_maps_already_applied():
     from app.services import apply as apply_mod
 
     sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
     client = MagicMock()
     client.access_token = "tok"
     client.get.return_value = {"id": "v1", "employer": {"id": "42"}, "has_test": False, "response_letter_required": False}
+
+    async def _rej(**kwargs):
+        return "failed", "hh_rejected: 400 already applied"
+
+    blacklist_upserts = []
+
+    def fake_blacklist(user_id, employer_id):
+        blacklist_upserts.append((user_id, employer_id))
+
+    with (
+        patch.object(apply_mod, "service_client", sb),
+        patch.object(apply_mod, "load_api_client", return_value=client),
+        patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.form_filler, "submit_response", new=_rej),
+        patch.object(apply_mod, "_auto_blacklist", side_effect=fake_blacklist),
+    ):
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
+    assert result == "skipped"
+    assert ("u1", "42") in blacklist_upserts
+
+
+async def test_apply_one_failed_on_unknown_rejection():
+    from app.services import apply as apply_mod
+
+    sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
+    client = MagicMock()
+    client.access_token = "tok"
+    client.get.return_value = {"id": "v1", "employer": {"id": "42"}, "has_test": False, "response_letter_required": False}
+
+    async def _rej(**kwargs):
+        return "failed", "hh_rejected: 502 upstream down"
+
+    with (
+        patch.object(apply_mod, "service_client", sb),
+        patch.object(apply_mod, "load_api_client", return_value=client),
+        patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.form_filler, "submit_response", new=_rej),
+    ):
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
+    assert result == "failed"
+
+
+async def test_apply_one_token_dead_on_forbidden_fetch():
+    from app.hh import errors as hh_errors
+    from app.services import apply as apply_mod
+
+    sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
+    client = MagicMock()
+    client.access_token = "tok"
 
     resp = MagicMock(status_code=403)
     data = {"errors": [{"value": "token_dead", "type": "auth"}]}
-    client.post.side_effect = hh_errors.Forbidden(resp, data)
+    client.get.side_effect = hh_errors.Forbidden(resp, data)
 
     mark_calls = []
 
@@ -260,16 +315,22 @@ async def test_apply_one_skips_letter_when_not_required():
 
     agent = _fake_agent()
 
+    captured = {}
+
+    async def _submitted(user_id, resume_id, vacancy_id, letter="", answers=None):
+        captured["letter"] = letter
+        return "sent", None
+
     with (
         patch.object(apply_mod, "service_client", sb),
         patch.object(apply_mod, "load_api_client", return_value=client),
         patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.form_filler, "submit_response", new=_submitted),
     ):
         result = await apply_mod.apply_one("u1", "r-uuid", "v1", agent)
     assert result == "sent"
     agent.write_cover_letter.assert_not_awaited()
-    posted_params = client.post.call_args[0][1]
-    assert "message" not in posted_params
+    assert captured["letter"] == ""
 
 
 async def test_apply_one_generates_letter_when_required():
@@ -289,15 +350,21 @@ async def test_apply_one_generates_letter_when_required():
 
     agent = _fake_agent(letter="GENERATED")
 
+    captured = {}
+
+    async def _submitted(user_id, resume_id, vacancy_id, letter="", answers=None):
+        captured["letter"] = letter
+        return "sent", None
+
     with (
         patch.object(apply_mod, "service_client", sb),
         patch.object(apply_mod, "load_api_client", return_value=client),
         patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.form_filler, "submit_response", new=_submitted),
     ):
         result = await apply_mod.apply_one("u1", "r-uuid", "v1", agent)
     assert result == "sent"
-    posted_params = client.post.call_args[0][1]
-    assert posted_params["message"] == "GENERATED"
+    assert captured["letter"] == "GENERATED"
 
 
 async def test_apply_one_vacancy_gone():
@@ -320,8 +387,7 @@ async def test_apply_one_vacancy_gone():
     client.post.assert_not_called()
 
 
-async def test_apply_one_form_required_on_hh_forbidden_marker():
-    from app.hh import errors as hh_errors
+async def test_apply_one_form_required_on_rejection_marker():
     from app.services import apply as apply_mod
 
     sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1", "title": "T"})
@@ -333,22 +399,21 @@ async def test_apply_one_form_required_on_hh_forbidden_marker():
         "response_letter_required": False,
         "employer": {"id": "42"},
     }
-    resp = MagicMock(status_code=403)
-    client.post.side_effect = hh_errors.Forbidden(
-        resp, {"errors": [{"type": "test_required", "value": "must process test first"}]}
-    )
+
+    async def _rej(**kwargs):
+        return "failed", "hh_rejected: 403 must process test first"
 
     with (
         patch.object(apply_mod, "service_client", sb),
         patch.object(apply_mod, "load_api_client", return_value=client),
         patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.form_filler, "submit_response", new=_rej),
     ):
         result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
     assert result == "form_required"
 
 
-async def test_apply_one_account_banned_on_negotiations_forbidden():
-    from app.hh import errors as hh_errors
+async def test_apply_one_account_banned_on_rejection():
     from app.services import apply as apply_mod
 
     sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
@@ -356,9 +421,8 @@ async def test_apply_one_account_banned_on_negotiations_forbidden():
     client.access_token = "tok"
     client.get.return_value = {"id": "v1", "employer": {"id": "42"}, "has_test": False, "response_letter_required": False}
 
-    resp = MagicMock(status_code=403)
-    data = {"errors": [{"type": "account", "value": "user_blocked"}]}
-    client.post.side_effect = hh_errors.Forbidden(resp, data)
+    async def _rej(**kwargs):
+        return "failed", "hh_rejected: 403 user_blocked"
 
     mark_calls = []
 
@@ -369,6 +433,7 @@ async def test_apply_one_account_banned_on_negotiations_forbidden():
         patch.object(apply_mod, "service_client", sb),
         patch.object(apply_mod, "load_api_client", return_value=client),
         patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.form_filler, "submit_response", new=_rej),
         patch.object(apply_mod, "mark_invalid", side_effect=fake_mark),
     ):
         result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
@@ -402,8 +467,7 @@ async def test_apply_one_account_banned_on_vacancy_fetch():
     client.post.assert_not_called()
 
 
-async def test_apply_one_resume_gone_on_hh_disables_filters():
-    from app.hh import errors as hh_errors
+async def test_apply_one_resume_gone_disables_filters():
     from app.services import apply as apply_mod
 
     sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
@@ -411,10 +475,8 @@ async def test_apply_one_resume_gone_on_hh_disables_filters():
     client.access_token = "tok"
     client.get.return_value = {"id": "v1", "employer": {"id": "42"}, "has_test": False, "response_letter_required": False}
 
-    resp = MagicMock(status_code=400)
-    client.post.side_effect = hh_errors.BadRequest(
-        resp, {"errors": [{"type": "bad_argument", "value": "resume_not_found"}]}
-    )
+    async def _rej(**kwargs):
+        return "failed", "hh_rejected: 400 resume_not_found"
 
     disable_calls = []
 
@@ -422,6 +484,7 @@ async def test_apply_one_resume_gone_on_hh_disables_filters():
         patch.object(apply_mod, "service_client", sb),
         patch.object(apply_mod, "load_api_client", return_value=client),
         patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.form_filler, "submit_response", new=_rej),
         patch.object(
             apply_mod,
             "_disable_filters_for_resume",
@@ -433,21 +496,22 @@ async def test_apply_one_resume_gone_on_hh_disables_filters():
     assert disable_calls == [("u1", "r-uuid")]
 
 
-async def test_apply_one_failed_on_generic_client_error():
-    from app.hh import errors as hh_errors
+async def test_apply_one_failed_on_generic_rejection():
     from app.services import apply as apply_mod
 
     sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
     client = MagicMock()
     client.access_token = "tok"
     client.get.return_value = {"id": "v1", "employer": {"id": "42"}, "has_test": False, "response_letter_required": False}
-    resp = MagicMock(status_code=400)
-    client.post.side_effect = hh_errors.BadRequest(resp, {"description": "nope"})
+
+    async def _rej(**kwargs):
+        return "failed", "hh_rejected: 400 nope"
 
     with (
         patch.object(apply_mod, "service_client", sb),
         patch.object(apply_mod, "load_api_client", return_value=client),
         patch.object(apply_mod, "persist_if_refreshed"),
+        patch.object(apply_mod.form_filler, "submit_response", new=_rej),
     ):
         result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
     assert result == "failed"
