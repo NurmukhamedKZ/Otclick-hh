@@ -7,7 +7,7 @@ import logging
 from datetime import UTC, datetime
 
 from app.db.supabase import service_client
-from app.services.hh_credentials import load_api_client, persist_if_refreshed
+from app.hh import web
 from app.services.notifications import notify
 
 logger = logging.getLogger(__name__)
@@ -71,15 +71,9 @@ def _disable_orphaned_filters(user_id: str) -> list[str]:
 
 
 async def sync_resumes(user_id: str) -> list[dict]:
-    """Pull /resumes/mine → upsert rows. Returns stored rows."""
-    client = await load_api_client(user_id)
-    original_access = client.access_token
+    """Read the resumes page → upsert rows. Returns stored rows."""
     loop = asyncio.get_running_loop()
-    try:
-        payload = await loop.run_in_executor(None, client.get, "resumes/mine")
-    finally:
-        await persist_if_refreshed(user_id, client, original_access)
-    items = payload.get("items", []) if isinstance(payload, dict) else []
+    items = await web.list_resumes(user_id)
     rows = await loop.run_in_executor(None, _upsert_resumes, user_id, items)
 
     try:

@@ -12,20 +12,6 @@ os.environ.setdefault("FERNET_KEY", "kPpDeJjFqDppkMm6QHzqFkkSgFwsKtGzh4WeZ5dKZHc
 from app.services import negotiation_sync as ns
 
 
-def test_rows_from_items_extracts_state_and_viewed():
-    rows = ns._rows_from_items([
-        {
-            "state": {"id": "invitation"},
-            "viewed_by_opponent": True,
-            "vacancy": {"id": 111, "employer": {"name": "Acme"}},
-        },
-        {"state": {"id": "discard"}, "vacancy": {}},  # no vacancy id → dropped
-    ])
-    assert rows == [
-        {"vacancy_id": "111", "state": "invitation", "viewed": True, "employer_name": "Acme"}
-    ]
-
-
 def _select_chain(data):
     chain = MagicMock()
     chain.select.return_value = chain
@@ -71,38 +57,38 @@ def test_persist_updates_only_changed_rows():
 @pytest.mark.asyncio
 async def test_sync_states_skips_when_not_due():
     with patch.object(ns, "_due", return_value=False), patch.object(
-        ns, "load_api_client"
-    ) as load:
+        ns.web, "list_negotiations"
+    ) as fetch:
         assert await ns.sync_states("u1") == 0
-    load.assert_not_called()
+    fetch.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_sync_states_survives_dead_creds():
     with patch.object(ns, "_due", return_value=True), patch.object(
-        ns, "load_api_client", side_effect=RuntimeError("no creds")
-    ):
+        ns.web, "list_negotiations", side_effect=RuntimeError("no web session")
+    ), patch.object(ns, "_mark_synced"):
         assert await ns.sync_states("u1") == 0
 
 
 @pytest.mark.asyncio
 async def test_sync_states_pages_and_marks_synced():
-    client = MagicMock()
-    client.access_token = "tok"
-    client.get.return_value = {
-        "items": [
-            {"state": {"id": "invitation"}, "viewed_by_opponent": True, "vacancy": {"id": 9}}
-        ],
-        "pages": 1,
-    }
+    calls = []
+
+    async def _fetch(user_id, page=0):
+        calls.append(page)
+        # short page → paging must stop after the first one
+        return [{"vacancy_id": "9", "state": "invitation", "viewed": True,
+                 "employer_name": None}]
+
     with patch.object(ns, "_due", return_value=True), patch.object(
-        ns, "load_api_client", return_value=client
+        ns.web, "list_negotiations", new=_fetch
     ), patch.object(ns, "_persist", return_value=1) as persist, patch.object(
         ns, "_mark_synced"
-    ) as mark, patch.object(ns, "persist_if_refreshed"):
+    ) as mark:
         changed = await ns.sync_states("u1")
 
     assert changed == 1
-    assert client.get.call_count == 1
+    assert calls == [0]
     persist.assert_called_once()
     mark.assert_called_once_with("u1")

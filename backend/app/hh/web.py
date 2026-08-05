@@ -138,3 +138,73 @@ async def get_vacancy(user_id: str, vacancy_id: str) -> dict:
     topics = (status.get("negotiations") or {}).get("topicList") or []
     vacancy["already_responded"] = bool(topics)
     return vacancy
+
+
+def _hh_string(value) -> str:
+    """hh wraps resume text fields as [{"string": "..."}]. Flatten to a string."""
+    if isinstance(value, list):
+        return " ".join(
+            str(v.get("string") or "") if isinstance(v, dict) else str(v) for v in value
+        ).strip()
+    return str(value or "")
+
+
+async def list_resumes(user_id: str) -> list[dict]:
+    """The user's resumes, shaped like the old /resumes/mine items.
+
+    `_attributes.hash` is the id every other hh surface uses (it is what
+    `resume_hash` in the apply POST expects), NOT `_attributes.id`.
+    """
+    loop = asyncio.get_running_loop()
+    session = await load_web_session(user_id)
+    resp = await loop.run_in_executor(
+        None, _get, session, user_id, f"{WEB_BASE}/applicant/resumes"
+    )
+    out: list[dict] = []
+    for r in find_state(resp.text, "applicantResumes") or []:
+        attrs = r.get("_attributes") or {}
+        if not attrs.get("hash"):
+            continue
+        out.append({
+            "id": str(attrs["hash"]),
+            "title": _hh_string(r.get("title")),
+            "status": attrs.get("publishState"),
+        })
+    return out
+
+
+# hh's web wording → the literals analytics_summary() and the UI expect.
+# Anything unmapped falls through lowercased rather than being dropped, so a
+# new hh state shows up in the data instead of silently reading as "no reply".
+_STATE_MAP = {
+    "RESPONSE": "response",
+    "INVITATION": "invitation",
+    "INTERVIEW": "invitation",
+    "DISCARD": "discard",
+}
+
+
+async def list_negotiations(user_id: str, page: int = 0) -> list[dict]:
+    """Negotiation states, shaped like negotiation_sync._rows_from_items output.
+
+    employer_name is not on this page (only employerId), so it stays None —
+    apply_one already fills it on new rows.
+    """
+    loop = asyncio.get_running_loop()
+    session = await load_web_session(user_id)
+    url = f"{WEB_BASE}/applicant/negotiations?{urlencode({'page': page})}"
+    resp = await loop.run_in_executor(None, _get, session, user_id, url)
+
+    out: list[dict] = []
+    for t in find_state(resp.text, "topicList") or []:
+        vid = t.get("vacancyId")
+        if not vid:
+            continue
+        raw = str(t.get("lastState") or "")
+        out.append({
+            "vacancy_id": str(vid),
+            "state": _STATE_MAP.get(raw, raw.lower() or None),
+            "viewed": bool(t.get("viewedByOpponent")),
+            "employer_name": None,
+        })
+    return out

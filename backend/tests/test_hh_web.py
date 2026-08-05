@@ -118,3 +118,52 @@ async def test_get_vacancy_raises_vacancy_gone_on_404(monkeypatch):
     monkeypatch.setattr(web, "load_web_session", _load_web_session)
     with pytest.raises(web.VacancyGone):
         await web.get_vacancy("u1", "42")
+
+
+RESUMES_PAGE = (
+    '<html>{&#34;applicantResumes&#34;:[{'
+    '&#34;title&#34;:[{&#34;string&#34;:&#34;AI-инженер&#34;}],'
+    '&#34;_attributes&#34;:{&#34;hash&#34;:&#34;abc123&#34;,&#34;updated&#34;:1785961567117,'
+    '&#34;publishState&#34;:&#34;published&#34;}}]}</html>'
+)
+
+NEGOTIATIONS_PAGE = (
+    '<html>{&#34;topicList&#34;:['
+    '{&#34;vacancyId&#34;:1,&#34;lastState&#34;:&#34;RESPONSE&#34;,&#34;viewedByOpponent&#34;:false},'
+    '{&#34;vacancyId&#34;:2,&#34;lastState&#34;:&#34;INTERVIEW&#34;,&#34;viewedByOpponent&#34;:true},'
+    '{&#34;vacancyId&#34;:3,&#34;lastState&#34;:&#34;DISCARD&#34;,&#34;viewedByOpponent&#34;:true},'
+    '{&#34;lastState&#34;:&#34;RESPONSE&#34;}]}</html>'
+)
+
+
+@pytest.mark.asyncio
+async def test_list_resumes_flattens_hhs_title_and_uses_the_hash_as_id(monkeypatch):
+    from app.hh import web
+
+    async def _load_web_session(_user_id):
+        return SimpleNamespace()
+
+    monkeypatch.setattr(web, "_get", _fake_get(RESUMES_PAGE))
+    monkeypatch.setattr(web, "load_web_session", _load_web_session)
+    items = await web.list_resumes("u1")
+
+    assert items == [{"id": "abc123", "title": "AI-инженер", "status": "published"}]
+
+
+@pytest.mark.asyncio
+async def test_list_negotiations_maps_hh_states_to_the_analytics_literals(monkeypatch):
+    """analytics_summary() keys the funnel off response/invitation/discard —
+    the stored values must not drift to hh's web wording."""
+    from app.hh import web
+
+    async def _load_web_session(_user_id):
+        return SimpleNamespace()
+
+    monkeypatch.setattr(web, "_get", _fake_get(NEGOTIATIONS_PAGE))
+    monkeypatch.setattr(web, "load_web_session", _load_web_session)
+    rows = await web.list_negotiations("u1")
+
+    # the entry with no vacancyId is dropped
+    assert [r["vacancy_id"] for r in rows] == ["1", "2", "3"]
+    assert [r["state"] for r in rows] == ["response", "invitation", "discard"]
+    assert [r["viewed"] for r in rows] == [False, True, True]
