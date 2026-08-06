@@ -386,3 +386,24 @@ def test_post_response_matches_the_captured_browser_submit():
     assert h["X-Hhtmfrom"] == ""
     assert h["Accept"] == "application/json"
     assert h["X-Xsrftoken"] == "XT"
+
+
+def test_submit_syncs_the_xsrf_cookie_with_the_token_it_sends():
+    """hh validates X-Xsrftoken against the _xsrf cookie. The jar is restored
+    from the Playwright login and goes stale, so without this every submit is
+    403'd — which is exactly what happened on the first live run."""
+    from unittest.mock import MagicMock
+
+    from app.services.form_filler import _submit_response
+
+    session = MagicMock()
+    session.get.return_value = MagicMock(
+        status_code=200, url="https://hh.ru/vacancy/42",
+        text='{"a":1,"xsrfToken":"FRESH"}',
+    )
+    _submit_response(session, "42", "hh-r", letter="", answers=None)
+
+    session.cookies.set.assert_called_once_with(
+        "_xsrf", "FRESH", domain="hh.ru", path="/"
+    )
+    assert session.post.call_args.kwargs["headers"]["X-Xsrftoken"] == "FRESH"

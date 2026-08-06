@@ -387,6 +387,17 @@ def _response_payload(
     return payload
 
 
+def _sync_xsrf_cookie(session: requests.Session, xsrf: str) -> None:
+    """Make the _xsrf cookie agree with the token we send in X-Xsrftoken.
+
+    hh validates one against the other. Our cookie jar is restored from the
+    Playwright login and its _xsrf goes stale, while every page carries a
+    current xsrfToken — the mismatch 403s every single submit. A browser never
+    sees this because hh sets the cookie and renders the same value.
+    """
+    session.cookies.set("_xsrf", xsrf, domain="hh.ru", path="/")
+
+
 def _post_response(
     session: requests.Session, vacancy_id: str, xsrf: str, payload: dict
 ) -> requests.Response:
@@ -436,6 +447,7 @@ def _submit_response(
     page = r.text
     xsrf = extract_xsrf_token(page)
     test_data = _parse_tests(page, vacancy_id) if answers else None
+    _sync_xsrf_cookie(session, xsrf)
     payload = _response_payload(
         vacancy_id, hh_resume_id, xsrf, letter, test_data, answers
     )
