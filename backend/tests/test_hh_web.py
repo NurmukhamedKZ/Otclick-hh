@@ -167,3 +167,67 @@ async def test_list_negotiations_maps_hh_states_to_the_analytics_literals(monkey
     assert [r["vacancy_id"] for r in rows] == ["1", "2", "3"]
     assert [r["state"] for r in rows] == ["response", "invitation", "discard"]
     assert [r["viewed"] for r in rows] == [False, True, True]
+
+
+RESUME_DETAIL_PAGE = (
+    '<html>{&#34;applicantResume&#34;:{'
+    '&#34;title&#34;:[{&#34;string&#34;:&#34;AI-инженер&#34;}],'
+    '&#34;firstName&#34;:[{&#34;string&#34;:&#34;Иван&#34;}],'
+    '&#34;lastName&#34;:[{&#34;string&#34;:&#34;Петров&#34;}],'
+    '&#34;gender&#34;:[{&#34;string&#34;:&#34;male&#34;}],'
+    '&#34;totalExperience&#34;:[{&#34;string&#34;:22}],'
+    '&#34;area&#34;:[{&#34;string&#34;:160}],'
+    '&#34;salary&#34;:[],'
+    '&#34;keySkills&#34;:[{&#34;string&#34;:&#34;Python&#34;},{&#34;string&#34;:&#34;SQL&#34;}],'
+    '&#34;skills&#34;:[{&#34;string&#34;:&#34;Про себя&#34;}],'
+    '&#34;experience&#34;:[{&#34;position&#34;:&#34;Dev&#34;,&#34;companyName&#34;:&#34;Acme&#34;,'
+    '&#34;startDate&#34;:&#34;2026-06-01&#34;,&#34;endDate&#34;:null,'
+    '&#34;description&#34;:&#34;Делал штуки&#34;}],'
+    '&#34;primaryEducation&#34;:[{&#34;name&#34;:&#34;КБТУ&#34;,&#34;organization&#34;:&#34;ШИТиИ&#34;,'
+    '&#34;result&#34;:&#34;ИС&#34;,&#34;year&#34;:2025}],'
+    '&#34;language&#34;:[{&#34;degree&#34;:&#34;c1&#34;,&#34;id&#34;:57}]}}</html>'
+)
+
+
+@pytest.mark.asyncio
+async def test_get_resume_maps_the_web_shape_onto_what_the_summary_expects(monkeypatch):
+    from app.hh import web
+
+    async def _load_web_session(_user_id):
+        return SimpleNamespace()
+
+    monkeypatch.setattr(web, "_get", _fake_get(RESUME_DETAIL_PAGE))
+    monkeypatch.setattr(web, "load_web_session", _load_web_session)
+    r = await web.get_resume("u1", "abc123")
+
+    assert r["title"] == "AI-инженер"
+    assert r["first_name"] == "Иван" and r["last_name"] == "Петров"
+    assert r["skill_set"] == ["Python", "SQL"]
+    assert r["gender"] == "мужской"  # not the raw "male" enum
+    assert r["skills"] == "Про себя"
+    assert r["experience"] == [{
+        "position": "Dev", "company": "Acme",
+        "start": "2026-06-01", "end": None, "description": "Делал штуки",
+    }]
+    assert r["education"]["primary"] == [{
+        "name": "КБТУ", "organization": "ШИТиИ", "result": "ИС", "year": 2025,
+    }]
+
+    # Ids we cannot resolve to names must be ABSENT, not printed raw: the
+    # summary feeds an LLM, and "Город: 160" is worse than no city at all.
+    assert "area" not in r
+    assert "language" not in r
+    assert "salary" not in r
+
+
+@pytest.mark.asyncio
+async def test_get_resume_renders_total_experience_readably(monkeypatch):
+    from app.hh import web
+
+    async def _load_web_session(_user_id):
+        return SimpleNamespace()
+
+    monkeypatch.setattr(web, "_get", _fake_get(RESUME_DETAIL_PAGE))
+    monkeypatch.setattr(web, "load_web_session", _load_web_session)
+    r = await web.get_resume("u1", "abc123")
+    assert r["total_experience"] == "1 г. 10 мес."

@@ -208,3 +208,94 @@ async def list_negotiations(user_id: str, page: int = 0) -> list[dict]:
             "employer_name": None,
         })
     return out
+
+
+# The API served these as {"name": "Мужской"}; the web page has only the enum.
+# The summary is LLM grounding, so "Пол: male" is a small but real quality loss.
+_ENUM_RU = {
+    "male": "мужской",
+    "female": "женский",
+    "relocation_possible": "возможна",
+    "relocation_impossible": "невозможна",
+    "relocation_no": "невозможна",
+    "ready": "готов",
+    "never": "не готов",
+    "sometimes": "иногда",
+}
+
+
+def _months_human(months) -> str | None:
+    """22 → "1 г. 10 мес.". The API gave a {"months": n} dict; the summary
+    prints whatever it gets, so render it here rather than leak a raw number."""
+    try:
+        m = int(months)
+    except (TypeError, ValueError):
+        return None
+    years, rest = divmod(m, 12)
+    parts = ([f"{years} г."] if years else []) + ([f"{rest} мес."] if rest else [])
+    return " ".join(parts) or None
+
+
+async def get_resume(user_id: str, hh_resume_id: str) -> dict:
+    """One full resume, mapped onto the API shape form_filler._resume_summary reads.
+
+    hh wraps scalars as [{"string": value}] and keeps the rich blocks as lists
+    of objects. Fields that survive only as numeric ids on this page (area,
+    language) are DROPPED rather than mapped: the summary grounds an LLM, and
+    "Город: 160" is worse for the answer than no city at all.
+    """
+    loop = asyncio.get_running_loop()
+    session = await load_web_session(user_id)
+    resp = await loop.run_in_executor(
+        None, _get, session, user_id, f"{WEB_BASE}/resume/{hh_resume_id}"
+    )
+    r = find_state(resp.text, "applicantResume")
+
+    out: dict = {}
+    for src, dst in (
+        ("title", "title"),
+        ("firstName", "first_name"),
+        ("lastName", "last_name"),
+        ("middleName", "middle_name"),
+        ("gender", "gender"),
+        ("skills", "skills"),
+        ("relocation", "relocation"),
+        ("businessTripReadiness", "business_trip_readiness"),
+    ):
+        if value := _hh_string(r.get(src)):
+            out[dst] = _ENUM_RU.get(value, value)
+
+    if total := _months_human(_hh_string(r.get("totalExperience"))):
+        out["total_experience"] = total
+
+    if skills := [s.get("string") for s in (r.get("keySkills") or []) if isinstance(s, dict)]:
+        out["skill_set"] = [s for s in skills if s]
+
+    experience = [
+        {
+            "position": e.get("position"),
+            "company": e.get("companyName"),
+            "start": e.get("startDate"),
+            "end": e.get("endDate"),
+            "description": e.get("description"),
+        }
+        for e in (r.get("experience") or [])
+        if isinstance(e, dict)
+    ]
+    if experience:
+        out["experience"] = experience
+
+    education = [
+        {
+            "name": e.get("name"),
+            "organization": e.get("organization"),
+            "result": e.get("result"),
+            "year": e.get("year"),
+        }
+        for e in (r.get("primaryEducation") or [])
+        if isinstance(e, dict)
+    ]
+    if education:
+        out["education"] = {"primary": education}
+
+    return out
