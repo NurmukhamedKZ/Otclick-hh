@@ -22,6 +22,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from scripts._local_env import use_public_supabase_url  # noqa: E402
+
+use_public_supabase_url()
+
 from playwright.async_api import async_playwright  # noqa: E402
 
 from app.services.form_filler import HH_WEB_USER_AGENT, _load_cookies_encrypted  # noqa: E402

@@ -18,6 +18,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from scripts._local_env import use_public_supabase_url  # noqa: E402
+
+use_public_supabase_url()
+
 from app.hh.page_json import find_balanced_object, find_state  # noqa: E402
 from app.services.form_filler import load_web_session  # noqa: E402
 
