@@ -281,7 +281,8 @@ def test_submit_posts_approved_answers():
     ]
     resp = _submit(session, "777", "hh-r", answers, letter="L")
     assert resp is post_resp
-    posted = session.post.call_args.kwargs["data"]
+    # multipart, not urlencoded: hh 403s a urlencoded submit as anti-CSRF
+    posted = {k: v[1] for k, v in session.post.call_args.kwargs["files"].items()}
     assert posted["task_11"] == "1"
     assert posted["task_12_text"] == "Привет"
     assert posted["resume_hash"] == "hh-r"
@@ -364,3 +365,24 @@ async def test_submit_response_plain_posts_without_test_fields(monkeypatch):
     for test_only in ("uidPk", "guid", "startTime", "testRequired"):
         assert test_only not in body
     assert captured["xsrf_header"] is not None
+
+
+def test_post_response_matches_the_captured_browser_submit():
+    """hh 403s anything that does not look like a submit from the vacancy page.
+    These four values are copied from recon_web_out/apply_no_test.json; every
+    one of them was wrong in the first live run and every apply was rejected."""
+    from unittest.mock import MagicMock
+
+    from app.services.form_filler import _post_response
+
+    session = MagicMock()
+    _post_response(session, "42", "XT", {"vacancy_id": "42", "letter": "hi"})
+
+    kwargs = session.post.call_args.kwargs
+    assert "data" not in kwargs and "files" in kwargs  # multipart, not urlencoded
+    h = kwargs["headers"]
+    assert h["Referer"] == "https://hh.ru/vacancy/42"  # not the response popup
+    assert h["X-Hhtmsource"] == "vacancy"
+    assert h["X-Hhtmfrom"] == ""
+    assert h["Accept"] == "application/json"
+    assert h["X-Xsrftoken"] == "XT"

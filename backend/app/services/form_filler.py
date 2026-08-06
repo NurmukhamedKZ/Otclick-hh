@@ -388,15 +388,27 @@ def _response_payload(
 
 
 def _post_response(
-    session: requests.Session, response_url: str, xsrf: str, payload: dict
+    session: requests.Session, vacancy_id: str, xsrf: str, payload: dict
 ) -> requests.Response:
+    """POST the response exactly the way the browser does.
+
+    Every field here is copied from a captured real submit
+    (recon_web_out/apply_no_test.json). hh answers 403 with a page body when
+    the request does not look like it came from the vacancy page — the body is
+    an anti-CSRF rejection, not a validation error, so the shape matters:
+      * multipart/form-data, NOT urlencoded (requests picks multipart when the
+        fields go through `files`)
+      * Referer is the VACANCY page, not the response popup
+      * X-Hhtmsource "vacancy" with an EMPTY X-Hhtmfrom
+    """
     return session.post(
         "https://hh.ru/applicant/vacancy_response/popup",
-        data=payload,
+        files={k: (None, str(v)) for k, v in payload.items()},
         headers={
-            "Referer": response_url,
-            "X-Hhtmfrom": "vacancy",
-            "X-Hhtmsource": "vacancy_response",
+            "Accept": "application/json",
+            "Referer": f"https://hh.ru/vacancy/{vacancy_id}",
+            "X-Hhtmfrom": "",
+            "X-Hhtmsource": "vacancy",
             "X-Requested-With": "XMLHttpRequest",
             "X-Xsrftoken": xsrf,
         },
@@ -413,8 +425,11 @@ def _submit_response(
 ) -> requests.Response:
     """Fetch the response page (fresh xsrf; test meta only if answers given),
     build the payload and POST."""
-    response_url = _response_url(vacancy_id)
-    r = session.get(response_url, timeout=15)
+    # xsrf comes from the page the browser would be on when it submits: the
+    # vacancy page for a plain response, the popup only when a test has to be
+    # parsed out of it.
+    page_url = _response_url(vacancy_id) if answers else f"https://hh.ru/vacancy/{vacancy_id}"
+    r = session.get(page_url, timeout=15)
     if session_looks_dead(r):
         raise WebSessionExpired(f"hh rejected the web session ({r.status_code})")
     r.raise_for_status()
@@ -424,7 +439,7 @@ def _submit_response(
     payload = _response_payload(
         vacancy_id, hh_resume_id, xsrf, letter, test_data, answers
     )
-    return _post_response(session, response_url, xsrf, payload)
+    return _post_response(session, vacancy_id, xsrf, payload)
 
 
 def _submit(
