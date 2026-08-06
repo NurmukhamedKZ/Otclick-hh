@@ -374,6 +374,32 @@ async def apply_one(
         letter=cover_letter,
         answers=None,
     )
+
+    # hh outranks the page flag. `@responseLetterRequired` is what the vacancy
+    # page advertises; "letter-required" is hh refusing the submit for real. If
+    # we believed the flag and sent nothing, write the letter and try again once
+    # — otherwise the vacancy is burned as "failed" over a missing field.
+    if status != "sent" and not cover_letter and "letter-required" in (error or ""):
+        logger.info(
+            "apply: hh demands a letter for vacancy=%s despite the page flag",
+            vacancy_id,
+        )
+        try:
+            cover_letter = await agent.write_cover_letter(
+                user_id=user_id, vacancy=vacancy, resume=resume,
+                resume_uuid=resume_uuid,
+            )
+        except Exception:
+            logger.exception("apply: late cover letter failed vacancy=%s", vacancy_id)
+        if cover_letter:
+            status, error = await form_filler.submit_response(
+                user_id=user_id,
+                resume_id=resume_uuid,
+                vacancy_id=vacancy_id,
+                letter=cover_letter,
+                answers=None,
+            )
+
     if status in ("sent", "form_sent"):
         logger.info(
             "apply: SENT user=%s vacancy=%s employer=%s",

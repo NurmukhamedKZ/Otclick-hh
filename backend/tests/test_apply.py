@@ -538,3 +538,40 @@ async def test_apply_one_captcha_does_not_fall_through_to_failed():
         result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
     assert result == "captcha"
     assert created == ["u1"]
+
+
+async def test_apply_one_writes_a_letter_when_hh_demands_one_despite_the_page_flag():
+    """@responseLetterRequired is what the vacancy page advertises;
+    "letter-required" is hh refusing for real. Believing the flag burned the
+    vacancy as "failed" over a missing field."""
+    from app.services import apply as apply_mod
+
+    sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1", "title": "T"})
+
+    async def _vacancy(user_id, vacancy_id):
+        return {
+            "id": "v1",
+            "employer": {"id": "42", "name": "Acme"},
+            "has_test": False,
+            "response_letter_required": False,   # page says no letter needed
+        }
+
+    calls = []
+
+    async def _submitted(user_id, resume_id, vacancy_id, letter="", answers=None):
+        calls.append(letter)
+        if not letter:
+            return "failed", 'hh_rejected: 400 {"error": "letter-required"}'
+        return "sent", None
+
+    agent = _fake_agent(letter="ПИСЬМО")
+
+    with (
+        patch.object(apply_mod, "service_client", sb),
+        patch.object(apply_mod.web, "get_vacancy", new=_vacancy),
+        patch.object(apply_mod.form_filler, "submit_response", new=_submitted),
+    ):
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", agent)
+
+    assert result == "sent"
+    assert calls == ["", "ПИСЬМО"]  # retried once, with a letter
