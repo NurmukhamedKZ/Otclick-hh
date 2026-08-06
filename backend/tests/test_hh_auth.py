@@ -85,10 +85,77 @@ def test_extract_code_reads_query_and_fragment():
     assert _extract_code("https://x.test/cb#code=F") == "F"
 
 
-def test_extract_code_surfaces_geo_forbidden_not_a_blank_failure():
+def test_extract_code_returns_none_instead_of_raising_on_geo_forbidden():
+    """Raising here used to discard a WORKING web session over an OAuth grant
+    nothing needs — and left the user unable to reconnect at all."""
     from app.hh.authorize import _extract_code
 
-    with pytest.raises(RuntimeError, match="geo_forbidden"):
-        _extract_code("hhandroid://oauthresponse?error=geo_forbidden")
-    with pytest.raises(RuntimeError, match="invalid_client"):
-        _extract_code("hhandroid://oauthresponse?error=invalid_client")
+    assert _extract_code("hhandroid://oauthresponse?error=geo_forbidden") is None
+    assert _extract_code("hhandroid://oauthresponse?error=invalid_client") is None
+    assert _extract_code("hhandroid://oauthresponse") is None
+
+
+async def test_connect_stores_a_cookies_only_connection_when_hh_refuses_the_code():
+    import asyncio
+    from unittest.mock import patch
+
+    from app.services import hh_auth
+
+    loop = asyncio.get_running_loop()
+    stored = {}
+
+    def _persist_web_only(user_id, cookies):
+        stored["user_id"] = user_id
+        stored["cookies"] = cookies
+
+    with (
+        patch.object(hh_auth, "_persist_web_session_only", side_effect=_persist_web_only),
+        patch.object(hh_auth, "_exchange_and_fetch_user") as exchange,
+    ):
+        await hh_auth._persist_connection(loop, "u1", None, [{"name": "hhtoken"}])
+
+    assert stored["user_id"] == "u1"
+    assert stored["cookies"] == [{"name": "hhtoken"}]
+    exchange.assert_not_called()
+
+
+async def test_connect_keeps_the_cookies_when_the_token_exchange_itself_fails():
+    import asyncio
+    from unittest.mock import patch
+
+    from app.services import hh_auth
+
+    loop = asyncio.get_running_loop()
+    stored = {}
+
+    with (
+        patch.object(hh_auth, "_persist_web_session_only",
+                     side_effect=lambda u, c: stored.update(user_id=u, cookies=c)),
+        patch.object(hh_auth, "_exchange_and_fetch_user",
+                     side_effect=RuntimeError("hh 400")),
+    ):
+        await hh_auth._persist_connection(loop, "u1", "CODE", [{"name": "hhtoken"}])
+
+    assert stored["user_id"] == "u1"
+
+
+def test_status_reports_connected_without_an_api_token_but_not_without_cookies():
+    from unittest.mock import MagicMock, patch
+
+    from app.services import hh_auth
+
+    def _status(row):
+        sb = MagicMock()
+        chain = sb.table.return_value.select.return_value.eq.return_value
+        chain.maybe_single.return_value.execute.return_value = MagicMock(data=row)
+        with patch.object(hh_auth, "service_client", sb):
+            return hh_auth.get_credentials_status("u1")
+
+    cookies_only = _status({"web_cookies_encrypted": "enc", "expires_at": None})
+    assert cookies_only["connected"] is True
+    assert cookies_only["has_api_token"] is False
+
+    # A token row whose web session was never captured cannot serve any feature.
+    assert _status({"web_cookies_encrypted": None, "expires_at": "2030-01-01"}) == {
+        "connected": False
+    }

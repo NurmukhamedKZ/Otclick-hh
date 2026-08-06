@@ -18,15 +18,13 @@ import requests as _requests
 
 from app.ai.agent import HHAgent
 from app.hh import errors as hh_errors
+from app.hh import web as hh_web
 from app.services import apply as apply_service
 from app.services import captcha as captcha_service
 from app.services import plan as plan_service
 from app.services import worker_control
-from app.services.hh_credentials import (
-    load_api_client,
-    mark_invalid,
-    persist_if_refreshed,
-)
+from app.services.form_filler import WebSessionExpired
+from app.services.hh_credentials import mark_invalid
 from app.services.notifications import notify
 from app.services.worker_runtime import heartbeat
 from app.worker import limiter, throttle
@@ -160,33 +158,24 @@ async def _probe_me(user_id: str) -> str:
     Returns 'ok' (clear), 'captcha' (still blocked / transient — keep polling),
     'token_dead' (creds unusable — stop), or 'banned' (account blocked — stop).
     """
-    loop = asyncio.get_running_loop()
     try:
-        client = await load_api_client(user_id)
-    except Exception:
-        logger.warning(
-            "probe_me: cannot load creds for %s — token_dead", user_id, exc_info=True
-        )
-        return "token_dead"
-    original = client.access_token
-    try:
-        await loop.run_in_executor(None, lambda: client.get("me"))
+        # Same page the apply loop uses, so the probe fails exactly when
+        # applying would. The old /me call went through the OAuth API, which is
+        # not on this path any more — it would have reported a healthy account
+        # while every apply died on a login wall.
+        await hh_web.list_resumes(user_id)
         return "ok"
-    except hh_errors.CaptchaRequired:
-        return "captcha"
-    except hh_errors.Forbidden as ex:
-        if apply_service.is_ban_error(ex):
-            await mark_invalid(user_id, f"account banned (/me probe): {ex}")
-            return "banned"
-        await mark_invalid(user_id, f"Forbidden on /me probe: {ex}")
+    except WebSessionExpired as ex:
+        await mark_invalid(user_id, f"web session dead (/probe): {ex}")
+        return "token_dead"
+    except ValueError:
+        logger.warning("probe_me: no stored web session for %s — token_dead", user_id)
         return "token_dead"
     except Exception:
         logger.warning(
             "probe_me: transient error for %s — keep polling", user_id, exc_info=True
         )
         return "captcha"
-    finally:
-        await persist_if_refreshed(user_id, client, original)
 
 
 def _seconds_until_next_local_midnight(user_id: str) -> float:

@@ -66,24 +66,31 @@ def _watch_redirect(page) -> asyncio.Future[str]:
     return fut
 
 
-def _extract_code(redirect_url: str) -> str:
-    """Pull the OAuth code out of the redirect, or raise with what hh sent."""
+def _extract_code(redirect_url: str) -> str | None:
+    """Pull the OAuth code out of the redirect, or None with the reason logged.
+
+    Deliberately does NOT raise. The login itself already succeeded by this
+    point and the browser holds a working hh.ru web session — which is what the
+    product actually runs on. Blowing up here used to throw those cookies away
+    over an OAuth grant nothing needs any more.
+    """
     parts = urlsplit(redirect_url)
     params = parse_qs(parts.query)
     params.update(parse_qs(parts.fragment))  # hh may answer in the fragment
     code = (params.get("code") or [None])[0]
     if code:
         return code
-    logger.error("hh oauth: no code in redirect %s", redirect_url)
     err = (params.get("error_description") or params.get("error") or [None])[0]
     if err == "geo_forbidden":
-        raise RuntimeError(
-            "hh отказал в выдаче OAuth-кода для вашего региона (geo_forbidden). "
-            "Логин прошёл, но приложение hh, под которым мы авторизуемся, не "
-            "обслуживает этот регион — зарегистрируйте своё на dev.hh.kz/admin "
-            "и задайте HH_CLIENT_ID / HH_CLIENT_SECRET / HH_REDIRECT_URI."
+        logger.warning(
+            "hh oauth: geo_forbidden — hh refuses the OAuth grant for this "
+            "region under client_id %s. Continuing on the web session alone; "
+            "register your own app (dev.hh.kz/admin) to get tokens back.",
+            ANDROID_CLIENT_ID[:8],
         )
-    raise RuntimeError(f"hh не вернул OAuth-код: {err or redirect_url}")
+    else:
+        logger.warning("hh oauth: no code in redirect %s", redirect_url)
+    return None
 
 
 async def get_auth_code(
@@ -91,8 +98,8 @@ async def get_auth_code(
     password: str,
     on_captcha: Callable[[bytes], Awaitable[str]] | None = None,
     headless: bool = True,
-) -> tuple[str, list[dict]]:
-    """Run Playwright OAuth flow → returns (hh OAuth code, web session cookies).
+) -> tuple[str | None, list[dict]]:
+    """Run Playwright OAuth flow → returns (hh OAuth code or None, web cookies).
 
     The cookies are the logged-in hh.ru session captured from the same browser
     context. Stored alongside the tokens and reused by the form-filler to solve
@@ -188,8 +195,8 @@ async def get_auth_code_via_email_code(
     on_code_required: Callable[[], Awaitable[str]] | None = None,
     on_captcha: Callable[[bytes], Awaitable[str]] | None = None,
     headless: bool = True,
-) -> tuple[str, list[dict]]:
-    """Run Playwright OAuth flow using email-code (passwordless) → returns (hh OAuth code, web session cookies).
+) -> tuple[str | None, list[dict]]:
+    """Run Playwright OAuth flow using email-code (passwordless) → returns (code or None, web cookies).
 
     Flow:
     1. Fill email → press Enter → captcha? → code page
