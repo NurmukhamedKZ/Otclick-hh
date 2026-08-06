@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.hh.page_json import find_balanced_object  # noqa: E402
+from app.hh.page_json import find_balanced_object, find_state  # noqa: E402
 from app.services.form_filler import load_web_session  # noqa: E402
 
 OUT = Path(__file__).resolve().parent.parent / "recon_web_out"
@@ -33,6 +33,9 @@ PAGES = {
 def dump(session, name, url, marker):
     r = session.get(url, timeout=20)
     text = html.unescape(r.text)
+    if "/account/login" in (r.url or ""):
+        print(f"{name}: LOGIN WALL — the stored web session is dead, reconnect first")
+        return text
     OUT.joinpath(f"{name}.html").write_text(text, encoding="utf-8")
     i = text.find(marker)
     if i == -1:
@@ -40,10 +43,11 @@ def dump(session, name, url, marker):
             f"{name}: MARKER {marker} NOT FOUND (status={r.status_code}) — "
             f"open {name}.html and find the real key"
         )
-        return
+        return text
     blob = find_balanced_object(text, text.find("{", i))
     OUT.joinpath(f"{name}.json").write_text(blob, encoding="utf-8")
     print(f"{name}: ok, {len(blob)} bytes -> {name}.json")
+    return text
 
 
 async def main() -> None:
@@ -55,7 +59,16 @@ async def main() -> None:
         if "{vacancy_id}" in url and not vacancy_id:
             continue  # no vacancy to capture yet
         url = url.format(vacancy_id=vacancy_id)
-        dump(session, name, url, marker)
+        text = dump(session, name, url, marker)
+        # The full resume (experience/education) is NOT on the list page; it
+        # lives on the detail page, whose hash we can only learn from the list.
+        if name == "resumes" and text:
+            for r in find_state(text, "applicantResumes") or []:
+                h = (r.get("_attributes") or {}).get("hash")
+                if h:
+                    dump(session, "resume_detail",
+                         f"https://hh.ru/resume/{h}", '"resume"')
+                    break
 
 
 if __name__ == "__main__":
