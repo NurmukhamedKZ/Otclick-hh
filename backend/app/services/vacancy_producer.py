@@ -16,7 +16,6 @@ from app.worker.queue import ApplyJob, get_user_queue
 
 logger = logging.getLogger(__name__)
 
-PER_PAGE = 50
 MAX_PUSH_PER_RUN = 30
 MAX_PAGES_PER_FILTER = 20
 
@@ -108,6 +107,7 @@ async def _filter_candidate_stream(loop, agent, user_id: str, f: dict):
     skipped_relations = 0
     relations_blacklist: dict[str, str | None] = {}
     pages = 0
+    fetched = 0
 
     try:
         for page in range(MAX_PAGES_PER_FILTER):
@@ -136,6 +136,7 @@ async def _filter_candidate_stream(loop, agent, user_id: str, f: dict):
             )
             if not items:
                 break
+            fetched += len(items)
 
             vacancy_ids = [str(it["id"]) for it in items if it.get("id")]
             employer_ids = [
@@ -196,7 +197,10 @@ async def _filter_candidate_stream(loop, agent, user_id: str, f: dict):
             for c in page_candidates:
                 yield c["id"]
 
-            if len(items) < PER_PAGE:
+            # Stop on hh's own total, not on a guessed page size: the web search
+            # serves ~20 items/page, so the old `len(items) < 50` check broke
+            # after page 0 and the worker never saw vacancy #21 onward.
+            if total_found and fetched >= total_found:
                 break
     finally:
         if relations_blacklist:

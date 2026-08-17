@@ -194,6 +194,34 @@ async def test_overlapping_filters_queue_each_vacancy_once():
 
 
 @pytest.mark.asyncio
+async def test_pages_past_the_first_page():
+    """Regression: hh's web search serves ~20 items/page. The old stop rule
+    (`len(items) < PER_PAGE`, PER_PAGE=50) fired on page 0 every time, so
+    everything past vacancy #20 was invisible and the worker idled at
+    'no new vacancies' while hh still had matches."""
+    from app.services import vacancy_producer as vp
+    from app.worker.queue import drop_user_queue, get_user_queue
+    drop_user_queue("u1")
+
+    f1 = _filter_row(ai_filter_enabled=False)
+
+    def _table(name):
+        return {"filters": _chain([f1]), "applications": _chain([]),
+                "blacklist": _chain([])}[name]
+
+    async def _search(_uid, _params, page):
+        ids = [f"v{page * 20 + i}" for i in range(20 if page == 0 else 5)]
+        return ([{"id": i, "employer": {"id": f"e{i}"}} for i in ids], 25)
+
+    with patch.object(vp.service_client, "table", side_effect=_table), \
+         patch.object(vp.web, "search_vacancies", side_effect=_search):
+        pushed, _ = await vp.produce_jobs("u1")
+
+    assert pushed == 25
+    assert get_user_queue("u1").qsize() == 25
+
+
+@pytest.mark.asyncio
 async def test_ai_filter_disabled_bypasses_relevance():
     from app.services import vacancy_producer as vp
     from app.worker.queue import drop_user_queue, get_user_queue

@@ -210,6 +210,10 @@ async def make_todo(title: str, detail: str, link: str | None,
       сообщении рекрутёра, иначе None (НЕ пустая строка, НЕ "нет", НЕ выдуманный).
       Допустимые форматы: "https://...", "tg://...", "mailto:...", None.
       Примеры: "https://forms.gle/abc", "https://t.me/recruiter_anna", None.
+      НИКОГДА не подставляй сюда ссылку/контакт на мессенджер MAX (max.ru и
+      т.п.) - кандидат туда не пишет. Если рекрутёр дал контакт и в MAX, и в
+      Telegram - бери ТОЛЬКО Telegram-ссылку. Если рекрутёр дал контакт ТОЛЬКО
+      в MAX - link=None, а сам факт (что просят написать в MAX) укажи в detail.
 
     RETURNS: "todo_created" при успешном создании.
 
