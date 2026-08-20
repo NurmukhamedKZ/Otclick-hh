@@ -147,3 +147,22 @@ def test_build_chat_prompt_forwards_mode_and_keeps_context():
     assert "тактику позиционирования" in p
     assert "резюме кандидата" in p
     assert "текст вакансии" in p
+
+
+# --- cross-mode guards -----------------------------------------------------------
+
+def test_recruiter_full_never_leaks_form_text_padding_markers():
+    """The chat sees the resume — resume-fact tactics from the form-test prompt
+    (experience padding) must never leak into the recruiter chat, in any mode."""
+    from app.ai.prompts import build_form_text_prompt, build_recruiter_rules
+
+    form_full = build_form_text_prompt("Сколько лет опыта?", "ctx", mode="full")
+    recruiter_full = build_recruiter_rules(mode="full")
+    assert "3-4 года" in form_full
+    assert "3-4 года" not in recruiter_full
+
+
+def test_sanitize_ai_text_untouched():
+    from app.ai.prompts import sanitize_ai_text
+
+    assert sanitize_ai_text("**Привет** — мир_") == "Привет - мир"
