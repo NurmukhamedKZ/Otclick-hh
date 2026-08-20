@@ -12,6 +12,7 @@ export interface PanelCallbacks {
   onSignOut: () => void;
   onSend: (text: string) => Promise<string>;
   onSaveEdits: () => void;
+  onClearChat: () => void;
 }
 
 export interface PanelController {
@@ -88,6 +89,11 @@ button.otc-primary[disabled] { opacity: .5; cursor: default; }
 .otc-chat-msg { margin-bottom: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .otc-chat-msg.user { text-align: right; color: #333; }
 .otc-chat-input { flex: 1; padding: 8px; border: 1px solid #d4d4d4; border-radius: 6px; font: inherit; }
+.otc-chat-head { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+button.otc-clear { border: 0; background: none; color: #888; cursor: pointer; font: inherit; font-size: 12px;
+  padding: 2px 0; }
+button.otc-clear:hover { color: #c00; }
+.otc-chat-empty { color: #888; }
 `;
 
 export function mountPanel(cb: PanelCallbacks): PanelController {
@@ -109,7 +115,10 @@ export function mountPanel(cb: PanelCallbacks): PanelController {
         <p class="otc-status"></p>
         <div class="otc-filled"></div>
       </div>
-      <div class="otc-body" data-pane="chat" hidden><div class="otc-chat"></div></div>
+      <div class="otc-body" data-pane="chat" hidden>
+        <div class="otc-chat-head"><button class="otc-clear">Очистить историю</button></div>
+        <div class="otc-chat"></div>
+      </div>
       <div class="otc-body" data-pane="settings" hidden>
         <p class="otc-email"></p>
         <button class="otc-signin otc-primary">Войти</button>
@@ -150,13 +159,29 @@ export function mountPanel(cb: PanelCallbacks): PanelController {
   $(".otc-signout").addEventListener("click", () => cb.onSignOut());
 
   const chatBox = $<HTMLDivElement>(".otc-chat");
+  const clearChat = () => {
+    chatBox.innerHTML = "";
+    chatBox.appendChild(emptyMsg());
+  };
+  const emptyMsg = () => {
+    const p = document.createElement("p");
+    p.className = "otc-chat-empty";
+    p.textContent = "История пуста";
+    return p;
+  };
+  chatBox.appendChild(emptyMsg());
   const appendChat = (role: "user" | "assistant", text: string) => {
+    chatBox.querySelector(".otc-chat-empty")?.remove();
     const div = document.createElement("div");
     div.className = `otc-chat-msg ${role}`;
     div.textContent = text;
     chatBox.appendChild(div);
     chatBox.scrollTop = chatBox.scrollHeight;
   };
+  $(".otc-clear").addEventListener("click", () => {
+    cb.onClearChat();
+    clearChat();
+  });
 
   const sendBtn = $<HTMLButtonElement>(".otc-send");
   const input = $<HTMLInputElement>(".otc-chat-input");

@@ -13,6 +13,7 @@ import logging
 import random
 import time
 
+from app.hh import web
 from app.services import chatik, recruiter
 from app.services.hh_credentials import load_api_client, persist_if_refreshed
 from app.worker import throttle
@@ -72,6 +73,32 @@ async def _negotiation_states(client, user_id: str) -> dict[str, str]:
     return out
 
 
+async def poll_answered_questions(user_id: str, agent, client, states: dict[str, str]) -> None:
+    """Pick up answered question sets and resume the agent with the answers fed
+    back in (see HHAgent.resume_recruiter_with_answers). Rows from a chat that
+    got rejected/archived in the meantime are marked completed without invoking
+    the agent. Errors leave the row 'answered' so it is retried next poll."""
+    for row in await recruiter.list_answered_questions(user_id):
+        if states.get(row["negotiation_id"]) in SKIP_STATES:
+            await recruiter.mark_question_completed(user_id, row["id"])
+            continue
+        try:
+            msgs = await chatik.chat_messages(user_id, row["chat_id"], row["applicant_id"])
+            await agent.resume_recruiter_with_answers(
+                row["negotiation_id"], row["message_id"], _history(msgs), client,
+                questions=row["questions"], answers=row["answers"], reason=row["reason"],
+                question_text=row["question_text"], chat_id=row["chat_id"], applicant_id=row["applicant_id"],
+                vacancy_id=row["vacancy_id"], vacancy_title=row["vacancy_title"],
+                employer_name=row["employer_name"],
+            )
+        except Exception:
+            logger.warning(
+                "recruiter poll: resume failed for question %s", row["id"], exc_info=True
+            )
+            continue  # leave status='answered' — retried next poll
+        await recruiter.mark_question_completed(user_id, row["id"])
+
+
 async def poll_recruiter_chats(user_id: str, agent) -> None:
     """For each recent chat whose newest message is an unhandled employer/bot
     message, invoke the agent. Errors are logged and never crash the loop."""
@@ -79,14 +106,23 @@ async def poll_recruiter_chats(user_id: str, agent) -> None:
     if chats is None:
         logger.warning("recruiter poll: no web session for %s — skipping", user_id)
         return
+    client = None
+    original = None
     try:
         client = await load_api_client(user_id)
     except Exception:
-        logger.warning("recruiter poll: cannot load creds for %s", user_id, exc_info=True)
-        return
-    original = client.access_token
+        # Cookies-only connection (no OAuth token) or a transient failure. The
+        # client is only needed for the negotiation-state skip list — run the
+        # agent without it instead of silently stopping all replies.
+        logger.info(
+            "recruiter poll: no api client for %s — running without negotiation states",
+            user_id,
+        )
     try:
-        states = await _negotiation_states(client, user_id)
+        states = {} if client is None else await _negotiation_states(client, user_id)
+        if client is not None:
+            original = client.access_token
+        await poll_answered_questions(user_id, agent, client, states)
         for ref in chats:
             try:
                 handled = await _process_chat(user_id, agent, client, ref, states)
@@ -100,7 +136,21 @@ async def poll_recruiter_chats(user_id: str, agent) -> None:
             if handled:
                 await asyncio.sleep(throttle.next_delay(_rng))
     finally:
-        await persist_if_refreshed(user_id, client, original)
+        if client is not None:
+            await persist_if_refreshed(user_id, client, original)
+
+
+async def _vacancy_meta(user_id: str, vacancy_id: str | None) -> tuple[str | None, str | None]:
+    """Best-effort vacancy title + employer name for a draft/todo the agent is
+    about to create — mirrors what the Todo UI already shows for form drafts.
+    A fetch failure must not stop the reply, so this never raises."""
+    if not vacancy_id:
+        return None, None
+    try:
+        vacancy = await web.get_vacancy(user_id, vacancy_id)
+    except Exception:
+        return None, None
+    return vacancy.get("name"), (vacancy.get("employer") or {}).get("name")
 
 
 def _history(msgs: list[dict]) -> list[tuple[str, str]]:
@@ -142,19 +192,24 @@ async def _process_chat(user_id: str, agent, client, ref: dict, states: dict[str
         return False
 
     vacancy_id = ref.get("vacancy_id")
+    vacancy_title, employer_name = await _vacancy_meta(user_id, vacancy_id)
     mid = target["id"]
     if target["buttons"]:
         # Robot-recruiter quick-reply: the agent must pick an exact button label
         # (free text loops) via answer_recruiter_question, or escalate.
         await agent.answer_recruiter_choice(
-            nid, mid, _history(msgs), client, target["text"], target["buttons"]
+            nid, mid, _history(msgs), client, target["text"], target["buttons"],
+            chat_id=ref["chat_id"], applicant_id=ref["applicant_id"],
+            vacancy_id=vacancy_id, vacancy_title=vacancy_title, employer_name=employer_name,
         )
     else:
         # Free text — from a real recruiter OR from the hh bot (it also asks open
         # questions without buttons; skipping those dropped them silently).
         # The agent decides: reply / escalate / todo, or SKIP on a rejection.
         await agent.answer_recruiter(
-            nid, mid, _history(msgs), client, question_text=target["text"] or None
+            nid, mid, _history(msgs), client, question_text=target["text"] or None,
+            chat_id=ref["chat_id"], applicant_id=ref["applicant_id"],
+            vacancy_id=vacancy_id, vacancy_title=vacancy_title, employer_name=employer_name,
         )
     await recruiter.upsert_cursor(user_id, nid, mid, vacancy_id=vacancy_id)
     return True

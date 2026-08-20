@@ -166,7 +166,7 @@ export default function AccountPage() {
       {err && <p style={{ fontSize: 13, color: "var(--err)", marginBottom: 12 }}>{err}</p>}
 
       {tab === "profile" && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))", gap: 18 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 420px))", gap: 18 }}>
           <Card>
             <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 14 }}>Контакты</div>
             <Field label="email" value={email ?? "—"} />

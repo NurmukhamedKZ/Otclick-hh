@@ -6,7 +6,7 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service")
 os.environ.setdefault("FERNET_KEY", "kPpDeJjFqDppkMm6QHzqFkkSgFwsKtGzh4WeZ5dKZHc=")
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
@@ -228,3 +228,98 @@ async def test_send_draft_skips_qa_memory_when_unchanged():
          patch.object(recruiter.qa_memory, "upsert", new=AsyncMock()) as up:
         await recruiter.send_draft("u1", "d1", message="orig")
     up.assert_not_awaited()
+
+
+# --- questions (ask-only escalation) ----------------------------------------
+
+@pytest.mark.asyncio
+async def test_insert_question_writes_row():
+    from app.services import recruiter
+    chain = _fluent([{"id": "q1"}])
+    with patch.object(recruiter.service_client, "table", return_value=chain):
+        await recruiter.insert_question(
+            "u1", "n1", "m1", ["Когда удобно?"], "scheduling",
+            chat_id="c1", applicant_id="me", vacancy_id="v1",
+        )
+    args = chain.insert.call_args[0][0]
+    assert args["user_id"] == "u1"
+    assert args["negotiation_id"] == "n1"
+    assert args["chat_id"] == "c1" and args["applicant_id"] == "me"
+    assert args["questions"] == ["Когда удобно?"]
+    assert args["reason"] == "scheduling"
+    assert args["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_list_questions_filters_pending():
+    from app.services import recruiter
+    chain = _fluent([{"id": "q1"}])
+    with patch.object(recruiter.service_client, "table", return_value=chain):
+        assert await recruiter.list_questions("u1") == [{"id": "q1"}]
+    assert chain.eq.call_args_list[1] == call("status", "pending")
+
+
+@pytest.mark.asyncio
+async def test_list_answered_questions_filters_answered():
+    from app.services import recruiter
+    chain = _fluent([{"id": "q1"}])
+    with patch.object(recruiter.service_client, "table", return_value=chain):
+        assert await recruiter.list_answered_questions("u1") == [{"id": "q1"}]
+    assert chain.eq.call_args_list[1] == call("status", "answered")
+
+
+@pytest.mark.asyncio
+async def test_submit_answers_sets_answered():
+    from app.services import recruiter
+    row = {"questions": ["Когда удобно?"]}
+    chain = _fluent(None)
+    chain.maybe_single.return_value = chain
+    chain.execute.return_value = SimpleNamespace(data=row)
+    with patch.object(recruiter.service_client, "table", return_value=chain):
+        await recruiter.submit_answers("u1", "q1", ["среда"])
+    upd = chain.update.call_args[0][0]
+    assert upd["status"] == "answered"
+    assert upd["answers"] == ["среда"]
+    assert upd["answered_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_submit_answers_raises_on_count_mismatch():
+    from app.services import recruiter
+    row = {"questions": ["Когда удобно?", "Какой формат?"]}
+    chain = _fluent(None)
+    chain.maybe_single.return_value = chain
+    chain.execute.return_value = SimpleNamespace(data=row)
+    with patch.object(recruiter.service_client, "table", return_value=chain):
+        with pytest.raises(ValueError):
+            await recruiter.submit_answers("u1", "q1", ["среда"])
+
+
+@pytest.mark.asyncio
+async def test_submit_answers_raises_when_missing():
+    from app.services import recruiter
+    chain = _fluent(None)
+    chain.execute.return_value = SimpleNamespace(data=None)
+    with patch.object(recruiter.service_client, "table", return_value=chain):
+        with pytest.raises(ValueError):
+            await recruiter.submit_answers("u1", "q1", ["среда"])
+
+
+@pytest.mark.asyncio
+async def test_discard_question_sets_status():
+    from app.services import recruiter
+    chain = _fluent([{"id": "q1"}])
+    with patch.object(recruiter.service_client, "table", return_value=chain):
+        await recruiter.discard_question("u1", "q1")
+    upd = chain.update.call_args[0][0]
+    assert upd["status"] == "discarded"
+
+
+@pytest.mark.asyncio
+async def test_mark_question_completed_sets_status():
+    from app.services import recruiter
+    chain = _fluent([{"id": "q1"}])
+    with patch.object(recruiter.service_client, "table", return_value=chain):
+        await recruiter.mark_question_completed("u1", "q1")
+    upd = chain.update.call_args[0][0]
+    assert upd["status"] == "completed"

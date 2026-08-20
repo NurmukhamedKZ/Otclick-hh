@@ -3,7 +3,7 @@
 Tools perform their own side effects (hh POST / DB write). Per-chat data is
 injected via ToolRuntime[RecruiterContext] at agent runtime and is hidden from
 the model. ToolRuntime cannot be built by hand, so the side-effect logic lives
-in plain helpers (do_answer / do_escalate / do_todo) that take a RecruiterContext;
+in plain helpers (do_answer / do_ask / do_todo) that take a RecruiterContext;
 the tools are thin adapters over them.
 """
 
@@ -24,9 +24,16 @@ class RecruiterContext:
     user_id: str
     negotiation_id: str
     message_id: str
-    client: ApiClient
+    # None for cookies-only connections — tools never call hh directly, they
+    # only write drafts/todos for the user to review.
+    client: ApiClient | None
     question_text: str | None = None
     quick_reply_labels: list[str] | None = None
+    chat_id: str | None = None
+    applicant_id: str | None = None
+    vacancy_id: str | None = None
+    vacancy_title: str | None = None
+    employer_name: str | None = None
     # Flipped by any successful side effect; the agent checks it after the run to
     # catch "model replied text and called nothing" (see HHAgent._run_recruiter).
     acted: bool = False
@@ -71,26 +78,47 @@ async def do_answer(ctx: RecruiterContext, message: str) -> str:
         await recruiter.insert_draft(
             ctx.user_id, ctx.negotiation_id, ctx.message_id, matched, "",
             question_text=ctx.question_text,
+            vacancy_id=ctx.vacancy_id, vacancy_title=ctx.vacancy_title,
+            employer_name=ctx.employer_name,
         )
         await notify(ctx.user_id, "recruiter_draft", {"negotiation_id": ctx.negotiation_id})
         ctx.acted = True
         return "escalated"
-    return await do_escalate(ctx, message, "")
-
-
-async def do_escalate(ctx: RecruiterContext, draft: str, reason: str) -> str:
     await recruiter.insert_draft(
-        ctx.user_id, ctx.negotiation_id, ctx.message_id,
-        sanitize_ai_text(draft), reason,
+        ctx.user_id, ctx.negotiation_id, ctx.message_id, sanitize_ai_text(message), "",
         question_text=ctx.question_text,
+        vacancy_id=ctx.vacancy_id, vacancy_title=ctx.vacancy_title,
+        employer_name=ctx.employer_name,
     )
     await notify(ctx.user_id, "recruiter_draft", {"negotiation_id": ctx.negotiation_id})
     ctx.acted = True
     return "escalated"
 
 
+async def do_ask(ctx: RecruiterContext, questions: list[str], reason: str) -> str:
+    """Ask the candidate one or more short direct questions instead of guessing
+    the recruiter's answer. The question set is persisted as a pending row; the
+    user answers on the Todo page, and the worker poller re-invokes the agent
+    with the answers fed back in as a tool response (see
+    HHAgent.resume_recruiter_with_answers) to produce the real reply draft."""
+    await recruiter.insert_question(
+        ctx.user_id, ctx.negotiation_id, ctx.message_id, questions, reason,
+        question_text=ctx.question_text,
+        chat_id=ctx.chat_id, applicant_id=ctx.applicant_id,
+        vacancy_id=ctx.vacancy_id, vacancy_title=ctx.vacancy_title,
+        employer_name=ctx.employer_name,
+    )
+    await notify(ctx.user_id, "recruiter_question", {"negotiation_id": ctx.negotiation_id})
+    ctx.acted = True
+    return "asked"
+
+
 async def do_todo(ctx: RecruiterContext, title: str, detail: str, link: str | None) -> str:
-    await recruiter.insert_todo(ctx.user_id, ctx.negotiation_id, ctx.message_id, title, detail, link)
+    await recruiter.insert_todo(
+        ctx.user_id, ctx.negotiation_id, ctx.message_id, title, detail, link,
+        vacancy_id=ctx.vacancy_id, vacancy_title=ctx.vacancy_title,
+        employer_name=ctx.employer_name,
+    )
     await notify(ctx.user_id, "recruiter_todo", {"negotiation_id": ctx.negotiation_id, "title": title})
     ctx.acted = True
     return "todo_created"
@@ -142,45 +170,36 @@ async def answer_recruiter_question(message: str, runtime: ToolRuntime[Recruiter
 
 
 @tool(return_direct=True)
-async def escalate_to_human(draft: str, reason: str, runtime: ToolRuntime[RecruiterContext]) -> str:
-    """Сохранить черновик ответа для ручного подтверждения пользователем.
+async def escalate_to_human(questions: list[str], reason: str, runtime: ToolRuntime[RecruiterContext]) -> str:
+    """Задать кандидату 1-3 коротких прямых вопроса вместо того, чтобы гадать
+    ответ рекрутёру самому. Вопросы уходят на страницу Задачи; как только
+    кандидат ответит, тебя вызовут снова с его ответами, и тогда ты
+    сформулируешь реальный ответ рекрутёру через answer_recruiter_question.
 
     КОГДА ИСПОЛЬЗОВАТЬ:
-    - Назначение/перенос времени собеседования (нужно согласие человека).
-    - Запрос данных, которых НЕТ в резюме (паспорт, ИИН, ссылки на профили).
-    - Технические вопросы, требующие решения кандидата.
-    - Любая неоднозначность, где автоответ может навредить.
-    - Вопрос робота-рекрутёра с кнопками, но ты НЕ можешь уверенно выбрать
-      вариант (нет данных в резюме / неоднозначно) → эскалируй, пусть человек
-      выберет. НЕ угадывай через answer_recruiter_question.
+    - Назначение/перенос времени собеседования → спроси, когда удобно.
+    - Данных нет в резюме (паспорт, ИИН, ссылки, зарплатные ожидания сверх
+      того, что в резюме) → спроси конкретный факт.
+    - Кнопки есть, но ни одна не подходит уверенно → перечисли варианты как
+      вопрос, дай кандидату выбрать словами.
+    - Любая неоднозначность, где домысливать вредно.
 
     КОГДА НЕ ИСПОЛЬЗОВАТЬ:
-    - Ответ есть в резюме, или вопрос с кнопками и вариант понятен по резюме
-      → answer_recruiter_question.
+    - Ответ уже есть в резюме / кнопка очевидна → answer_recruiter_question.
     - Действие вне hh (форма/Telegram/звонок) → make_todo.
 
     PARAMETERS:
-    - draft (str, required): предлагаемый текст ответа, который человек
-      отредактирует и отправит. Формат: plain text, 1-3 предложения,
-      БЕЗ markdown (*, _, **), БЕЗ длинных тире (—). Длина: 10-500 символов.
-      Пример: "Готов в среду в 15:00 МСК, подойдёт?"
-      Для вопроса робота с кнопками: draft = один из вариантов (твоё лучшее
-      предположение, человек поменяет при необходимости).
-    - reason (str, required): краткое объяснение ПОЧЕМУ эскалируешь (для UI).
-      Формат: одна фраза, 3-15 слов, на русском. БЕЗ markdown.
-      Примеры: "назначение времени интервью", "запрос данных не из резюме".
-      ВАЖНО: если это вопрос робота с кнопками и ты не смог выбрать — в reason
-      укажи И причину, ПОЧЕМУ не выбрал, И возможные варианты ответа дословно
-      через " / ". Пример: "нет данных в резюме; варианты: Да / Рассматриваю
-      зарплату выше".
+    - questions (list[str], required): 1-3 коротких прямых вопроса на русском,
+      каждый — то, что реально нужно узнать у кандидата, не риторический.
+      Пример: ["Когда вам удобно на собеседование?"]
+      Пример (кнопки): ["Рекрутёр спрашивает про доход 250 000 - подходит?
+      Варианты: Да / Рассматриваю выше."]
+    - reason (str, required): одна фраза на русском — зачем спрашиваешь
+      (контекст для UI). Пример: "назначение времени интервью".
 
-    RETURNS: "escalated" при успешном сохранении черновика.
-
-    EDGE CASES:
-    - draft санитизируется автоматически.
-    - Пользователь получит уведомление recruiter_draft в UI.
+    RETURNS: "asked" при успешном сохранении.
     """
-    return await do_escalate(runtime.context, draft, reason)
+    return await do_ask(runtime.context, questions, reason)
 
 
 @tool(return_direct=True)

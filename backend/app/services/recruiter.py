@@ -105,6 +105,8 @@ async def upsert_cursor(
 async def insert_draft(
     user_id: str, negotiation_id: str, message_id: str, draft_text: str, reason: str,
     question_text: str | None = None,
+    vacancy_id: str | None = None, vacancy_title: str | None = None,
+    employer_name: str | None = None,
 ) -> None:
     def _q():
         return service_client.table("recruiter_drafts").insert({
@@ -114,14 +116,124 @@ async def insert_draft(
             "draft_text": draft_text,
             "reason": reason,
             "question_text": question_text,
+            "vacancy_id": vacancy_id,
+            "vacancy_title": vacancy_title,
+            "employer_name": employer_name,
             "status": "pending",
         }).execute()
+    await _run(_q)
+
+
+async def insert_question(
+    user_id: str, negotiation_id: str, message_id: str, questions: list[str], reason: str,
+    question_text: str | None = None,
+    chat_id: str | None = None, applicant_id: str | None = None,
+    vacancy_id: str | None = None, vacancy_title: str | None = None,
+    employer_name: str | None = None,
+) -> None:
+    def _q():
+        return service_client.table("recruiter_questions").insert({
+            "user_id": user_id,
+            "negotiation_id": negotiation_id,
+            "chat_id": chat_id,
+            "applicant_id": applicant_id,
+            "message_id": message_id,
+            "questions": questions,
+            "reason": reason,
+            "question_text": question_text,
+            "vacancy_id": vacancy_id,
+            "vacancy_title": vacancy_title,
+            "employer_name": employer_name,
+            "status": "pending",
+        }).execute()
+    await _run(_q)
+
+
+# --- questions (ask-only escalation) ----------------------------------------
+
+async def list_questions(user_id: str) -> list[dict]:
+    def _q():
+        return (
+            service_client.table("recruiter_questions")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("status", "pending")
+            .order("created_at", desc=True)
+            .execute()
+        )
+    res = await _run(_q)
+    return res.data or []
+
+
+async def list_answered_questions(user_id: str) -> list[dict]:
+    def _q():
+        return (
+            service_client.table("recruiter_questions")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("status", "answered")
+            .order("created_at", desc=True)
+            .execute()
+        )
+    res = await _run(_q)
+    return res.data or []
+
+
+async def discard_question(user_id: str, question_id: str) -> None:
+    def _q():
+        return (
+            service_client.table("recruiter_questions")
+            .update({"status": "discarded", "resolved_at": datetime.now(UTC).isoformat()})
+            .eq("user_id", user_id).eq("id", question_id)
+            .execute()
+        )
+    await _run(_q)
+
+
+async def submit_answers(user_id: str, question_id: str, answers: list[str]) -> None:
+    """Record the user's answers to a pending question set. Validates that the
+    count matches the number of questions asked (raises ValueError otherwise)."""
+    def _q():
+        return (
+            service_client.table("recruiter_questions")
+            .select("questions")
+            .eq("user_id", user_id).eq("id", question_id)
+            .maybe_single()
+            .execute()
+        )
+    res = await _run(_q)
+    row = res.data if res else None
+    if not row:
+        raise ValueError(f"question {question_id} not found")
+    if len(answers) != len(row["questions"] or []):
+        raise ValueError("answer count does not match question count")
+
+    def _upd():
+        return (
+            service_client.table("recruiter_questions")
+            .update({"answers": answers, "status": "answered", "answered_at": datetime.now(UTC).isoformat()})
+            .eq("user_id", user_id).eq("id", question_id)
+            .execute()
+        )
+    await _run(_upd)
+
+
+async def mark_question_completed(user_id: str, question_id: str) -> None:
+    def _q():
+        return (
+            service_client.table("recruiter_questions")
+            .update({"status": "completed", "resolved_at": datetime.now(UTC).isoformat()})
+            .eq("user_id", user_id).eq("id", question_id)
+            .execute()
+        )
     await _run(_q)
 
 
 async def insert_todo(
     user_id: str, negotiation_id: str, message_id: str,
     title: str, detail: str | None, link: str | None,
+    vacancy_id: str | None = None, vacancy_title: str | None = None,
+    employer_name: str | None = None,
 ) -> None:
     def _q():
         return service_client.table("recruiter_todos").insert({
@@ -131,6 +243,9 @@ async def insert_todo(
             "title": title,
             "detail": detail,
             "link": link,
+            "vacancy_id": vacancy_id,
+            "vacancy_title": vacancy_title,
+            "employer_name": employer_name,
             "status": "open",
         }).execute()
     await _run(_q)

@@ -5,13 +5,14 @@ export type NavCountsInput = {
   formDrafts: unknown[];
   recruiterDrafts: unknown[];
   todos: unknown[];
+  questions: unknown[];
   unreadNotifications: number;
 };
 
 export function computeNavCounts(input: NavCountsInput): NavCounts {
   return {
     chats: input.chats.reduce((sum, c) => sum + (c.unread ?? 0), 0),
-    todo: input.formDrafts.length + input.recruiterDrafts.length + input.todos.length,
+    todo: input.formDrafts.length + input.recruiterDrafts.length + input.todos.length + input.questions.length,
     notifications: input.unreadNotifications,
   };
 }

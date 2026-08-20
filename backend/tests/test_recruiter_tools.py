@@ -13,15 +13,18 @@ import pytest
 class _Spy:
     def __init__(self):
         self.calls = []
+        self.kwargs = []
     async def __call__(self, *args, **kwargs):
         self.calls.append(args)
+        self.kwargs.append(kwargs)
 
 
 def _ctx(client=None, labels=None):
     from app.ai.recruiter_tools import RecruiterContext
     return RecruiterContext(user_id="u1", negotiation_id="n9", message_id="m5",
                             client=client or MagicMock(access_token="tok"),
-                            quick_reply_labels=labels)
+                            quick_reply_labels=labels,
+                            chat_id="c1", applicant_id="me")
 
 
 @pytest.mark.asyncio
@@ -40,14 +43,18 @@ async def test_do_answer_drafts_instead_of_posting():
 
 
 @pytest.mark.asyncio
-async def test_do_escalate_inserts_draft_and_notifies():
+async def test_do_ask_inserts_question_and_notifies():
     from app.ai import recruiter_tools as rt
     ins, notif = _Spy(), _Spy()
-    with patch.object(rt.recruiter, "insert_draft", new=ins), patch.object(rt, "notify", new=notif):
-        out = await rt.do_escalate(_ctx(), "Давайте во вторник", "scheduling")
-    assert ins.calls[0] == ("u1", "n9", "m5", "Давайте во вторник", "scheduling")
-    assert notif.calls[0][1] == "recruiter_draft"
-    assert out == "escalated"
+    ctx = _ctx()
+    with patch.object(rt.recruiter, "insert_question", new=ins), patch.object(rt, "notify", new=notif):
+        out = await rt.do_ask(ctx, ["Когда вам удобно на собеседование?"], "scheduling")
+    assert ins.calls[0] == ("u1", "n9", "m5", ["Когда вам удобно на собеседование?"], "scheduling")
+    # chat_id/applicant_id captured at ask-time so the poller can refetch the chat
+    assert ins.kwargs[0]["chat_id"] == "c1" and ins.kwargs[0]["applicant_id"] == "me"
+    assert notif.calls[0][1] == "recruiter_question"
+    assert out == "asked"
+    assert ctx.acted is True
 
 
 @pytest.mark.asyncio
