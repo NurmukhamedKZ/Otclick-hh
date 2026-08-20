@@ -86,3 +86,21 @@ def test_form_choice_full_adds_dumping_guard():
     p = build_form_choice_prompt("Опыт?", "1: 1 год\n2: 3 года", "ctx", mode="full")
     assert "не занижает кандидата" in p
     assert "1: 1 год" in p  # options block still embedded verbatim
+
+
+# --- cover letter ---------------------------------------------------------------
+
+def test_cover_letter_balanced_has_no_desperate_tone_guard():
+    from app.ai.prompts import build_cover_letter_prompt
+
+    p = build_cover_letter_prompt(mode="balanced")
+    assert "отчаянного тона" not in p
+    assert "Не выдумывай факты" in p
+
+
+def test_cover_letter_full_adds_salary_and_tone_guidance():
+    from app.ai.prompts import build_cover_letter_prompt
+
+    p = build_cover_letter_prompt(mode="full")
+    assert "отчаянного тона" in p
+    assert "Не выдумывай факты" in p
