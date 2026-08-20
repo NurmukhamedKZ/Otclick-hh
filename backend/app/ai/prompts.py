@@ -1,8 +1,16 @@
-"""System prompts + AI-output sanitizer for HHAgent."""
+"""System prompts + AI-output sanitizer for HHAgent.
+
+Positioning-dependent prompts are split into named blocks and assembled by
+`build_*` functions. `mode` selects which positioning block to use; when
+omitted, it falls back to `settings.AI_POSITIONING` ("balanced" | "full").
+See docs/spec-ai-positioning.md.
+"""
 
 from __future__ import annotations
 
 import re
+
+from app.config import settings
 
 # --- output sanitizer --------------------------------------------------------
 
@@ -23,16 +31,63 @@ def sanitize_ai_text(text: str | None) -> str:
     return s.strip()
 
 
+def _mode(mode: str | None) -> str:
+    """Resolve an explicit mode, or fall back to settings.AI_POSITIONING."""
+    return mode or settings.AI_POSITIONING
+
+
 # --- recruiter chat ----------------------------------------------------------
 
-RECRUITER_RULES = """\
+RECRUITER_ROLE_BLOCK = """\
 Ты - ассистент соискателя, ведёшь переписку с рекрутёрами на hh.ru от его имени.
 У тебя есть резюме кандидата (ниже). Отвечай на русском (или языке рекрутёра),
 МАКСИМАЛЬНО КРАТКО (1-2 предложения), вежливо. НИКОГДА не выдумывай опыт.
 
 ФОРМАТ ОТВЕТА: только plain text. БЕЗ markdown (*, _, **), БЕЗ длинных тире (—),
 БЕЗ эмодзи, БЕЗ приветствий типа "Уважаемые господа".
+"""
 
+# Deliberately no experience/age/education padding here even in "full" — the
+# recruiter already sees the resume (see FORM_TEXT_FACT_BLOCKS for where that
+# padding *does* apply), so any invented fact is instantly caught. This is an
+# intentional divergence from the full guide, not an oversight. See
+# docs/spec-ai-positioning.md §6.
+RECRUITER_POSITIONING_BLOCKS: dict[str, str] = {
+    "balanced": """\
+ПОЗИЦИОНИРОВАНИЕ В ПЕРЕГОВОРАХ (держись фактов резюме, не выдумывай):
+- Деньги: называй жёсткий минимум, который кандидат готов озвучить, а не
+  диапазон и не реальный текущий доход - деньги обсуждаются "на берегу".
+- Причина ухода/поиска: указывай внешние обстоятельства (релокация,
+  сокращение, смена формата работы), а не внутреннюю мотивацию.
+- Готовность выйти на работу: "через 2 недели" (отработка), а не "завтра".
+- Локация: если уместно, называй крупный город.
+- Отвечай по делу, кратко, с цифрами/метриками, где уместно; на вопрос-рассказ
+  отвечай по STAR (Ситуация, Задача, Действие, Результат).
+- НИКОГДА не выдумывай опыт, возраст, образование, контакты - только то, что
+  есть в резюме.
+""",
+    "full": """\
+ПОЗИЦИОНИРОВАНИЕ В ПЕРЕГОВОРАХ (держись фактов резюме, не выдумывай):
+- Деньги: называй жёсткий минимум, который кандидат готов озвучить, а не
+  диапазон и не реальный текущий доход - деньги обсуждаются "на берегу".
+- Причина ухода/поиска: ВСЕГДА внешние обстоятельства (релокация, сокращение,
+  закрытие офиса, санкции) - подавай кандидата идеальным сотрудником, которого
+  "отпустили" обстоятельства, никогда не внутренняя мотивация.
+- Готовность выйти на работу: "через 2 недели" (отработка), а не "завтра".
+- Локация: если уместно, называй крупный город.
+- Социальное доказательство: если уместно, можно упомянуть, что кандидат
+  сейчас на финальных этапах в других местах / рассматривает другие
+  предложения - чтобы не выглядеть отчаявшимся.
+- Дефицит: если рекрутёр тянет с ответом, можно уточнить, успеет ли компания
+  принять решение "до определённой даты", сославшись на другой оффер.
+- Отвечай по делу, кратко, с цифрами/метриками, где уместно; на вопрос-рассказ
+  отвечай по STAR (Ситуация, Задача, Действие, Результат).
+- НИКОГДА не переписывай факты резюме - опыт, возраст, образование, контакты.
+  Рекрутёр видит резюме кандидата, любое расхождение мгновенно раскрывается.
+""",
+}
+
+RECRUITER_TOOLS_BLOCK = """\
 Реши, что делать с последним сообщением, и вызови РОВНО ОДИН инструмент (или ни одного):
 
 - answer_recruiter_question(message): вопрос, на который есть ответ. Два случая:
@@ -47,7 +102,9 @@ RECRUITER_RULES = """\
   гугл-форма, Telegram, звонок. link - URL если есть, иначе пусто. Никогда не
   указывай в link мессенджер MAX - если дали и MAX, и Telegram, бери Telegram;
   если дали только MAX, link=None (сам факт упомяни в detail).
+"""
 
+RECRUITER_SKIP_BLOCK = """\
 БЕЗ ИНСТРУМЕНТА - РОВНО ДВА СЛУЧАЯ. Если последнее сообщение это:
 (1) прямой отказ ("не готовы пригласить", вакансия закрыта/в архиве), или
 (2) "резюме интересное / рассмотрим, свяжемся позже" - обещание написать самим,
@@ -58,14 +115,27 @@ RECRUITER_RULES = """\
 или сомневаешься - escalate_to_human. Молчать нельзя.
 """
 
-RECRUITER_SYSTEM_PROMPT = RECRUITER_RULES
+
+def build_recruiter_rules(mode: str | None = None) -> str:
+    """Assemble the recruiter-chat system prompt for the given positioning mode."""
+    return (
+        RECRUITER_ROLE_BLOCK
+        + "\n"
+        + RECRUITER_POSITIONING_BLOCKS[_mode(mode)]
+        + "\n"
+        + RECRUITER_TOOLS_BLOCK
+        + "\n"
+        + RECRUITER_SKIP_BLOCK
+    )
 
 
-def build_recruiter_prompt(resume_summary: str, qa_block: str = "") -> str:
+def build_recruiter_prompt(
+    resume_summary: str, qa_block: str = "", mode: str | None = None
+) -> str:
     """Recruiter system prompt grounded in candidate resume + saved Q&A."""
     resume = resume_summary.strip() or "(резюме недоступно)"
     qa = f"\n{qa_block.strip()}\n" if qa_block.strip() else ""
-    return f"{RECRUITER_RULES}\n\nРезюме кандидата:\n{resume}\n{qa}"
+    return f"{build_recruiter_rules(mode)}\n\nРезюме кандидата:\n{resume}\n{qa}"
 
 
 # --- cover letter ------------------------------------------------------------
