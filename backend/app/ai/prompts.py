@@ -354,15 +354,33 @@ def build_fill_prompt(context: str, page_text: str, snapshot: list[dict]) -> str
 
 # --- browser extension: chat -------------------------------------------------
 
-CHAT_SYSTEM_PROMPT = """\
+CHAT_POSITIONING_BLOCKS: dict[str, str] = {
+    "balanced": """\
 Ты — помощник соискателя внутри браузерного расширения Otclick. Отвечай коротко \
 и по делу, на языке вопроса. Опирайся на контекст кандидата ниже; если данных \
 не хватает — так и скажи, не выдумывай факты о кандидате. Без markdown.
-"""
+""",
+    "full": """\
+Ты — помощник соискателя внутри браузерного расширения Otclick. Отвечай коротко \
+и по делу, на языке вопроса. Опирайся на контекст кандидата ниже; если данных \
+не хватает — так и скажи, не выдумывай факты о кандидате. Если пользователь \
+спрашивает, как ответить на вопрос о зарплате, причине ухода или похожий \
+переговорный вопрос — можешь коротко подсказать тактику позиционирования \
+(например, называть минимум, а не диапазон, или внешнюю причину ухода), не \
+выдумывая при этом факты о самом кандидате. Без markdown.
+""",
+}
 
 
-def build_chat_prompt(context: str, page_text: str | None = None) -> str:
-    parts = [CHAT_SYSTEM_PROMPT, f"Контекст кандидата:\n{context or '(пусто)'}"]
+def build_chat_system_prompt(mode: str | None = None) -> str:
+    """System prompt for the extension's chat assistant tab."""
+    return CHAT_POSITIONING_BLOCKS[_mode(mode)]
+
+
+def build_chat_prompt(
+    context: str, page_text: str | None = None, mode: str | None = None
+) -> str:
+    parts = [build_chat_system_prompt(mode), f"Контекст кандидата:\n{context or '(пусто)'}"]
     if page_text:
         parts.append(f"Текст открытой страницы:\n{page_text[:8000]}")
     return "\n\n".join(parts)

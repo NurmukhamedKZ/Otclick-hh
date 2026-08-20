@@ -122,3 +122,28 @@ def test_fill_full_allows_positioning_optional_fields_never_contacts():
     p = build_fill_system_prompt(mode="full")
     assert "позиционировать кандидата выгоднее" in p
     assert "никогда не выдумывай" in p  # contact/personal fields guard stays
+
+
+# --- extension chat ------------------------------------------------------------
+
+def test_chat_balanced_has_no_negotiation_tactics_hint():
+    from app.ai.prompts import build_chat_system_prompt
+
+    p = build_chat_system_prompt(mode="balanced")
+    assert "тактику позиционирования" not in p
+
+
+def test_chat_full_offers_negotiation_tactics_hint():
+    from app.ai.prompts import build_chat_system_prompt
+
+    p = build_chat_system_prompt(mode="full")
+    assert "тактику позиционирования" in p
+
+
+def test_build_chat_prompt_forwards_mode_and_keeps_context():
+    from app.ai.prompts import build_chat_prompt
+
+    p = build_chat_prompt("резюме кандидата", page_text="текст вакансии", mode="full")
+    assert "тактику позиционирования" in p
+    assert "резюме кандидата" in p
+    assert "текст вакансии" in p
