@@ -1,4 +1,5 @@
 from functools import cached_property
+from typing import Literal
 
 from cryptography.fernet import Fernet
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -59,6 +60,12 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_MODEL: str = "gpt-5.4-nano"
     OPENAI_RATE_LIMIT: int = 60
+
+    # Positioning tactics baked into AI-generated candidate-facing text. See
+    # docs/spec-ai-positioning.md. "full" opts into the guide's more
+    # aggressive tactics (experience/age/education padding, phantom-offer
+    # social proof) — deliberate user choice, not the default.
+    AI_POSITIONING: Literal["balanced", "full"] = "balanced"
 
     @property
     def cors_origins_list(self) -> list[str]:
