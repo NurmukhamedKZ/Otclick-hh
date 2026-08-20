@@ -42,3 +42,30 @@ def test_build_recruiter_prompt_embeds_resume_and_tools():
     assert "answer_recruiter_question" in p
     assert "escalate_to_human" in p
     assert "make_todo" in p
+
+
+# --- vacancy-test free-text answers -------------------------------------------
+
+def test_form_text_balanced_has_no_experience_padding():
+    from app.ai.prompts import build_form_text_prompt
+
+    p = build_form_text_prompt("Сколько лет опыта?", "Junior, 1 год", mode="balanced")
+    assert "3-4 года" not in p
+    assert "рыночный минимум" not in p
+
+
+def test_form_text_full_adds_experience_and_salary_padding():
+    from app.ai.prompts import build_form_text_prompt
+
+    p = build_form_text_prompt("Сколько лет опыта?", "Junior, 1 год", mode="full")
+    assert "3-4 года" in p
+    assert "рыночный минимум" in p
+
+
+def test_form_text_story_instructions_present_in_both_modes():
+    from app.ai.prompts import build_form_text_prompt
+
+    for mode in ("balanced", "full"):
+        p = build_form_text_prompt("Расскажите о сложном проекте", "ctx", mode=mode)
+        assert "STAR" in p
+        assert "не сухим канцеляритом" in p
