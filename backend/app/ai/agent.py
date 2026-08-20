@@ -7,21 +7,23 @@ recruiter chat agent. No per-call LLM construction.
 
 from __future__ import annotations
 
+import json
 import logging
 
 from langchain.agents import create_agent
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.rate_limiters import InMemoryRateLimiter
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 from app.ai.prompts import (
-    FILL_SYSTEM_PROMPT,
     build_chat_prompt,
     build_fill_prompt,
+    build_fill_system_prompt,
     build_recruiter_prompt,
     sanitize_ai_text,
 )
-from app.ai.recruiter_tools import RECRUITER_TOOLS, RecruiterContext, do_escalate
+from app.ai.recruiter_tools import RECRUITER_TOOLS, RecruiterContext, do_ask
 from app.config import settings
 from app.services import qa_memory
 from app.services.cover_letter import generate as _generate_cover_letter
@@ -132,7 +134,7 @@ class HHAgent:
         try:
             plan = await self.llm.with_structured_output(_FillPlan).ainvoke(
                 [
-                    ("system", FILL_SYSTEM_PROMPT),
+                    ("system", build_fill_system_prompt()),
                     ("human", build_fill_prompt(context, page_text, snapshot)),
                 ]
             )
@@ -262,6 +264,9 @@ class HHAgent:
         self, negotiation_id: str, message_id: str,
         history: list[tuple[str, str]], client,
         question_text: str | None = None,
+        chat_id: str | None = None, applicant_id: str | None = None,
+        vacancy_id: str | None = None, vacancy_title: str | None = None,
+        employer_name: str | None = None,
     ) -> None:
         """Decide + act on the latest recruiter message via tools (send/escalate/
         todo) or no-op. Conversation memory keyed by negotiation_id. The
@@ -281,12 +286,17 @@ class HHAgent:
         ctx = RecruiterContext(
             self.user_id, negotiation_id, message_id, client,
             question_text=question_text,
+            chat_id=chat_id, applicant_id=applicant_id,
+            vacancy_id=vacancy_id, vacancy_title=vacancy_title, employer_name=employer_name,
         )
         await self._run_recruiter(history, ctx)
 
     async def answer_recruiter_choice(
         self, negotiation_id: str, message_id: str,
         history: list[tuple[str, str]], client, question: str, labels: list[str],
+        chat_id: str | None = None, applicant_id: str | None = None,
+        vacancy_id: str | None = None, vacancy_title: str | None = None,
+        employer_name: str | None = None,
     ) -> None:
         """Answer a robot-recruiter quick-reply question via the langchain agent.
 
@@ -309,6 +319,8 @@ class HHAgent:
         ctx = RecruiterContext(
             self.user_id, negotiation_id, message_id, client,
             question_text=question, quick_reply_labels=labels,
+            chat_id=chat_id, applicant_id=applicant_id,
+            vacancy_id=vacancy_id, vacancy_title=vacancy_title, employer_name=employer_name,
         )
         directive = (
             "Последнее сообщение - вопрос робота-рекрутёра с кнопками-вариантами. "
@@ -318,6 +330,51 @@ class HHAgent:
             '(почему не выбрал) И перечисление этих вариантов через " / ".'
         )
         await self._run_recruiter(history + [("user", directive)], ctx)
+
+    async def resume_recruiter_with_answers(
+        self, negotiation_id: str, message_id: str,
+        history: list[tuple[str, str]], client, *,
+        questions: list[str], answers: list[str], reason: str,
+        question_text: str | None = None,
+        chat_id: str | None = None, applicant_id: str | None = None,
+        vacancy_id=None, vacancy_title=None, employer_name=None,
+    ) -> None:
+        """Re-invoke the recruiter agent after the candidate answered a pending
+        question set. Feeds the answers back as a literal LangChain ToolMessage
+        (the model "sees" its own escalate_to_human call answered), plus a
+        directive turn, so it produces the real reply via answer_recruiter_question
+        (or asks again / makes a todo). No checkpointer — the plain message list
+        is extended, same as answer_recruiter/answer_recruiter_choice."""
+        if not settings.OPENAI_API_KEY:
+            logger.info("recruiter: no OPENAI_API_KEY — skipping resume %s", negotiation_id)
+            return
+        if self._recruiter_agent is None:
+            summary = await self._load_resume_summary()
+            qa = await qa_memory.prompt_block(self.user_id)
+            self._recruiter_agent = self._build_recruiter_agent(
+                build_recruiter_prompt(summary, qa)
+            )
+        ctx = RecruiterContext(
+            self.user_id, negotiation_id, message_id, client,
+            question_text=question_text,
+            chat_id=chat_id, applicant_id=applicant_id,
+            vacancy_id=vacancy_id, vacancy_title=vacancy_title, employer_name=employer_name,
+        )
+        call_id = f"call_{message_id}"
+        qa_pairs = json.dumps(dict(zip(questions, answers)), ensure_ascii=False)
+        synthetic = [
+            AIMessage(content="", tool_calls=[{
+                "name": "escalate_to_human",
+                "args": {"questions": questions, "reason": reason},
+                "id": call_id,
+            }]),
+            ToolMessage(content=qa_pairs, tool_call_id=call_id),
+            ("user", "Кандидат ответил на твои вопросы (см. tool response выше). "
+                     "Сформулируй финальный ответ рекрутёру через "
+                     "answer_recruiter_question. Если нужно уточнить что-то ещё "
+                     "— снова escalate_to_human."),
+        ]
+        await self._run_recruiter(history + synthetic, ctx)
 
     async def _run_recruiter(self, messages: list[tuple[str, str]], ctx) -> None:
         """Invoke the recruiter agent and guarantee an outcome.
@@ -343,4 +400,4 @@ class HHAgent:
             logger.info("recruiter: chat %s skipped (отказ / в обработке)", nid)
             return
         logger.warning("recruiter: chat %s — no tool call, escalating", nid)
-        await do_escalate(ctx, text, "агент не выбрал действие, проверьте вручную")
+        await do_ask(ctx, [text], "агент не выбрал действие, проверьте вручную")

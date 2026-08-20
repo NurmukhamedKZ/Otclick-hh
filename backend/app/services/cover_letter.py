@@ -15,7 +15,7 @@ import re
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.ai.prompts import COVER_LETTER_SYSTEM_PROMPT, sanitize_ai_text
+from app.ai.prompts import build_cover_letter_prompt, sanitize_ai_text
 from app.config import settings
 from app.db.supabase import service_client
 
@@ -142,7 +142,7 @@ async def generate(
         prompt = _build_prompt(vacancy, resume)
         try:
             resp = await llm.ainvoke([
-                SystemMessage(COVER_LETTER_SYSTEM_PROMPT),
+                SystemMessage(build_cover_letter_prompt()),
                 HumanMessage(prompt),
             ])
             content = resp.content

@@ -76,8 +76,7 @@ async def test_sync_resumes_notifies_when_filters_were_orphaned():
 
     client = MagicMock(access_token="t")
     client.get.return_value = {"items": []}
-    with patch.object(resume_sync, "load_api_client", new=AsyncMock(return_value=client)), \
-         patch.object(resume_sync, "persist_if_refreshed", new=AsyncMock()), \
+    with patch.object(resume_sync.web, "list_resumes", new=AsyncMock(return_value=[])), \
          patch.object(resume_sync, "_upsert_resumes", return_value=[]), \
          patch.object(resume_sync, "_disable_orphaned_filters", return_value=["f1"]), \
          patch.object(resume_sync, "notify", new=AsyncMock()) as notify:
@@ -94,8 +93,7 @@ async def test_sync_resumes_stays_quiet_when_nothing_was_orphaned():
 
     client = MagicMock(access_token="t")
     client.get.return_value = {"items": []}
-    with patch.object(resume_sync, "load_api_client", new=AsyncMock(return_value=client)), \
-         patch.object(resume_sync, "persist_if_refreshed", new=AsyncMock()), \
+    with patch.object(resume_sync.web, "list_resumes", new=AsyncMock(return_value=[])), \
          patch.object(resume_sync, "_upsert_resumes", return_value=[]), \
          patch.object(resume_sync, "_disable_orphaned_filters", return_value=[]), \
          patch.object(resume_sync, "notify", new=AsyncMock()) as notify:

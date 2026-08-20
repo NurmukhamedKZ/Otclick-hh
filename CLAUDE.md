@@ -98,6 +98,14 @@ OPENAI_API_KEY=
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-5.4-nano
 
+# hh OAuth app. Empty → the official Android app's borrowed keys, which answer
+# `error=geo_forbidden` on /oauth/authorize outside their region (login succeeds,
+# hh then refuses the code). Fix: your own app on dev.hh.ru/admin or dev.hh.kz/admin.
+# All three move together; HH_REDIRECT_URI must match the registration byte for byte.
+HH_CLIENT_ID=
+HH_CLIENT_SECRET=
+HH_REDIRECT_URI=
+
 # cron endpoints (shared secret for /internal/cron/*: refresh-tokens, prune-notifications)
 INTERNAL_CRON_TOKEN=
 

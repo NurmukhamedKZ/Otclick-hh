@@ -36,7 +36,10 @@ def _patches(rp, *, recent, messages, cursor=None):
         patch.object(rp.chatik, "chat_messages", new=AsyncMock(return_value=messages)),
         patch.object(rp.recruiter, "get_cursor", new=AsyncMock(return_value=cursor)),
         patch.object(rp.recruiter, "upsert_cursor", new=AsyncMock()),
+        patch.object(rp.recruiter, "list_answered_questions", new=AsyncMock(return_value=[])),
+        patch.object(rp.recruiter, "mark_question_completed", new=AsyncMock()),
         patch.object(rp.asyncio, "sleep", new=AsyncMock()),
+        patch.object(rp, "_vacancy_meta", new=AsyncMock(return_value=("Python Dev", "Acme"))),
     ]
 
 
@@ -62,6 +65,10 @@ async def test_poll_routes_real_recruiter_to_free_text():
     agent.answer_recruiter.assert_awaited_once()
     args = agent.answer_recruiter.await_args.args
     assert args[0] == "n9" and args[1] == "m5"  # nid, message_id
+    kwargs = agent.answer_recruiter.await_args.kwargs
+    assert kwargs["vacancy_id"] == "v1"
+    assert kwargs["vacancy_title"] == "Python Dev"
+    assert kwargs["employer_name"] == "Acme"
     agent.answer_recruiter_choice.assert_not_awaited()
     upsert.new.assert_awaited_once()
     assert upsert.new.await_args.args[2] == "m5"
@@ -80,6 +87,8 @@ async def test_poll_routes_bot_buttons_to_choice():
     agent.answer_recruiter_choice.assert_awaited_once()
     ca = agent.answer_recruiter_choice.await_args.args
     assert ca[0] == "n9" and ca[1] == "m5" and ca[4] == "Подходит 100 тыс?" and ca[5] == ["Да", "Нет"]
+    ckw = agent.answer_recruiter_choice.await_args.kwargs
+    assert ckw["vacancy_id"] == "v1" and ckw["vacancy_title"] == "Python Dev"
     agent.answer_recruiter.assert_not_awaited()
 
 
@@ -174,3 +183,89 @@ async def test_poll_swallows_error_keeps_cursor():
     upsert = p[5]
     await _run(rp, agent, p)  # must not raise
     upsert.new.assert_not_awaited()  # error → cursor NOT advanced
+
+
+@pytest.mark.asyncio
+async def test_poll_runs_agent_without_api_client():
+    """Cookies-only connection (no OAuth token): the poll must still answer
+    chats — the client is only the negotiation-state skip list. Regression for
+    the agent going silent with AttributeError every 2 minutes."""
+    from app.worker import recruiter_poll as rp
+    recent = [_ref(last_id="m5", last_participant_id="emp")]
+    messages = [_msg("m5", "Здравствуйте", is_bot=False)]
+    agent = MagicMock()
+    agent.answer_recruiter = AsyncMock()
+    agent.answer_recruiter_choice = AsyncMock()
+    p = _patches(rp, recent=recent, messages=messages, cursor="old")
+    load, persist = p[0], p[1]
+    load.new.side_effect = RuntimeError("cookies-only connection")
+    upsert = p[5]
+    await _run(rp, agent, p)
+    agent.answer_recruiter.assert_awaited_once()
+    upsert.new.assert_awaited_once()
+    persist.new.assert_not_awaited()  # nothing to persist without a client
+
+
+def _qrow(**kw):
+    base = {
+        "id": "q1", "negotiation_id": "n9", "message_id": "m5",
+        "chat_id": "c1", "applicant_id": "me",
+        "questions": ["Когда вам удобно?"], "answers": ["В среду в 15:00"],
+        "reason": "scheduling", "question_text": "Когда?",
+        "vacancy_id": "v1", "vacancy_title": "Python Dev", "employer_name": "Acme",
+    }
+    base.update(kw)
+    return base
+
+
+@pytest.mark.asyncio
+async def test_poll_resumes_answered_question():
+    from app.worker import recruiter_poll as rp
+    agent = MagicMock()
+    agent.resume_recruiter_with_answers = AsyncMock()
+    msgs = [_msg("m5", "Когда удобно?", is_bot=False)]
+    with patch.object(rp.recruiter, "list_answered_questions",
+                      new=AsyncMock(return_value=[_qrow()])), \
+         patch.object(rp.chatik, "chat_messages", new=AsyncMock(return_value=msgs)), \
+         patch.object(rp.recruiter, "mark_question_completed", new=AsyncMock()) as done:
+        await rp.poll_answered_questions("u1", agent, MagicMock(access_token="t"), {})
+    agent.resume_recruiter_with_answers.assert_awaited_once()
+    kw = agent.resume_recruiter_with_answers.await_args.kwargs
+    assert kw["questions"] == ["Когда вам удобно?"] and kw["answers"] == ["В среду в 15:00"]
+    assert kw["chat_id"] == "c1" and kw["applicant_id"] == "me"
+    assert kw["vacancy_id"] == "v1"
+    done.assert_awaited_once_with("u1", "q1")
+
+
+@pytest.mark.asyncio
+async def test_poll_marks_completed_without_resume_when_rejected():
+    """Answer to a question from a chat that got rejected meanwhile -> marked
+    completed without invoking the agent (no pointless draft)."""
+    from app.worker import recruiter_poll as rp
+    agent = MagicMock()
+    agent.resume_recruiter_with_answers = AsyncMock()
+    with patch.object(rp.recruiter, "list_answered_questions",
+                      new=AsyncMock(return_value=[_qrow()])), \
+         patch.object(rp.recruiter, "mark_question_completed", new=AsyncMock()) as done:
+        await rp.poll_answered_questions(
+            "u1", agent, MagicMock(access_token="t"),
+            {"n9": "discard_after_interview"},
+        )
+    agent.resume_recruiter_with_answers.assert_not_awaited()
+    done.assert_awaited_once_with("u1", "q1")
+
+
+@pytest.mark.asyncio
+async def test_poll_keeps_row_answered_on_resume_error():
+    """Agent crash on resume -> status stays 'answered' (not advanced/completed)
+    so the next poll retries it."""
+    from app.worker import recruiter_poll as rp
+    agent = MagicMock()
+    agent.resume_recruiter_with_answers = AsyncMock(side_effect=RuntimeError("boom"))
+    with patch.object(rp.recruiter, "list_answered_questions",
+                      new=AsyncMock(return_value=[_qrow()])), \
+         patch.object(rp.chatik, "chat_messages", new=AsyncMock(return_value=[_msg("m5", "hi")])), \
+         patch.object(rp.recruiter, "mark_question_completed", new=AsyncMock()) as done:
+        await rp.poll_answered_questions("u1", agent, MagicMock(access_token="t"), {})  # must not raise
+    assert agent.resume_recruiter_with_answers.await_count == 1
+    done.assert_not_awaited()

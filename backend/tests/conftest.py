@@ -19,6 +19,7 @@ import pytest
 def _clear_process_caches():
     def _clear():
         from app.api import deps
+        from app.hh import web
         from app.services import form_filler, hh_credentials, notifications
         from app.worker import recruiter_poll
 
@@ -27,6 +28,7 @@ def _clear_process_caches():
         deps._token_cache.clear()
         notifications._once_sent.clear()
         recruiter_poll._states_cache.clear()
+        web._last_request_at.clear()
 
     _clear()
     yield

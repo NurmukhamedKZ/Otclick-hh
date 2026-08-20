@@ -29,6 +29,7 @@ describe("computeNavCounts", () => {
         formDrafts: [],
         recruiterDrafts: [],
         todos: [],
+        questions: [],
         unreadNotifications: 0,
       }),
     ).toEqual({ chats: 0, todo: 0, notifications: 0 });
@@ -40,20 +41,22 @@ describe("computeNavCounts", () => {
       formDrafts: [],
       recruiterDrafts: [],
       todos: [],
+      questions: [],
       unreadNotifications: 0,
     });
     expect(r.chats).toBe(7);
   });
 
-  it("adds the three todo sources together", () => {
+  it("adds the four todo sources together", () => {
     const r = computeNavCounts({
       chats: [],
       formDrafts: [{}, {}],
       recruiterDrafts: [{}],
       todos: [{}, {}, {}],
+      questions: [{}, {}],
       unreadNotifications: 0,
     });
-    expect(r.todo).toBe(6);
+    expect(r.todo).toBe(8);
   });
 
   it("passes the notification count through", () => {
@@ -62,6 +65,7 @@ describe("computeNavCounts", () => {
       formDrafts: [],
       recruiterDrafts: [],
       todos: [],
+      questions: [],
       unreadNotifications: 12,
     });
     expect(r.notifications).toBe(12);

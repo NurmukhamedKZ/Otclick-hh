@@ -1,8 +1,9 @@
 """Pull negotiation states from hh into applications.hh_state.
 
 The apply pipeline only knows whether WE managed to send a response. Whether
-the employer then invited or rejected lives on hh (`negotiations[].state.id` =
-response | invitation | discard). Analytics needs it, so we mirror it.
+the employer then invited or rejected lives on hh. Analytics needs it, so we
+mirror it — read off the negotiations page (web.list_negotiations), which
+normalises hh's wording to response | invitation | discard.
 
 Called on demand from the analytics endpoint, throttled by
 profiles.negotiations_synced_at — nobody looking at the page, nobody paying
@@ -16,12 +17,15 @@ import logging
 from datetime import UTC, datetime, timedelta
 
 from app.db.supabase import service_client
-from app.services.hh_credentials import load_api_client, persist_if_refreshed
+from app.hh import web
 
 logger = logging.getLogger(__name__)
 
-PER_PAGE = 100
-MAX_PAGES = 5  # 500 most recently updated negotiations — enough for a 30d window
+# The web negotiations page serves 20 topics per page (observed: total=841 over
+# pageCount=43), where the old API took per_page=100. Keep the same ~500-row
+# window the 30d analytics needs by paging 25 times instead of 5.
+PER_PAGE = 20
+MAX_PAGES = 25
 MIN_SYNC_INTERVAL_S = 300
 
 
@@ -47,24 +51,6 @@ def _mark_synced(user_id: str) -> None:
     service_client.table("profiles").update(
         {"negotiations_synced_at": datetime.now(UTC).isoformat()}
     ).eq("id", user_id).execute()
-
-
-def _rows_from_items(items: list[dict]) -> list[dict]:
-    out = []
-    for it in items:
-        vacancy = it.get("vacancy") or {}
-        vid = vacancy.get("id")
-        if not vid:
-            continue
-        out.append(
-            {
-                "vacancy_id": str(vid),
-                "state": (it.get("state") or {}).get("id"),
-                "viewed": bool(it.get("viewed_by_opponent")),
-                "employer_name": ((vacancy.get("employer") or {}).get("name")),
-            }
-        )
-    return out
 
 
 def _persist(user_id: str, rows: list[dict]) -> int:
@@ -112,37 +98,18 @@ async def sync_states(user_id: str, force: bool = False) -> int:
     loop = asyncio.get_running_loop()
     if not force and not await loop.run_in_executor(None, _due, user_id):
         return 0
-    try:
-        client = await load_api_client(user_id)
-    except Exception:
-        logger.info("negotiation_sync: no usable hh creds for %s — skip", user_id)
-        return 0
-
-    original_access = client.access_token
     changed = 0
     try:
         for page in range(MAX_PAGES):
-            payload = await loop.run_in_executor(
-                None,
-                lambda p=page: client.get(
-                    "negotiations", order_by="updated_at", page=p, per_page=PER_PAGE
-                ),
-            )
-            items = payload.get("items") or [] if isinstance(payload, dict) else []
-            if not items:
+            rows = await web.list_negotiations(user_id, page=page)
+            if not rows:
                 break
-            changed += await loop.run_in_executor(
-                None, _persist, user_id, _rows_from_items(items)
-            )
-            pages_total = payload.get("pages")
-            if pages_total is not None and page + 1 >= pages_total:
-                break
-            if len(items) < PER_PAGE:
+            changed += await loop.run_in_executor(None, _persist, user_id, rows)
+            if len(rows) < PER_PAGE:
                 break
     except Exception:
         logger.warning("negotiation_sync failed for %s", user_id, exc_info=True)
     finally:
-        await persist_if_refreshed(user_id, client, original_access)
         try:
             await loop.run_in_executor(None, _mark_synced, user_id)
         except Exception:  # pragma: no cover

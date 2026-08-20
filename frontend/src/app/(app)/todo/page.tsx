@@ -3,14 +3,15 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Btn, Card, EmptyState, SegmentedTabs, Skeleton } from "@/components/otclick/ui";
-import { ICheck, IDoc, IMail } from "@/components/otclick/icons";
-import { useRecruiter, type Draft, type Todo } from "@/hooks/useRecruiter";
+import { ICheck, IDoc, IMail, ISpark } from "@/components/otclick/icons";
+import { useRecruiter, type Draft, type QuestionSet, type Todo } from "@/hooks/useRecruiter";
 import { useFormDrafts, type FormAnswer, type FormDraft } from "@/hooks/useFormDrafts";
 import { useChats, useChatMessages, type ChatSummary } from "@/hooks/useChats";
 
 const SECTIONS = [
   { id: "forms", label: "Анкеты" },
   { id: "drafts", label: "Черновики" },
+  { id: "questions", label: "Вопросы" },
   { id: "tasks", label: "Задачи" },
 ] as const;
 
@@ -129,7 +130,13 @@ function FormDraftCard({
   );
 }
 
-function VacancyMeta({ meta }: { meta?: ChatSummary }) {
+type VacancyRef = {
+  vacancy_id?: string | null;
+  vacancy_name?: string | null;
+  employer_name?: string | null;
+};
+
+function VacancyMeta({ meta }: { meta?: VacancyRef | null }) {
   if (!meta || (!meta.vacancy_name && !meta.employer_name)) return null;
   const href = meta.vacancy_id ? `https://hh.ru/vacancy/${meta.vacancy_id}` : null;
   return (
@@ -228,7 +235,7 @@ function DraftCard({
   onDiscard,
 }: {
   draft: Draft;
-  meta?: ChatSummary;
+  meta?: VacancyRef;
   onSend: (id: string, msg: string) => void;
   onDiscard: (id: string) => void;
 }) {
@@ -410,8 +417,9 @@ function DraftsSection({
   sendDraft: (id: string, msg: string) => void;
   discardDraft: (id: string) => void;
 }) {
-  // Reuses the /api/chats list (already fetched for the Chats page) purely for
-  // its vacancy_name/employer_name — same data the Анкеты tab already shows.
+  // Fallback for drafts created before vacancy fields were persisted on the
+  // row itself — reuses the /api/chats list (already fetched for the Chats
+  // page), but only covers the 50 most recently updated negotiations.
   const { chats } = useChats(false);
   const metaById = useMemo(() => {
     const map = new Map<string, ChatSummary>();
@@ -424,16 +432,150 @@ function DraftsSection({
       {drafts.length === 0 && (
         <EmptyState icon={<IMail size={22} />} title="Черновиков нет" description="Если ИИ не уверен в ответе рекрутёру, черновик появится здесь." action={{ label: "Открыть чаты", href: "/chats" }} />
       )}
-      {drafts.map((d) => (
-        <DraftCard
-          key={d.id}
-          draft={d}
-          meta={metaById.get(d.negotiation_id)}
-          onSend={sendDraft}
-          onDiscard={discardDraft}
-        />
-      ))}
+      {drafts.map((d) => {
+        const fallback = metaById.get(d.negotiation_id);
+        const meta: VacancyRef = {
+          vacancy_id: d.vacancy_id ?? fallback?.vacancy_id,
+          vacancy_name: d.vacancy_title ?? fallback?.vacancy_name,
+          employer_name: d.employer_name ?? fallback?.employer_name,
+        };
+        return (
+          <DraftCard
+            key={d.id}
+            draft={d}
+            meta={meta}
+            onSend={sendDraft}
+            onDiscard={discardDraft}
+          />
+        );
+      })}
     </div>
+  );
+}
+
+function QuestionsSection({
+  questions,
+  answerQuestions,
+  discardQuestion,
+}: {
+  questions: QuestionSet[];
+  answerQuestions: (id: string, answers: string[]) => void;
+  discardQuestion: (id: string) => void;
+}) {
+  const { chats } = useChats(false);
+  const metaById = useMemo(() => {
+    const map = new Map<string, ChatSummary>();
+    for (const c of chats ?? []) map.set(c.id, c);
+    return map;
+  }, [chats]);
+
+  return (
+    <div style={{ display: "grid", gap: 12, minWidth: 0, gridTemplateColumns: "minmax(0, 1fr)" }}>
+      {questions.length === 0 && (
+        <EmptyState icon={<ISpark size={22} />} title="Вопросов нет" description="Если ИИ-агенту не хватит данных для ответа рекрутёру, он задаст вопросы здесь." />
+      )}
+      {questions.map((q) => {
+        const fallback = metaById.get(q.negotiation_id);
+        const meta: VacancyRef = {
+          vacancy_id: q.vacancy_id ?? fallback?.vacancy_id,
+          vacancy_name: q.vacancy_title ?? fallback?.vacancy_name,
+          employer_name: q.employer_name ?? fallback?.employer_name,
+        };
+        return (
+          <QuestionCard
+            key={q.id}
+            questionSet={q}
+            meta={meta}
+            onAnswer={answerQuestions}
+            onDiscard={discardQuestion}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function QuestionCard({
+  questionSet,
+  meta,
+  onAnswer,
+  onDiscard,
+}: {
+  questionSet: QuestionSet;
+  meta?: VacancyRef;
+  onAnswer: (id: string, answers: string[]) => void;
+  onDiscard: (id: string) => void;
+}) {
+  const [answers, setAnswers] = useState<string[]>(questionSet.questions.map(() => ""));
+  const ready = answers.every((a) => a.trim().length > 0);
+  const update = (idx: number, value: string) =>
+    setAnswers((prev) => prev.map((a, i) => (i === idx ? value : a)));
+
+  return (
+    <Card style={{ display: "grid", gap: 10, gridTemplateColumns: "minmax(0, 1fr)" }}>
+      <VacancyMeta meta={meta} />
+      <ChatHistory negotiationId={questionSet.negotiation_id} vacancyId={meta?.vacancy_id ?? null} />
+      {questionSet.question_text && (
+        <div
+          style={{
+            background: "var(--bg-deep)",
+            borderLeft: "3px solid var(--coral)",
+            borderRadius: 10,
+            padding: "10px 12px",
+            display: "grid",
+            gap: 4,
+          }}
+        >
+          <div style={{ fontSize: 11, color: "var(--muted)", fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase" }}>
+            Вопрос рекрутёра
+          </div>
+          <div
+            style={{
+              fontSize: 14,
+              lineHeight: 1.45,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+              color: "var(--ink)",
+            }}
+          >
+            {questionSet.question_text}
+          </div>
+        </div>
+      )}
+      {questionSet.reason && (
+        <div style={{ fontSize: 13, color: "var(--muted)" }}>Причина: {questionSet.reason}</div>
+      )}
+      {questionSet.questions.map((q, i) => (
+        <div key={i} style={{ display: "grid", gap: 6, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, overflowWrap: "anywhere" }}>{q}</div>
+          <textarea
+            value={answers[i]}
+            onChange={(e) => update(i, e.target.value)}
+            rows={2}
+            placeholder="Ваш ответ…"
+            style={{
+              width: "100%",
+              resize: "vertical",
+              padding: 8,
+              borderRadius: 10,
+              border: "1px solid var(--line)",
+              background: "var(--bg-deep)",
+              color: "var(--ink)",
+              fontSize: 13,
+              fontFamily: "inherit",
+            }}
+          />
+        </div>
+      ))}
+      <div style={{ display: "flex", gap: 8 }}>
+        <Btn kind="primary" size="sm" disabled={!ready} onClick={() => onAnswer(questionSet.id, answers)}>
+          Отправить ответы
+        </Btn>
+        <Btn kind="ghost" size="sm" onClick={() => onDiscard(questionSet.id)}>
+          Отклонить
+        </Btn>
+      </div>
+    </Card>
   );
 }
 
@@ -456,9 +598,16 @@ function TasksSection({
       {todos.length === 0 && (
         <EmptyState icon={<ICheck size={22} />} title="Задач нет" description="ИИ-агент создаёт задачи, когда рекрутёр просит что-то сделать вне переписки." />
       )}
-      {todos.map((t) => (
+      {todos.map((t) => {
+        const fallback = metaById.get(t.negotiation_id);
+        const meta: VacancyRef = {
+          vacancy_id: t.vacancy_id ?? fallback?.vacancy_id,
+          vacancy_name: t.vacancy_title ?? fallback?.vacancy_name,
+          employer_name: t.employer_name ?? fallback?.employer_name,
+        };
+        return (
         <Card key={t.id} style={{ display: "grid", gap: 6, gridTemplateColumns: "minmax(0, 1fr)" }}>
-          <VacancyMeta meta={metaById.get(t.negotiation_id)} />
+          <VacancyMeta meta={meta} />
           <div style={{ fontWeight: 600, overflowWrap: "anywhere" }}>{t.title}</div>
           {t.detail && <div style={{ fontSize: 14, overflowWrap: "anywhere" }}>{t.detail}</div>}
           {t.link && (
@@ -486,13 +635,25 @@ function TasksSection({
             </Btn>
           </div>
         </Card>
-      ))}
+        );
+      })}
     </div>
   );
 }
 
 export default function RecruiterPage() {
-  const { drafts, todos, loading, error, sendDraft, discardDraft, resolveTodo } = useRecruiter();
+  const {
+    drafts,
+    todos,
+    questions,
+    loading,
+    error,
+    sendDraft,
+    discardDraft,
+    resolveTodo,
+    answerQuestions,
+    discardQuestion,
+  } = useRecruiter();
   const {
     drafts: formDrafts,
     loading: formLoading,
@@ -506,6 +667,7 @@ export default function RecruiterPage() {
   const counts: Record<SectionId, number> = {
     forms: formDrafts.length,
     drafts: drafts.length,
+    questions: questions.length,
     tasks: todos.length,
   };
 
@@ -530,6 +692,13 @@ export default function RecruiterPage() {
           )}
           {active === "drafts" && (
             <DraftsSection drafts={drafts} sendDraft={sendDraft} discardDraft={discardDraft} />
+          )}
+          {active === "questions" && (
+            <QuestionsSection
+              questions={questions}
+              answerQuestions={answerQuestions}
+              discardQuestion={discardQuestion}
+            />
           )}
           {active === "tasks" && <TasksSection todos={todos} resolveTodo={resolveTodo} />}
         </div>

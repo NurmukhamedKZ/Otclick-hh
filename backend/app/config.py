@@ -1,4 +1,5 @@
 from functools import cached_property
+from typing import Literal
 
 from cryptography.fernet import Fernet
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -21,6 +22,13 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:3000"
     DEBUG_ENDPOINTS: bool = False
     LOG_LEVEL: str = "INFO"
+
+    # hh OAuth application. Empty → the official Android app's keys (see
+    # app/hh/client_keys.py), which answer `geo_forbidden` outside their region.
+    # Set all three together; HH_REDIRECT_URI must match the app's registration.
+    HH_CLIENT_ID: str = ""
+    HH_CLIENT_SECRET: str = ""
+    HH_REDIRECT_URI: str = ""
 
     # hh refresh-token cron: shared secret for /internal/cron/* + near-expiry window.
     # hh refresh token is single-use and only usable once the access token expired,
@@ -52,6 +60,12 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_MODEL: str = "gpt-5.4-nano"
     OPENAI_RATE_LIMIT: int = 60
+
+    # Positioning tactics baked into AI-generated candidate-facing text. See
+    # docs/spec-ai-positioning.md. "full" opts into the guide's more
+    # aggressive tactics (experience/age/education padding, phantom-offer
+    # social proof) — deliberate user choice, not the default.
+    AI_POSITIONING: Literal["balanced", "full"] = "balanced"
 
     @property
     def cors_origins_list(self) -> list[str]:

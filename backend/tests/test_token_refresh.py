@@ -76,6 +76,7 @@ async def test_refresh_due_selects_near_expiry_and_aggregates():
     chain = MagicMock()
     chain.select.return_value = chain
     chain.is_.return_value = chain
+    chain.not_.is_.return_value = chain
     chain.lte.return_value = chain
     chain.execute.return_value = SimpleNamespace(
         data=[{"user_id": "u1"}, {"user_id": "u2"}, {"user_id": "u3"}]
@@ -99,6 +100,9 @@ async def test_refresh_due_selects_near_expiry_and_aggregates():
     # near-expiry filters applied
     chain.is_.assert_called_once_with("invalid_at", None)
     assert chain.lte.call_args.args[0] == "expires_at"
+    # cookies-only rows have no refresh token; "refreshing" them would fail and
+    # mark a working web session invalid
+    chain.not_.is_.assert_called_once_with("refresh_token_encrypted", None)
     assert summary == {"due": 3, "refreshed": 1, "invalid": 1, "errors": 1}
 
 
@@ -109,6 +113,7 @@ async def test_refresh_due_one_bad_user_does_not_abort_batch():
     chain = MagicMock()
     chain.select.return_value = chain
     chain.is_.return_value = chain
+    chain.not_.is_.return_value = chain
     chain.lte.return_value = chain
     chain.execute.return_value = SimpleNamespace(
         data=[{"user_id": "u1"}, {"user_id": "u2"}]

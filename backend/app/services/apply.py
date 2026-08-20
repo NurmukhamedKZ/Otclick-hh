@@ -1,13 +1,17 @@
-"""Send one job application to hh via POST /negotiations.
+"""Send one job application to hh over the logged-in web session.
+
+No OAuth token anywhere on this path — hh refuses the OAuth grant outside the
+client's region (`geo_forbidden`), so both the vacancy fetch and the response
+go through the web session captured at login.
 
 Flow:
   1. Resolve resume_uuid → (hh_resume_id, title)
-  2. Skip if already applied
-  3. Load ApiClient
-  4. Fetch vacancy details ONCE — drives 3 decisions: form_required, employer_id, response_letter_required
-  5. If has_test → record form_required, return
-  6. Generate cover letter ONLY if response_letter_required, else send empty message
-  7. POST /negotiations, handle errors
+  2. Skip if already applied (locally, then per hh's own per-applicant block)
+  3. Fetch the vacancy page ONCE — drives 3 decisions: has_test, employer_id,
+     response_letter_required
+  4. If has_test → AI drafts answers, user approves; never auto-submitted
+  5. Generate cover letter ONLY if response_letter_required
+  6. POST vacancy_response/popup, map every rejection onto an ApplyStatus
 """
 
 from __future__ import annotations
@@ -19,15 +23,11 @@ from typing import Literal
 
 from app.ai.agent import HHAgent
 from app.db.supabase import service_client
-from app.hh import errors as hh_errors
+from app.hh import web
 from app.services import captcha as captcha_service
-from app.services import form_drafts, notifications
-from app.services.hh_credentials import (
-    HHCredentialsInvalid,
-    load_api_client,
-    mark_invalid,
-    persist_if_refreshed,
-)
+from app.services import form_drafts, form_filler, notifications
+from app.services.form_filler import WebSessionExpired
+from app.services.hh_credentials import mark_invalid
 
 logger = logging.getLogger(__name__)
 
@@ -115,10 +115,6 @@ def _already_applied(user_id: str, vacancy_id: str) -> bool:
     # form_required pre-record is not a real attempt — allow re-evaluation.
     # form_pending = AI answers waiting for user approval; do not re-queue.
     return res.data[0].get("status") not in RETRYABLE_STATUSES
-
-
-def _is_already_applied_error(ex: hh_errors.ClientError) -> bool:
-    return _match_markers(ex, _ALREADY_APPLIED_MARKERS)
 
 
 def is_ban_error(ex: Exception) -> bool:
@@ -217,251 +213,142 @@ async def apply_one(
     if resume is None:
         logger.warning("apply: resume %s not found for user %s", resume_uuid, user_id)
         return "resume_missing"
-    hh_resume_id = resume["hh_resume_id"]
 
     if await loop.run_in_executor(None, _already_applied, user_id, vacancy_id):
         logger.info("apply: user=%s already applied to vacancy=%s", user_id, vacancy_id)
         return "skipped"
 
     try:
-        client = await load_api_client(user_id)
-    except HHCredentialsInvalid:
-        logger.error("apply: user=%s creds invalid", user_id)
+        vacancy = await web.get_vacancy(user_id, vacancy_id)
+    except web.VacancyGone:
+        logger.info("apply: vacancy=%s gone (404)", vacancy_id)
+        await loop.run_in_executor(
+            None,
+            lambda: _record_application(
+                user_id=user_id,
+                resume_uuid=resume_uuid,
+                vacancy_id=vacancy_id,
+                status="vacancy_gone",
+                cover_letter=None,
+                error="vacancy 404",
+            ),
+        )
+        return "vacancy_gone"
+    except WebSessionExpired as ex:
+        logger.warning("apply: web session dead on vacancy fetch: %s", ex)
+        await form_filler.report_dead_session(user_id, ex)
+        await mark_invalid(user_id, f"web session dead on vacancy fetch: {ex}")
         return "token_dead"
-    original_access = client.access_token
 
-    try:
+    employer_id = _extract_employer_id(vacancy)
+    employer_name = (vacancy.get("employer") or {}).get("name")
+
+    # hh itself says this user already has a negotiation on this vacancy.
+    # Authoritative, unlike matching hh's rejection wording after the POST.
+    if vacancy.get("already_responded"):
+        logger.info(
+            "apply: user=%s vacancy=%s already has a negotiation on hh",
+            user_id, vacancy_id,
+        )
+        await loop.run_in_executor(None, _auto_blacklist, user_id, employer_id)
+        await loop.run_in_executor(
+            None,
+            lambda: _record_application(
+                user_id=user_id,
+                resume_uuid=resume_uuid,
+                vacancy_id=vacancy_id,
+                status="skipped",
+                cover_letter=None,
+                error="already_responded (hh)",
+                employer_id=employer_id,
+            ),
+        )
+        return "skipped"
+
+    # Has-test check survives the producer race: vacancy may have flipped
+    # has_test=true between search and apply. AI generates answers but the
+    # worker NEVER auto-submits — drop a form_draft for user approval.
+    if vacancy.get("has_test") is True:
+        fill_status, form_answers = await agent.write_form_answers(
+            user_id, resume_uuid, vacancy
+        )
+        logger.info(
+            "apply: vacancy=%s has_test=true → fill_status=%s",
+            vacancy_id, fill_status,
+        )
+        if fill_status == "form_pending":
+            # Test vacancies can also require a letter — prefill it, else
+            # hh rejects the submit at approval time. Editable in the UI.
+            draft_letter = ""
+            if vacancy.get("response_letter_required"):
+                try:
+                    draft_letter = await agent.write_cover_letter(
+                        user_id=user_id,
+                        vacancy=vacancy,
+                        resume=resume,
+                        resume_uuid=resume_uuid,
+                    )
+                except Exception:
+                    logger.exception(
+                        "apply: draft cover letter failed vacancy=%s", vacancy_id
+                    )
+            await form_drafts.insert_draft(
+                user_id=user_id,
+                resume_id=resume_uuid,
+                vacancy=vacancy,
+                answers=form_answers,
+                letter=draft_letter,
+            )
+            await notifications.notify(
+                user_id, "form_approval",
+                {
+                    "vacancy_id": vacancy_id,
+                    "vacancy_title": vacancy.get("name"),
+                    "employer": (vacancy.get("employer") or {}).get("name"),
+                },
+            )
+        await loop.run_in_executor(
+            None,
+            lambda: _record_application(
+                user_id=user_id,
+                resume_uuid=resume_uuid,
+                vacancy_id=vacancy_id,
+                status=fill_status,
+                cover_letter=None,
+                error=None if fill_status == "form_pending" else "vacancy.has_test",
+                employer_id=employer_id,
+                form_answers=form_answers or None,
+                employer_name=employer_name,
+                filter_id=filter_id,
+            ),
+        )
+        return fill_status
+
+    letter_required = bool(vacancy.get("response_letter_required"))
+    cover_letter = ""
+    if letter_required:
         try:
-            vacancy = await loop.run_in_executor(
-                None, lambda: client.get(f"vacancies/{vacancy_id}")
+            cover_letter = await agent.write_cover_letter(
+                user_id=user_id,
+                vacancy=vacancy,
+                resume=resume,
+                resume_uuid=resume_uuid,
             )
-        except hh_errors.ResourceNotFound:
-            logger.info("apply: vacancy=%s gone (404)", vacancy_id)
-            await loop.run_in_executor(
-                None,
-                lambda: _record_application(
-                    user_id=user_id,
-                    resume_uuid=resume_uuid,
-                    vacancy_id=vacancy_id,
-                    status="vacancy_gone",
-                    cover_letter=None,
-                    error="vacancy 404",
-                ),
-            )
-            return "vacancy_gone"
-        except hh_errors.Forbidden as ex:
-            if is_ban_error(ex):
-                logger.error("apply: vacancy fetch Forbidden — account banned: %s", ex)
-                await mark_invalid(user_id, f"account banned (vacancy fetch): {ex}")
-                return "account_banned"
-            logger.warning("apply: vacancy fetch Forbidden — token dead: %s", ex)
-            await mark_invalid(user_id, f"Forbidden on vacancy fetch: {ex}")
-            return "token_dead"
-
-        employer_id = _extract_employer_id(vacancy)
-        employer_name = (vacancy.get("employer") or {}).get("name")
-
-        # Has-test check survives the producer race: vacancy may have flipped
-        # has_test=true between search and apply. AI generates answers but the
-        # worker NEVER auto-submits — drop a form_draft for user approval.
-        if vacancy.get("has_test") is True:
-            fill_status, form_answers = await agent.write_form_answers(
-                user_id, resume_uuid, vacancy
-            )
-            logger.info(
-                "apply: vacancy=%s has_test=true → fill_status=%s",
-                vacancy_id, fill_status,
-            )
-            if fill_status == "form_pending":
-                # Test vacancies can also require a letter — prefill it, else
-                # hh rejects the submit at approval time. Editable in the UI.
-                draft_letter = ""
-                if vacancy.get("response_letter_required"):
-                    try:
-                        draft_letter = await agent.write_cover_letter(
-                            user_id=user_id,
-                            vacancy=vacancy,
-                            resume=resume,
-                            resume_uuid=resume_uuid,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "apply: draft cover letter failed vacancy=%s", vacancy_id
-                        )
-                await form_drafts.insert_draft(
-                    user_id=user_id,
-                    resume_id=resume_uuid,
-                    vacancy=vacancy,
-                    answers=form_answers,
-                    letter=draft_letter,
-                )
+            if cover_letter:
                 await notifications.notify(
-                    user_id, "form_approval",
+                    user_id,
+                    "cover_letter_written",
                     {
                         "vacancy_id": vacancy_id,
                         "vacancy_title": vacancy.get("name"),
                         "employer": (vacancy.get("employer") or {}).get("name"),
                     },
                 )
-            await loop.run_in_executor(
-                None,
-                lambda: _record_application(
-                    user_id=user_id,
-                    resume_uuid=resume_uuid,
-                    vacancy_id=vacancy_id,
-                    status=fill_status,
-                    cover_letter=None,
-                    error=None if fill_status == "form_pending" else "vacancy.has_test",
-                    employer_id=employer_id,
-                    form_answers=form_answers or None,
-                    employer_name=employer_name,
-                    filter_id=filter_id,
-                ),
+        except Exception:
+            logger.exception(
+                "apply: cover letter generation failed for vacancy=%s — using empty letter and failing",
+                vacancy_id,
             )
-            return fill_status
-
-        letter_required = bool(vacancy.get("response_letter_required"))
-        cover_letter = ""
-        if letter_required:
-            try:
-                cover_letter = await agent.write_cover_letter(
-                    user_id=user_id,
-                    vacancy=vacancy,
-                    resume=resume,
-                    resume_uuid=resume_uuid,
-                )
-                if cover_letter:
-                    await notifications.notify(
-                        user_id,
-                        "cover_letter_written",
-                        {
-                            "vacancy_id": vacancy_id,
-                            "vacancy_title": vacancy.get("name"),
-                            "employer": (vacancy.get("employer") or {}).get("name"),
-                        },
-                    )
-            except Exception:
-                logger.exception(
-                    "apply: cover letter generation failed for vacancy=%s — using empty letter and failing",
-                    vacancy_id,
-                )
-                await loop.run_in_executor(
-                    None,
-                    lambda: _record_application(
-                        user_id=user_id,
-                        resume_uuid=resume_uuid,
-                        vacancy_id=vacancy_id,
-                        status="failed",
-                        cover_letter=None,
-                        error="cover_letter_generation_failed",
-                        employer_id=employer_id,
-                    ),
-                )
-                return "failed"
-
-        params = {
-            "resume_id": hh_resume_id,
-            "vacancy_id": vacancy_id,
-        }
-        if letter_required:
-            params["message"] = cover_letter
-
-        logger.info(
-            "apply: POST /negotiations user=%s vacancy=%s letter_required=%s len=%d",
-            user_id, vacancy_id, letter_required, len(cover_letter),
-        )
-        try:
-            await loop.run_in_executor(
-                None, lambda: client.post("/negotiations", params)
-            )
-        except hh_errors.CaptchaRequired as ex:
-            captcha_url = ex.captcha_url
-            await loop.run_in_executor(
-                None,
-                lambda: _record_application(
-                    user_id=user_id,
-                    resume_uuid=resume_uuid,
-                    vacancy_id=vacancy_id,
-                    status="captcha",
-                    cover_letter=cover_letter or None,
-                    error=captcha_url,
-                    employer_id=employer_id,
-                ),
-            )
-            try:
-                await captcha_service.create_request(user_id, captcha_url)
-            except Exception:
-                logger.exception("apply: failed to create captcha_request")
-            return "captcha"
-        except hh_errors.LimitExceeded:
-            logger.info("user %s: hh LimitExceeded on vacancy %s", user_id, vacancy_id)
-            return "limit_day"
-        except hh_errors.Forbidden as ex:
-            ex_str = str(ex)
-            msg = ex_str.lower()
-            if any(m in msg for m in _FORM_REQUIRED_MARKERS):
-                logger.info(
-                    "apply: user=%s vacancy=%s form_required by hh Forbidden marker",
-                    user_id, vacancy_id,
-                )
-                await loop.run_in_executor(
-                    None,
-                    lambda: _record_application(
-                        user_id=user_id,
-                        resume_uuid=resume_uuid,
-                        vacancy_id=vacancy_id,
-                        status="form_required",
-                        cover_letter=cover_letter or None,
-                        error=f"form_required: {ex_str}",
-                        employer_id=employer_id,
-                    ),
-                )
-                return "form_required"
-            if is_ban_error(ex):
-                logger.error("user %s: hh Forbidden — account banned", user_id)
-                await mark_invalid(user_id, f"account banned: {ex}")
-                return "account_banned"
-            if _match_markers(ex, _RESUME_GONE_MARKERS):
-                logger.warning(
-                    "user %s: resume %s gone on hh — disabling its filters",
-                    user_id, resume_uuid,
-                )
-                await loop.run_in_executor(
-                    None, _disable_filters_for_resume, user_id, resume_uuid
-                )
-                return "resume_missing"
-            logger.warning("user %s: hh Forbidden — marking creds invalid", user_id)
-            await mark_invalid(user_id, f"Forbidden: {ex}")
-            return "token_dead"
-        except hh_errors.ClientError as ex:
-            ex_str = str(ex)
-            ex_type = type(ex).__name__
-            if _is_already_applied_error(ex):
-                await loop.run_in_executor(
-                    None, _auto_blacklist, user_id, employer_id
-                )
-                await loop.run_in_executor(
-                    None,
-                    lambda: _record_application(
-                        user_id=user_id,
-                        resume_uuid=resume_uuid,
-                        vacancy_id=vacancy_id,
-                        status="skipped",
-                        cover_letter=cover_letter or None,
-                        error=f"already_applied: {ex_str}",
-                        employer_id=employer_id,
-                    ),
-                )
-                return "skipped"
-            if _match_markers(ex, _RESUME_GONE_MARKERS):
-                logger.warning(
-                    "user %s: resume %s gone on hh (%s) — disabling its filters",
-                    user_id, resume_uuid, ex_type,
-                )
-                await loop.run_in_executor(
-                    None, _disable_filters_for_resume, user_id, resume_uuid
-                )
-                return "resume_missing"
             await loop.run_in_executor(
                 None,
                 lambda: _record_application(
@@ -469,13 +356,51 @@ async def apply_one(
                     resume_uuid=resume_uuid,
                     vacancy_id=vacancy_id,
                     status="failed",
-                    cover_letter=cover_letter or None,
-                    error=f"{ex_type}: {ex_str}",
+                    cover_letter=None,
+                    error="cover_letter_generation_failed",
                     employer_id=employer_id,
                 ),
             )
             return "failed"
 
+    logger.info(
+        "apply: submit_response user=%s vacancy=%s letter_required=%s len=%d",
+        user_id, vacancy_id, letter_required, len(cover_letter),
+    )
+    status, error = await form_filler.submit_response(
+        user_id=user_id,
+        resume_id=resume_uuid,
+        vacancy_id=vacancy_id,
+        letter=cover_letter,
+        answers=None,
+    )
+
+    # hh outranks the page flag. `@responseLetterRequired` is what the vacancy
+    # page advertises; "letter-required" is hh refusing the submit for real. If
+    # we believed the flag and sent nothing, write the letter and try again once
+    # — otherwise the vacancy is burned as "failed" over a missing field.
+    if status != "sent" and not cover_letter and "letter-required" in (error or ""):
+        logger.info(
+            "apply: hh demands a letter for vacancy=%s despite the page flag",
+            vacancy_id,
+        )
+        try:
+            cover_letter = await agent.write_cover_letter(
+                user_id=user_id, vacancy=vacancy, resume=resume,
+                resume_uuid=resume_uuid,
+            )
+        except Exception:
+            logger.exception("apply: late cover letter failed vacancy=%s", vacancy_id)
+        if cover_letter:
+            status, error = await form_filler.submit_response(
+                user_id=user_id,
+                resume_id=resume_uuid,
+                vacancy_id=vacancy_id,
+                letter=cover_letter,
+                answers=None,
+            )
+
+    if status in ("sent", "form_sent"):
         logger.info(
             "apply: SENT user=%s vacancy=%s employer=%s",
             user_id, vacancy_id, employer_id,
@@ -495,5 +420,101 @@ async def apply_one(
             ),
         )
         return "sent"
-    finally:
-        await persist_if_refreshed(user_id, client, original_access)
+
+    # A dead web session must stop the loop via the terminal path
+    # (runner._disable_worker) — otherwise worker_main respawns the runner
+    # every 15 s forever. Treat it like a dead token.
+    if error and "web_session_expired" in error:
+        logger.warning(
+            "apply: user=%s web session dead on submit — marking invalid", user_id
+        )
+        await mark_invalid(user_id, f"web session dead on apply: {error}")
+        return "token_dead"
+
+    # hh rejected the body — map it onto the same ApplyStatus literals the
+    # old POST /negotiations used.
+    err_text = (error or "").lower()
+    # Captcha must NOT fall through to "failed": the runner would keep applying
+    # into a captcha wall while looking healthy, which is the fastest way to get
+    # the account flagged. ponytail: substring probe — the web captcha body was
+    # never captured in recon, tighten it once a real one is seen.
+    if "captcha" in err_text:
+        logger.warning("apply: user=%s vacancy=%s captcha on submit", user_id, vacancy_id)
+        await loop.run_in_executor(
+            None,
+            lambda: _record_application(
+                user_id=user_id,
+                resume_uuid=resume_uuid,
+                vacancy_id=vacancy_id,
+                status="captcha",
+                cover_letter=cover_letter or None,
+                error=error,
+                employer_id=employer_id,
+            ),
+        )
+        try:
+            await captcha_service.create_request(user_id, None)
+        except Exception:
+            logger.exception("apply: failed to create captcha_request")
+        return "captcha"
+    if any(m in err_text for m in _ALREADY_APPLIED_MARKERS):
+        await loop.run_in_executor(None, _auto_blacklist, user_id, employer_id)
+        await loop.run_in_executor(
+            None,
+            lambda: _record_application(
+                user_id=user_id,
+                resume_uuid=resume_uuid,
+                vacancy_id=vacancy_id,
+                status="skipped",
+                cover_letter=cover_letter or None,
+                error=f"already_applied: {error}",
+                employer_id=employer_id,
+            ),
+        )
+        return "skipped"
+    if any(m in err_text for m in _FORM_REQUIRED_MARKERS):
+        logger.info(
+            "apply: user=%s vacancy=%s form_required by hh rejection marker",
+            user_id, vacancy_id,
+        )
+        await loop.run_in_executor(
+            None,
+            lambda: _record_application(
+                user_id=user_id,
+                resume_uuid=resume_uuid,
+                vacancy_id=vacancy_id,
+                status="form_required",
+                cover_letter=cover_letter or None,
+                error=f"form_required: {error}",
+                employer_id=employer_id,
+            ),
+        )
+        return "form_required"
+    if any(m in err_text for m in _BANNED_MARKERS):
+        logger.error("user %s: hh submit banned — account banned", user_id)
+        await mark_invalid(user_id, f"account banned (submit): {error}")
+        return "account_banned"
+    if any(m in err_text for m in _RESUME_GONE_MARKERS):
+        logger.warning(
+            "user %s: resume %s gone on hh — disabling its filters",
+            user_id, resume_uuid,
+        )
+        await loop.run_in_executor(
+            None, _disable_filters_for_resume, user_id, resume_uuid
+        )
+        return "resume_missing"
+
+    await loop.run_in_executor(
+        None,
+        lambda: _record_application(
+            user_id=user_id,
+            resume_uuid=resume_uuid,
+            vacancy_id=vacancy_id,
+            status="failed",
+            cover_letter=cover_letter or None,
+            error=f"hh_submit_rejected: {error}",
+            employer_id=employer_id,
+        ),
+    )
+    return "failed"
+

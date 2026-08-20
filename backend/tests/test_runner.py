@@ -241,92 +241,52 @@ async def test_limit_total_stops_runner_and_clears_flag():
 
 
 async def test_probe_me_ok():
-    from unittest.mock import MagicMock
-
     from app.worker import runner
 
-    client = MagicMock()
-    client.access_token = "tok"
-    client.get.return_value = {"id": "me1"}
+    async def _ok(user_id):
+        return [{"id": "r1"}]
+
+    with patch.object(runner.hh_web, "list_resumes", new=_ok):
+        assert await runner._probe_me("u1") == "ok"
+
+
+async def test_probe_me_transient_keeps_polling():
+    from app.worker import runner
+
+    async def _boom(user_id):
+        raise RuntimeError("connection reset")
+
+    with patch.object(runner.hh_web, "list_resumes", new=_boom):
+        assert await runner._probe_me("u1") == "captcha"
+
+
+async def test_probe_me_dead_web_session_is_terminal():
+    """The probe must fail where applying fails. Probing the OAuth API used to
+    report a healthy account while every apply died on a login wall."""
+    from app.services.form_filler import WebSessionExpired
+    from app.worker import runner
+
+    async def _dead(user_id):
+        raise WebSessionExpired("hh rejected the web session (403)")
+
+    marked = []
+
+    async def _mark(user_id, reason):
+        marked.append(user_id)
 
     with (
-        patch.object(runner, "load_api_client", return_value=client),
-        patch.object(runner, "persist_if_refreshed"),
+        patch.object(runner.hh_web, "list_resumes", new=_dead),
+        patch.object(runner, "mark_invalid", new=_mark),
     ):
-        result = await runner._probe_me("u1")
-    assert result == "ok"
+        assert await runner._probe_me("u1") == "token_dead"
+    assert marked == ["u1"]
 
 
-async def test_probe_me_captcha():
-    from unittest.mock import MagicMock
-
-    from app.hh import errors as hh_errors
+async def test_probe_me_no_stored_session_is_terminal():
     from app.worker import runner
 
-    client = MagicMock()
-    client.access_token = "tok"
-    resp = type("R", (), {"status_code": 403, "request": None, "headers": {}})()
-    data = {"errors": [{"value": "captcha_required", "captcha_url": "https://x"}]}
-    client.get.side_effect = hh_errors.CaptchaRequired(resp, data)
+    async def _none(user_id):
+        raise ValueError("no stored web session for user u1")
 
-    with (
-        patch.object(runner, "load_api_client", return_value=client),
-        patch.object(runner, "persist_if_refreshed"),
-    ):
-        result = await runner._probe_me("u1")
-    assert result == "captcha"
-
-
-async def test_probe_me_forbidden_token_dead():
-    from unittest.mock import AsyncMock, MagicMock
-
-    from app.hh import errors as hh_errors
-    from app.worker import runner
-
-    client = MagicMock()
-    client.access_token = "tok"
-    resp = type("R", (), {"status_code": 403, "request": None, "headers": {}})()
-    client.get.side_effect = hh_errors.Forbidden(resp, {"description": "nope"})
-
-    with (
-        patch.object(runner, "load_api_client", return_value=client),
-        patch.object(runner, "persist_if_refreshed"),
-        patch.object(runner, "mark_invalid", new=AsyncMock()) as mi,
-    ):
-        result = await runner._probe_me("u1")
-    assert result == "token_dead"
-    mi.assert_awaited_once()
-
-
-async def test_probe_me_load_fails_token_dead():
-    from app.worker import runner
-
-    def _boom(_uid):
-        raise RuntimeError("no creds")
-
-    with patch.object(runner, "load_api_client", side_effect=_boom):
-        result = await runner._probe_me("u1")
-    assert result == "token_dead"
-
-
-async def test_probe_me_forbidden_banned():
-    from unittest.mock import AsyncMock, MagicMock
-
-    from app.hh import errors as hh_errors
-    from app.worker import runner
-
-    client = MagicMock()
-    client.access_token = "tok"
-    resp = type("R", (), {"status_code": 403, "request": None, "headers": {}})()
-    client.get.side_effect = hh_errors.Forbidden(
-        resp, {"errors": [{"type": "auth", "value": "account_blocked"}]}
-    )
-
-    with (
-        patch.object(runner, "load_api_client", return_value=client),
-        patch.object(runner, "persist_if_refreshed"),
-        patch.object(runner, "mark_invalid", new=AsyncMock()) as mi,
-    ):
-        result = await runner._probe_me("u1")
-    assert result == "banned"
-    mi.assert_awaited_once()
+    with patch.object(runner.hh_web, "list_resumes", new=_none):
+        assert await runner._probe_me("u1") == "token_dead"

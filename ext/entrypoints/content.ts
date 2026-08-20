@@ -5,7 +5,7 @@ import { mergeFrameFields, withLabels, type FillResponse, type FilledField } fro
 import { readFieldValue, renderMarks } from "../lib/marks";
 import { deterministicFields } from "../lib/deterministic-fill";
 import { mountPanel, type PanelController } from "../lib/panel";
-import { appendMessage, loadHistory } from "../lib/chat-store";
+import { appendMessage, clearHistory, loadHistory } from "../lib/chat-store";
 import { collectEdits } from "../lib/edits";
 import { error } from "../lib/log";
 
@@ -35,6 +35,7 @@ export default defineContentScript({
       },
       onSend: sendChat,
       onSaveEdits: () => void saveEdits(),
+      onClearChat: () => void clearHistory(),
     });
     for (const m of await loadHistory()) panel.appendChat(m.role, m.content);
     await refreshAuth();

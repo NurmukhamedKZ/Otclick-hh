@@ -31,9 +31,10 @@ def _fetch_image(captcha_url: str) -> bytes | None:
         return None
 
 
-def _create_request_sync(user_id: str, captcha_url: str) -> dict:
+def _create_request_sync(user_id: str, captcha_url: str | None) -> dict:
     storage_path: str | None = None
-    image = _fetch_image(captcha_url)
+    # The web apply path has no separate captcha image URL — only the DB row.
+    image = _fetch_image(captcha_url) if captcha_url else None
     if image:
         path = f"{user_id}/{uuid.uuid4()}.png"
         try:
@@ -60,7 +61,7 @@ def _create_request_sync(user_id: str, captcha_url: str) -> dict:
     return rows[0] if rows else {}
 
 
-async def create_request(user_id: str, captcha_url: str) -> dict:
+async def create_request(user_id: str, captcha_url: str | None) -> dict:
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, _create_request_sync, user_id, captcha_url)
 

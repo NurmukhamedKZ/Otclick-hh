@@ -17,6 +17,7 @@ from . import errors
 from .client_keys import (
     ANDROID_CLIENT_ID,
     ANDROID_CLIENT_SECRET,
+    REDIRECT_URI,
 )
 from .datatypes import AccessToken
 from .user_agent import generate_android_useragent
@@ -163,6 +164,7 @@ class OAuthClient(BaseClient):
         super().__post_init__()
         self.client_id = self.client_id or ANDROID_CLIENT_ID
         self.client_secret = self.client_secret or ANDROID_CLIENT_SECRET
+        self.redirect_uri = self.redirect_uri or REDIRECT_URI
 
     @property
     def authorize_url(self) -> str:
@@ -198,6 +200,7 @@ class OAuthClient(BaseClient):
             "client_secret": self.client_secret,
             "code": code,
             "grant_type": "authorization_code",
+            "redirect_uri": self.redirect_uri,
         }
         return self.request_access_token("/token", params)
 

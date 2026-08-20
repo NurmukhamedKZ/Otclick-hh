@@ -53,3 +53,33 @@ def test_todo_done(client):
         r = client.post("/api/recruiter/todos/t1/done")
     assert r.status_code == 200
     mt.assert_awaited_once_with("u1", "t1", "done")
+
+
+def test_list_questions(client):
+    with patch("app.api.recruiter.recruiter.list_questions",
+               new=AsyncMock(return_value=[{"id": "q1"}])) as lq:
+        r = client.get("/api/recruiter/questions")
+    assert r.status_code == 200
+    assert r.json()[0]["id"] == "q1"
+    lq.assert_awaited_once_with("u1")
+
+
+def test_answer_questions(client):
+    with patch("app.api.recruiter.recruiter.submit_answers", new=AsyncMock()) as sa:
+        r = client.post("/api/recruiter/questions/q1/answer", json={"answers": ["среда"]})
+    assert r.status_code == 200
+    sa.assert_awaited_once_with("u1", "q1", ["среда"])
+
+
+def test_answer_questions_400_on_mismatch(client):
+    with patch("app.api.recruiter.recruiter.submit_answers",
+               new=AsyncMock(side_effect=ValueError("answer count does not match question count"))):
+        r = client.post("/api/recruiter/questions/q1/answer", json={"answers": ["среда"]})
+    assert r.status_code == 400
+
+
+def test_discard_question(client):
+    with patch("app.api.recruiter.recruiter.discard_question", new=AsyncMock()) as dq:
+        r = client.post("/api/recruiter/questions/q1/discard")
+    assert r.status_code == 200
+    dq.assert_awaited_once_with("u1", "q1")

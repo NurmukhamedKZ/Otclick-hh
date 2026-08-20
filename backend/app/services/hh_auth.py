@@ -181,18 +181,7 @@ async def _run_oauth(job_id: str, username: str, password: str) -> None:
         )
 
         # Sync blocking HTTP calls (requests + time.sleep) — run in executor
-        token = await loop.run_in_executor(None, _exchange_and_fetch_user, code)
-
-        await loop.run_in_executor(
-            None,
-            _persist_credentials,
-            state.user_id,
-            token["access_token"],
-            token["refresh_token"],
-            token["access_expires_at"],
-            token["hh_user_id"],
-            cookies,
-        )
+        await _persist_connection(loop, state.user_id, code, cookies)
         _finish(state, "success")
     except Exception as ex:
         logger.exception("hh oauth job %s failed", job_id)
@@ -254,22 +243,42 @@ async def _run_oauth_email_code(job_id: str, username: str) -> None:
             headless=True,
         )
 
-        token = await loop.run_in_executor(None, _exchange_and_fetch_user, code)
-
-        await loop.run_in_executor(
-            None,
-            _persist_credentials,
-            state.user_id,
-            token["access_token"],
-            token["refresh_token"],
-            token["access_expires_at"],
-            token["hh_user_id"],
-            cookies,
-        )
+        await _persist_connection(loop, state.user_id, code, cookies)
         _finish(state, "success")
     except Exception as ex:
         logger.exception("hh oauth email-code job %s failed", job_id)
         _finish(state, "failed", str(ex))
+
+
+async def _persist_connection(
+    loop, user_id: str, code: str | None, cookies: list[dict]
+) -> None:
+    """Store whatever the login produced.
+
+    The web session is the product's data path; the OAuth token is a bonus hh
+    refuses outside the client's region (`geo_forbidden`). A connect that got
+    cookies but no code is a WORKING connection, not a failure — treating it as
+    one used to discard the cookies and leave the user unable to reconnect at all.
+    """
+    if code:
+        try:
+            token = await loop.run_in_executor(None, _exchange_and_fetch_user, code)
+        except Exception:
+            logger.exception("hh oauth: token exchange failed — keeping cookies")
+        else:
+            await loop.run_in_executor(
+                None,
+                _persist_credentials,
+                user_id,
+                token["access_token"],
+                token["refresh_token"],
+                token["access_expires_at"],
+                token["hh_user_id"],
+                cookies,
+            )
+            return
+    logger.info("hh oauth: storing a cookies-only connection for %s", user_id)
+    await loop.run_in_executor(None, _persist_web_session_only, user_id, cookies)
 
 
 def _exchange_and_fetch_user(code: str) -> dict:
@@ -291,6 +300,31 @@ def _exchange_and_fetch_user(code: str) -> dict:
     }
 
 
+def _persist_web_session_only(user_id: str, web_cookies: list[dict]) -> None:
+    """Upsert just the web session, leaving any existing token columns alone.
+
+    Clears invalid_at: a fresh login IS a valid connection even without a token.
+    """
+    service_client.table("hh_credentials").upsert({
+        "user_id": user_id,
+        "web_cookies_encrypted": encrypt_token(json.dumps(web_cookies)),
+        "last_refreshed_at": datetime.now(UTC).isoformat(),
+        "invalid_at": None,
+        "invalid_reason": None,
+    }).execute()
+    _reset_caches(user_id)
+
+
+def _reset_caches(user_id: str) -> None:
+    from app.services import notifications
+    from app.services.form_filler import drop_web_session
+    from app.services.hh_credentials import drop_cached_client
+
+    drop_web_session(user_id)
+    drop_cached_client(user_id)
+    notifications.clear_once(user_id, "web_session_expired")
+
+
 def _persist_credentials(user_id: str, access: str, refresh: str,
                          expires_at: int, hh_user_id: str,
                          web_cookies: list[dict] | None = None) -> None:
@@ -310,24 +344,23 @@ def _persist_credentials(user_id: str, access: str, refresh: str,
     service_client.table("hh_credentials").upsert(row).execute()
     # Fresh credentials — drop anything cached from the previous connection and
     # re-arm the "web session expired" notification.
-    from app.services import notifications
-    from app.services.form_filler import drop_web_session
-    from app.services.hh_credentials import drop_cached_client
-
-    drop_web_session(user_id)
-    drop_cached_client(user_id)
-    notifications.clear_once(user_id, "web_session_expired")
+    _reset_caches(user_id)
 
 
 def get_credentials_status(user_id: str) -> dict:
     res = service_client.table("hh_credentials").select(
-        "expires_at,last_refreshed_at,hh_user_id,invalid_at"
+        "expires_at,last_refreshed_at,hh_user_id,invalid_at,web_cookies_encrypted"
     ).eq("user_id", user_id).maybe_single().execute()
     data = res.data if res else None
     if not data or data.get("invalid_at"):
         return {"connected": False}
+    # The web session is what the product runs on; an OAuth token is optional
+    # (hh refuses the grant in some regions). No cookies = nothing works.
+    if not data.get("web_cookies_encrypted"):
+        return {"connected": False}
     return {
         "connected": True,
+        "has_api_token": bool(data.get("expires_at")),
         "expires_at": data.get("expires_at"),
         "last_refreshed_at": data.get("last_refreshed_at"),
         "hh_user_id": data.get("hh_user_id"),

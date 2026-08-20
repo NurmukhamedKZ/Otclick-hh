@@ -26,7 +26,7 @@ export function useNavCounts(): NavCounts {
   // must match the chats page's default so both share one cache entry
   const { chats } = useChats(false, { enabled: !!hh?.connected });
   const { drafts: formDrafts } = useFormDrafts();
-  const { drafts: recruiterDrafts, todos } = useRecruiter();
+  const { drafts: recruiterDrafts, todos, questions } = useRecruiter();
   const [unreadNotifications, setUnread] = useState(0);
 
   useEffect(() => {
@@ -76,8 +76,9 @@ export function useNavCounts(): NavCounts {
         formDrafts,
         recruiterDrafts,
         todos,
+        questions,
         unreadNotifications,
       }),
-    [chats, formDrafts, recruiterDrafts, todos, unreadNotifications],
+    [chats, formDrafts, recruiterDrafts, todos, questions, unreadNotifications],
   );
 }

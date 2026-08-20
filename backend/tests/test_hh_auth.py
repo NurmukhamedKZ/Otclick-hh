@@ -49,3 +49,113 @@ async def test_solve_captcha_unblocks_queue():
     result = await asyncio.wait_for(solved, timeout=1.0)
     assert result == "abc123"
     _jobs.clear()
+
+
+def test_authorize_url_carries_the_configured_redirect_uri():
+    from urllib.parse import parse_qs, urlsplit
+
+    from app.hh.authorize import build_authorize_url
+    from app.hh.client_keys import ANDROID_CLIENT_ID, REDIRECT_URI
+
+    q = parse_qs(urlsplit(build_authorize_url()).query)
+    assert q["client_id"] == [ANDROID_CLIENT_ID]
+    assert q["response_type"] == ["code"]
+    # Must be present and match the token exchange, or hh rejects the code.
+    assert q["redirect_uri"] == [REDIRECT_URI]
+
+
+def test_token_exchange_sends_the_same_redirect_uri():
+    from unittest.mock import patch
+
+    from app.hh.client import OAuthClient
+    from app.hh.client_keys import REDIRECT_URI
+
+    client = OAuthClient()
+    with patch.object(OAuthClient, "post", return_value={
+        "access_token": "USERa", "refresh_token": "r", "expires_in": 60,
+    }) as post:
+        client.authenticate("CODE")
+    assert post.call_args.args[1]["redirect_uri"] == REDIRECT_URI
+
+
+def test_extract_code_reads_query_and_fragment():
+    from app.hh.authorize import _extract_code
+
+    assert _extract_code("hhandroid://oauthresponse?code=Q") == "Q"
+    assert _extract_code("https://x.test/cb#code=F") == "F"
+
+
+def test_extract_code_returns_none_instead_of_raising_on_geo_forbidden():
+    """Raising here used to discard a WORKING web session over an OAuth grant
+    nothing needs — and left the user unable to reconnect at all."""
+    from app.hh.authorize import _extract_code
+
+    assert _extract_code("hhandroid://oauthresponse?error=geo_forbidden") is None
+    assert _extract_code("hhandroid://oauthresponse?error=invalid_client") is None
+    assert _extract_code("hhandroid://oauthresponse") is None
+
+
+async def test_connect_stores_a_cookies_only_connection_when_hh_refuses_the_code():
+    import asyncio
+    from unittest.mock import patch
+
+    from app.services import hh_auth
+
+    loop = asyncio.get_running_loop()
+    stored = {}
+
+    def _persist_web_only(user_id, cookies):
+        stored["user_id"] = user_id
+        stored["cookies"] = cookies
+
+    with (
+        patch.object(hh_auth, "_persist_web_session_only", side_effect=_persist_web_only),
+        patch.object(hh_auth, "_exchange_and_fetch_user") as exchange,
+    ):
+        await hh_auth._persist_connection(loop, "u1", None, [{"name": "hhtoken"}])
+
+    assert stored["user_id"] == "u1"
+    assert stored["cookies"] == [{"name": "hhtoken"}]
+    exchange.assert_not_called()
+
+
+async def test_connect_keeps_the_cookies_when_the_token_exchange_itself_fails():
+    import asyncio
+    from unittest.mock import patch
+
+    from app.services import hh_auth
+
+    loop = asyncio.get_running_loop()
+    stored = {}
+
+    with (
+        patch.object(hh_auth, "_persist_web_session_only",
+                     side_effect=lambda u, c: stored.update(user_id=u, cookies=c)),
+        patch.object(hh_auth, "_exchange_and_fetch_user",
+                     side_effect=RuntimeError("hh 400")),
+    ):
+        await hh_auth._persist_connection(loop, "u1", "CODE", [{"name": "hhtoken"}])
+
+    assert stored["user_id"] == "u1"
+
+
+def test_status_reports_connected_without_an_api_token_but_not_without_cookies():
+    from unittest.mock import MagicMock, patch
+
+    from app.services import hh_auth
+
+    def _status(row):
+        sb = MagicMock()
+        chain = sb.table.return_value.select.return_value.eq.return_value
+        chain.maybe_single.return_value.execute.return_value = MagicMock(data=row)
+        with patch.object(hh_auth, "service_client", sb):
+            return hh_auth.get_credentials_status("u1")
+
+    cookies_only = _status({"web_cookies_encrypted": "enc", "expires_at": None})
+    assert cookies_only["connected"] is True
+    assert cookies_only["has_api_token"] is False
+
+    # A token row whose web session was never captured cannot serve any feature.
+    assert _status({"web_cookies_encrypted": None, "expires_at": "2030-01-01"}) == {
+        "connected": False
+    }

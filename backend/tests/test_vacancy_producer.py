@@ -44,16 +44,10 @@ async def test_has_test_vacancy_is_queued_not_skipped():
             "blacklist": blacklist_chain,
         }[name]
 
-    client = MagicMock()
-    client.access_token = "tok"
-    client.get.return_value = {
-        "items": [{"id": "v1", "has_test": True, "employer": {"id": "e1"}}],
-        "found": 1,
-    }
-
     with patch.object(vp.service_client, "table", side_effect=_table), \
-         patch.object(vp, "load_api_client", new=AsyncMock(return_value=client)), \
-         patch.object(vp, "persist_if_refreshed", new=AsyncMock()):
+         patch.object(vp.web, "search_vacancies", new=AsyncMock(return_value=(
+             [{"id": "v1", "has_test": True, "employer": {"id": "e1"}}], 2
+         ))):
         pushed, skipped_has_test = await vp.produce_jobs("u1")
 
     assert pushed == 1
@@ -90,16 +84,6 @@ async def test_relevance_drops_irrelevant():
         return {"filters": filters_chain, "applications": apps_chain,
                 "blacklist": blacklist_chain}[name]
 
-    client = MagicMock()
-    client.access_token = "tok"
-    client.get.return_value = {
-        "items": [
-            {"id": "v1", "name": "AI Engineer", "employer": {"id": "e1"}},
-            {"id": "v2", "name": "Sales Manager", "employer": {"id": "e2"}},
-        ],
-        "found": 2,
-    }
-
     agent = MagicMock()
     agent.filter_relevant_vacancies = AsyncMock(
         return_value={"v1": (True, ""), "v2": (False, "sales")}
@@ -108,8 +92,10 @@ async def test_relevance_drops_irrelevant():
     with patch.object(vp.service_client, "table", side_effect=_table), \
          patch.object(vp.relevance, "get_cached_verdicts", return_value={}), \
          patch.object(vp.relevance, "store_verdicts"), \
-         patch.object(vp, "load_api_client", new=AsyncMock(return_value=client)), \
-         patch.object(vp, "persist_if_refreshed", new=AsyncMock()):
+         patch.object(vp.web, "search_vacancies", new=AsyncMock(return_value=(
+             [{"id": "v1", "name": "AI Engineer", "employer": {"id": "e1"}},
+              {"id": "v2", "name": "Sales Manager", "employer": {"id": "e2"}}], 2
+         ))):
         pushed, _ = await vp.produce_jobs("u1", agent)
 
     assert pushed == 1
@@ -128,13 +114,6 @@ async def test_relevance_uses_cache_no_llm_call():
         return {"filters": _chain([_filter_row()]), "applications": _chain([]),
                 "blacklist": _chain([])}[name]
 
-    client = MagicMock()
-    client.access_token = "tok"
-    client.get.return_value = {
-        "items": [{"id": "v2", "name": "Sales Manager", "employer": {"id": "e2"}}],
-        "found": 1,
-    }
-
     agent = MagicMock()
     agent.filter_relevant_vacancies = AsyncMock(return_value={})
 
@@ -142,8 +121,9 @@ async def test_relevance_uses_cache_no_llm_call():
          patch.object(vp.relevance, "get_cached_verdicts",
                       return_value={"v2": (False, "cached sales")}), \
          patch.object(vp.relevance, "store_verdicts"), \
-         patch.object(vp, "load_api_client", new=AsyncMock(return_value=client)), \
-         patch.object(vp, "persist_if_refreshed", new=AsyncMock()):
+         patch.object(vp.web, "search_vacancies", new=AsyncMock(return_value=(
+             [{"id": "v2", "name": "Sales Manager", "employer": {"id": "e2"}}], 1
+         ))):
         pushed, _ = await vp.produce_jobs("u1", agent)
 
     assert pushed == 0
@@ -166,20 +146,15 @@ async def test_round_robin_interleaves_filters():
         return {"filters": _chain([f1, f2]), "applications": _chain([]),
                 "blacklist": _chain([])}[name]
 
-    def _get(path, params):
+    async def _search(_uid, params, page):
         if params.get("text") == "A":
-            return {"items": [{"id": f"a{i}", "employer": {"id": f"ea{i}"}}
-                              for i in range(3)], "found": 3}
-        return {"items": [{"id": f"b{i}", "employer": {"id": f"eb{i}"}}
-                          for i in range(3)], "found": 3}
-
-    client = MagicMock()
-    client.access_token = "tok"
-    client.get.side_effect = _get
+            return ([{"id": f"a{i}", "employer": {"id": f"ea{i}"}}
+                     for i in range(3)], 3)
+        return ([{"id": f"b{i}", "employer": {"id": f"eb{i}"}}
+                 for i in range(3)], 3)
 
     with patch.object(vp.service_client, "table", side_effect=_table), \
-         patch.object(vp, "load_api_client", new=AsyncMock(return_value=client)), \
-         patch.object(vp, "persist_if_refreshed", new=AsyncMock()):
+         patch.object(vp.web, "search_vacancies", side_effect=_search):
         pushed, _ = await vp.produce_jobs("u1")
 
     assert pushed == 6
@@ -204,24 +179,46 @@ async def test_overlapping_filters_queue_each_vacancy_once():
         return {"filters": _chain([f1, f2]), "applications": _chain([]),
                 "blacklist": _chain([])}[name]
 
-    def _get(path, params):
+    async def _search(_uid, params, page):
         # both filters see v1; only the second also sees v2
         ids = ["v1"] if params.get("text") == "A" else ["v1", "v2"]
-        return {"items": [{"id": i, "employer": {"id": f"e{i}"}} for i in ids],
-                "found": len(ids)}
-
-    client = MagicMock()
-    client.access_token = "tok"
-    client.get.side_effect = _get
+        return ([{"id": i, "employer": {"id": f"e{i}"}} for i in ids], len(ids))
 
     with patch.object(vp.service_client, "table", side_effect=_table), \
-         patch.object(vp, "load_api_client", new=AsyncMock(return_value=client)), \
-         patch.object(vp, "persist_if_refreshed", new=AsyncMock()):
+         patch.object(vp.web, "search_vacancies", side_effect=_search):
         pushed, _ = await vp.produce_jobs("u1")
 
     assert pushed == 2
     queue = get_user_queue("u1")
     assert sorted(queue.get_nowait().vacancy_id for _ in range(2)) == ["v1", "v2"]
+
+
+@pytest.mark.asyncio
+async def test_pages_past_the_first_page():
+    """Regression: hh's web search serves ~20 items/page. The old stop rule
+    (`len(items) < PER_PAGE`, PER_PAGE=50) fired on page 0 every time, so
+    everything past vacancy #20 was invisible and the worker idled at
+    'no new vacancies' while hh still had matches."""
+    from app.services import vacancy_producer as vp
+    from app.worker.queue import drop_user_queue, get_user_queue
+    drop_user_queue("u1")
+
+    f1 = _filter_row(ai_filter_enabled=False)
+
+    def _table(name):
+        return {"filters": _chain([f1]), "applications": _chain([]),
+                "blacklist": _chain([])}[name]
+
+    async def _search(_uid, _params, page):
+        ids = [f"v{page * 20 + i}" for i in range(20 if page == 0 else 5)]
+        return ([{"id": i, "employer": {"id": f"e{i}"}} for i in ids], 25)
+
+    with patch.object(vp.service_client, "table", side_effect=_table), \
+         patch.object(vp.web, "search_vacancies", side_effect=_search):
+        pushed, _ = await vp.produce_jobs("u1")
+
+    assert pushed == 25
+    assert get_user_queue("u1").qsize() == 25
 
 
 @pytest.mark.asyncio
@@ -234,21 +231,15 @@ async def test_ai_filter_disabled_bypasses_relevance():
         return {"filters": _chain([_filter_row(ai_filter_enabled=False)]),
                 "applications": _chain([]), "blacklist": _chain([])}[name]
 
-    client = MagicMock()
-    client.access_token = "tok"
-    client.get.return_value = {
-        "items": [{"id": "v2", "name": "Sales Manager", "employer": {"id": "e2"}}],
-        "found": 1,
-    }
-
     agent = MagicMock()
     agent.filter_relevant_vacancies = AsyncMock(return_value={})
 
     with patch.object(vp.service_client, "table", side_effect=_table), \
          patch.object(vp.relevance, "get_cached_verdicts", return_value={}), \
          patch.object(vp.relevance, "store_verdicts"), \
-         patch.object(vp, "load_api_client", new=AsyncMock(return_value=client)), \
-         patch.object(vp, "persist_if_refreshed", new=AsyncMock()):
+         patch.object(vp.web, "search_vacancies", new=AsyncMock(return_value=(
+             [{"id": "v2", "name": "Sales Manager", "employer": {"id": "e2"}}], 1
+         ))):
         pushed, _ = await vp.produce_jobs("u1", agent)
 
     assert pushed == 1  # not filtered

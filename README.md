@@ -304,6 +304,11 @@ the stack runs, but degrades:
 | Vacancy tests | Not solved → `form_required`, fill them in by hand |
 | Recruiter agent | Skips every chat |
 
+`AI_POSITIONING` (default `balanced`) controls how far AI-generated text goes
+in framing the candidate favorably in recruiter chat, vacancy tests, cover
+letters and extension autofill. `full` opts into more aggressive tactics —
+see `docs/spec-ai-positioning.md` and `AUDIT.md` before switching.
+
 Any OpenAI-compatible endpoint works — `OPENAI_BASE_URL` is a base URL, not a
 full path. A local model costs nothing and keeps resumes off third-party
 servers:

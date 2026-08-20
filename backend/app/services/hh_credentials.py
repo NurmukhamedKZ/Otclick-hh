@@ -45,6 +45,11 @@ def _load_row(user_id: str) -> dict:
         )
     if data.get("invalid_at"):
         raise HHCredentialsInvalid(user_id, data.get("invalid_reason"))
+    if not data.get("access_token_encrypted") or not data.get("refresh_token_encrypted"):
+        # Cookies-only connection (OAuth exchange refused, e.g. geo_forbidden).
+        # Without this guard _build_client dies on decrypt_token(None) with an
+        # opaque AttributeError.
+        raise HHCredentialsInvalid(user_id, "cookies-only connection (no api token)")
     return data
 
 

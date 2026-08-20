@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import HTTPException, status
 
 from app.db.supabase import service_client
-from app.services.hh_credentials import load_api_client, persist_if_refreshed
+from app.hh import web
 
 logger = logging.getLogger(__name__)
 
@@ -199,20 +199,12 @@ def _filter_to_search_params(f: dict) -> dict[str, Any]:
 
 async def preview_filter(user_id: str, filter_id: str) -> dict:
     f = await get_filter(user_id, filter_id)
-    client = await load_api_client(user_id)
-    original_access = client.access_token
-    loop = asyncio.get_running_loop()
     params = _filter_to_search_params(f)
-    try:
-        payload = await loop.run_in_executor(
-            None, lambda: client.get("vacancies", params)
-        )
-    finally:
-        await persist_if_refreshed(user_id, client, original_access)
+    params.pop("per_page", None)  # web caps items per page itself
+    items, found = await web.search_vacancies(user_id, params, 0)
     # excluded_text is applied by hh itself — nothing to filter locally.
-    items = payload.get("items", []) if isinstance(payload, dict) else []
     return {
-        "found": payload.get("found", 0) if isinstance(payload, dict) else 0,
+        "found": found,
         "items": [
             {
                 "id": v.get("id"),
@@ -220,7 +212,7 @@ async def preview_filter(user_id: str, filter_id: str) -> dict:
                 "employer": (v.get("employer") or {}).get("name"),
                 "area": (v.get("area") or {}).get("name"),
                 "salary": v.get("salary"),
-                "url": v.get("alternate_url"),
+                "url": v.get("url"),
             }
             for v in items
         ],

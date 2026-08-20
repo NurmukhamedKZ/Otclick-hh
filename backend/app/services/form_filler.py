@@ -20,9 +20,9 @@ from app.ai.prompts import (
 )
 from app.config import settings
 from app.db.supabase import service_client
+from app.hh.page_json import find_state
 from app.services import qa_memory
 from app.services.hh_auth import decrypt_token
-from app.services.hh_credentials import load_api_client, persist_if_refreshed
 
 logger = logging.getLogger(__name__)
 
@@ -149,31 +149,22 @@ async def _get_hh_resume_id(user_id: str, resume_row_id: str | None) -> str:
 
 
 async def load_resume(user_id: str, resume_row_id: str | None = None) -> dict:
-    """Fetch full resume from hh API. Returns raw resume payload.
+    """Fetch the full resume over the web session. Returns the resume payload.
 
     resume_row_id: optional id of row in `resumes` table.
                    If None, picks most recently synced resume.
     """
     hh_resume_id = await _get_hh_resume_id(user_id, resume_row_id)
 
-    client = await load_api_client(user_id)
-    original_access = client.access_token
-    loop = asyncio.get_running_loop()
-    try:
-        payload = await loop.run_in_executor(
-            None, client.get, f"resumes/{hh_resume_id}"
-        )
-    finally:
-        await persist_if_refreshed(user_id, client, original_access)
+    from app.hh import web  # local: web imports this module for the session
 
+    payload = await web.get_resume(user_id, hh_resume_id)
     if not isinstance(payload, dict):
         raise RuntimeError(f"unexpected hh resume payload: {type(payload)}")
     return payload
 
 
 # --- vacancy test solving (web endpoint) -------------------------------------
-
-_TESTS_MARKER = ',"vacancyTests":'
 
 
 def _strip_tags(s: str | None) -> str:
@@ -248,52 +239,10 @@ def _resume_summary(resume: dict) -> str:
     return "\n".join(parts)
 
 
-def _find_balanced_object(text: str, obj_start: int) -> str:
-    """Return the JSON object substring starting at text[obj_start] == '{'."""
-    depth = 0
-    in_string = False
-    escaped = False
-    for i in range(obj_start, len(text)):
-        ch = text[i]
-        if in_string:
-            if escaped:
-                escaped = False
-            elif ch == "\\":
-                escaped = True
-            elif ch == '"':
-                in_string = False
-            continue
-        if ch == '"':
-            in_string = True
-        elif ch == "{":
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0:
-                return text[obj_start:i + 1]
-    raise ValueError("unbalanced vacancyTests object in page")
-
-
-def _decode_page(page_html: str) -> str:
-    """hh serves the inline JSON HTML-entity-encoded (&#34; instead of ") — decode.
-
-    Only when the plain marker is absent, so already-plain pages keep their
-    literal &amp; sequences intact.
-    """
-    return page_html if _TESTS_MARKER in page_html else html.unescape(page_html)
-
-
 def _parse_tests(page_html: str, vacancy_id: str) -> dict:
     """Pull the test definition for vacancy_id out of the page's inline JSON."""
-    page_html = _decode_page(page_html)
-    marker_pos = page_html.find(_TESTS_MARKER)
-    if marker_pos == -1:
-        raise ValueError("vacancyTests block not found in page")
-    obj_start = marker_pos + len(_TESTS_MARKER)
-    blob = _find_balanced_object(page_html, obj_start)
-    tests_data = json.loads(blob, strict=False)
     try:
-        return tests_data[str(vacancy_id)]
+        return find_state(page_html, "vacancyTests")[str(vacancy_id)]
     except KeyError as ex:
         raise ValueError(f"no test data for vacancy {vacancy_id}") from ex
 
@@ -394,6 +343,117 @@ def _solve(
     return _build_answers(test_data, chat, resume_ctx)
 
 
+def _response_payload(
+    vacancy_id: str,
+    hh_resume_id: str,
+    xsrf: str,
+    letter: str,
+    test_data: dict | None,
+    answers: list[dict] | None,
+) -> dict:
+    """Build the vacancy_response/popup form body.
+
+    Field set mirrors the captured real no-test POST (recon_web_out/apply_no_test
+    .json): the test-only keys (uidPk/guid/startTime/testRequired/withoutTest/
+    incomplete) are present ONLY when answers are being submitted, and _xsrf is
+    sent as the x-xsrftoken header, not as a form field.
+    """
+    payload: dict = {
+        "resume_hash": hh_resume_id,
+        "vacancy_id": vacancy_id,
+        "letterRequired": "true" if letter else "false",
+        "lux": "true",
+        "ignore_postponed": "true",
+        "mark_applicant_visible_in_vacancy_country": "false",
+        "country_ids": "[]",
+    }
+    if letter:
+        payload["letter"] = letter
+    if test_data is not None:
+        payload.update({
+            "uidPk": test_data["uidPk"],
+            "guid": test_data["guid"],
+            "startTime": test_data["startTime"],
+            "testRequired": test_data["required"],
+            "withoutTest": "no",
+            "incomplete": "false",
+        })
+    for a in answers or []:
+        field = f"task_{a['task_id']}"
+        if a.get("type") == "choice":
+            payload[field] = str(a["answer_id"])
+        else:
+            payload[f"{field}_text"] = a.get("answer", "")
+    return payload
+
+
+def _sync_xsrf_cookie(session: requests.Session, xsrf: str) -> None:
+    """Make the _xsrf cookie agree with the token we send in X-Xsrftoken.
+
+    hh validates one against the other. Our cookie jar is restored from the
+    Playwright login and its _xsrf goes stale, while every page carries a
+    current xsrfToken — the mismatch 403s every single submit. A browser never
+    sees this because hh sets the cookie and renders the same value.
+    """
+    session.cookies.set("_xsrf", xsrf, domain="hh.ru", path="/")
+
+
+def _post_response(
+    session: requests.Session, vacancy_id: str, xsrf: str, payload: dict
+) -> requests.Response:
+    """POST the response exactly the way the browser does.
+
+    Every field here is copied from a captured real submit
+    (recon_web_out/apply_no_test.json). hh answers 403 with a page body when
+    the request does not look like it came from the vacancy page — the body is
+    an anti-CSRF rejection, not a validation error, so the shape matters:
+      * multipart/form-data, NOT urlencoded (requests picks multipart when the
+        fields go through `files`)
+      * Referer is the VACANCY page, not the response popup
+      * X-Hhtmsource "vacancy" with an EMPTY X-Hhtmfrom
+    """
+    return session.post(
+        "https://hh.ru/applicant/vacancy_response/popup",
+        files={k: (None, str(v)) for k, v in payload.items()},
+        headers={
+            "Accept": "application/json",
+            "Referer": f"https://hh.ru/vacancy/{vacancy_id}",
+            "X-Hhtmfrom": "",
+            "X-Hhtmsource": "vacancy",
+            "X-Requested-With": "XMLHttpRequest",
+            "X-Xsrftoken": xsrf,
+        },
+        timeout=20,
+    )
+
+
+def _submit_response(
+    session: requests.Session,
+    vacancy_id: str,
+    hh_resume_id: str,
+    letter: str,
+    answers: list[dict] | None,
+) -> requests.Response:
+    """Fetch the response page (fresh xsrf; test meta only if answers given),
+    build the payload and POST."""
+    # xsrf comes from the page the browser would be on when it submits: the
+    # vacancy page for a plain response, the popup only when a test has to be
+    # parsed out of it.
+    page_url = _response_url(vacancy_id) if answers else f"https://hh.ru/vacancy/{vacancy_id}"
+    r = session.get(page_url, timeout=15)
+    if session_looks_dead(r):
+        raise WebSessionExpired(f"hh rejected the web session ({r.status_code})")
+    r.raise_for_status()
+    page = r.text
+    xsrf = extract_xsrf_token(page)
+    test_data = _parse_tests(page, vacancy_id) if answers else None
+    _sync_xsrf_cookie(session, xsrf)
+    payload = _response_payload(
+        vacancy_id, hh_resume_id, xsrf, letter, test_data, answers
+    )
+    return _post_response(session, vacancy_id, xsrf, payload)
+
+
 def _submit(
     session: requests.Session,
     vacancy_id: str,
@@ -402,50 +462,7 @@ def _submit(
     letter: str,
 ) -> requests.Response:
     """Re-fetch xsrf+test meta, build payload from approved answers, POST."""
-    response_url = _response_url(vacancy_id)
-    r = session.get(response_url, timeout=15)
-    if session_looks_dead(r):
-        raise WebSessionExpired(f"hh rejected the web session ({r.status_code})")
-    r.raise_for_status()
-    page = r.text
-    test_data = _parse_tests(page, vacancy_id)
-    xsrf = extract_xsrf_token(page)
-
-    payload: dict = {
-        "_xsrf": xsrf,
-        "uidPk": test_data["uidPk"],
-        "guid": test_data["guid"],
-        "startTime": test_data["startTime"],
-        "testRequired": test_data["required"],
-        "vacancy_id": vacancy_id,
-        "resume_hash": hh_resume_id,
-        "ignore_postponed": "true",
-        "incomplete": "false",
-        "mark_applicant_visible_in_vacancy_country": "false",
-        "country_ids": "[]",
-        "lux": "true",
-        "withoutTest": "no",
-        "letter": letter,
-    }
-    for a in answers:
-        field = f"task_{a['task_id']}"
-        if a.get("type") == "choice":
-            payload[field] = str(a["answer_id"])
-        else:
-            payload[f"{field}_text"] = a.get("answer", "")
-
-    return session.post(
-        "https://hh.ru/applicant/vacancy_response/popup",
-        data=payload,
-        headers={
-            "Referer": response_url,
-            "X-Hhtmfrom": "vacancy",
-            "X-Hhtmsource": "vacancy_response",
-            "X-Requested-With": "XMLHttpRequest",
-            "X-Xsrftoken": xsrf,
-        },
-        timeout=20,
-    )
+    return _submit_response(session, vacancy_id, hh_resume_id, letter, answers)
 
 
 def _is_success(resp: requests.Response) -> bool:
@@ -527,14 +544,17 @@ async def prepare_form_answers(
     return "form_pending", answers
 
 
-async def submit_prepared_form(
+async def submit_response(
     user_id: str, resume_id: str, vacancy_id: str,
-    answers: list[dict], letter: str = "",
+    letter: str = "", answers: list[dict] | None = None,
 ) -> tuple[FillStatus, str | None]:
-    """Submit previously-approved answers to hh. Re-fetches fresh xsrf each call.
+    """Post a response to an hh vacancy over the web session.
 
-    Returns (status, error). "form_sent" on accepted submit, "failed" + reason
-    otherwise (network/parse error, or hh rejected).
+    answers=None → plain response (no vacancy test, test-only fields omitted).
+    answers given → submit the solved test, same as submit_prepared_form.
+
+    Returns (status, error): "sent"/"form_sent" on accept, "failed" + reason
+    otherwise (network/parse error, dead session, or hh rejected).
     """
     loop = asyncio.get_running_loop()
     try:
@@ -549,7 +569,7 @@ async def submit_prepared_form(
 
     try:
         resp = await loop.run_in_executor(
-            None, _submit, session, vacancy_id, hh_resume_id, answers, letter
+            None, _submit_response, session, vacancy_id, hh_resume_id, letter, answers
         )
     except WebSessionExpired as ex:
         await report_dead_session(user_id, ex)
@@ -559,11 +579,28 @@ async def submit_prepared_form(
         return "failed", f"submit_error: {ex}"
 
     if _is_success(resp):
-        logger.info("fill: approved answers submitted vacancy=%s", vacancy_id)
-        return "form_sent", None
+        logger.info(
+            "fill: submitted vacancy=%s has_test=%s",
+            vacancy_id, bool(answers),
+        )
+        return ("form_sent" if answers else "sent"), None
     body = (resp.text or "")[:300]
     logger.warning(
         "fill: submit rejected vacancy=%s status=%s body=%.300s",
         vacancy_id, resp.status_code, body,
     )
     return "failed", f"hh_rejected: {resp.status_code} {body}"
+
+
+async def submit_prepared_form(
+    user_id: str, resume_id: str, vacancy_id: str,
+    answers: list[dict], letter: str = "",
+) -> tuple[FillStatus, str | None]:
+    """Submit previously-approved answers to hh. Re-fetches fresh xsrf each call.
+
+    Returns (status, error). "form_sent" on accepted submit, "failed" + reason
+    otherwise (network/parse error, or hh rejected).
+    """
+    return await submit_response(
+        user_id, resume_id, vacancy_id, letter=letter, answers=answers
+    )

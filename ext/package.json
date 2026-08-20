@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "postinstall": "wxt prepare",
     "dev": "wxt -b firefox",
     "build": "wxt build -b firefox",
     "zip": "wxt zip -b firefox",

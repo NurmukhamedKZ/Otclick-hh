@@ -6,16 +6,16 @@ import asyncio
 import logging
 
 from app.db.supabase import service_client
+from app.hh import web
 from app.services import relevance
 from app.services.apply import RETRYABLE_STATUSES
 from app.services.blacklist import bulk_auto_blacklist
 from app.services.filters_service import _filter_to_search_params
-from app.services.hh_credentials import load_api_client, persist_if_refreshed
+from app.services.form_filler import WebSessionExpired, report_dead_session
 from app.worker.queue import ApplyJob, get_user_queue
 
 logger = logging.getLogger(__name__)
 
-PER_PAGE = 50
 MAX_PUSH_PER_RUN = 30
 MAX_PAGES_PER_FILTER = 20
 
@@ -93,7 +93,7 @@ async def _relevant_ids(
     return {vid for vid in ids if verdicts.get(vid, (True, ""))[0]}
 
 
-async def _filter_candidate_stream(loop, agent, client, user_id: str, f: dict):
+async def _filter_candidate_stream(loop, agent, user_id: str, f: dict):
     """Yield vacancy ids for one filter, lazily paged.
 
     Applies dedup / blacklist / AI relevance per page (excluded words are
@@ -107,33 +107,36 @@ async def _filter_candidate_stream(loop, agent, client, user_id: str, f: dict):
     skipped_relations = 0
     relations_blacklist: dict[str, str | None] = {}
     pages = 0
+    fetched = 0
 
     try:
         for page in range(MAX_PAGES_PER_FILTER):
             params = _filter_to_search_params(f)
-            params["per_page"] = PER_PAGE
-            params["page"] = page
+            params.pop("per_page", None)  # web caps items per page itself
             logger.info(
                 "producer: user=%s filter=%s search params=%s",
                 user_id, f.get("id"), params,
             )
             try:
-                payload = await loop.run_in_executor(
-                    None, lambda p=params: client.get("vacancies", p)
+                items, total_found = await web.search_vacancies(user_id, params, page)
+            except WebSessionExpired as ex:
+                logger.warning(
+                    "producer: user=%s web session dead on search — stopping",
+                    user_id,
                 )
+                await report_dead_session(user_id, ex)
+                break
             except Exception:
                 logger.exception("vacancy search failed for filter %s", f.get("id"))
                 break
 
-            items = payload.get("items", []) if isinstance(payload, dict) else []
-            total_found = payload.get("found") if isinstance(payload, dict) else None
-            pages_total = payload.get("pages") if isinstance(payload, dict) else None
             logger.info(
-                "producer: user=%s filter=%s page=%d items=%d found=%s pages=%s",
-                user_id, f.get("id"), page, len(items), total_found, pages_total,
+                "producer: user=%s filter=%s page=%d items=%d found=%s",
+                user_id, f.get("id"), page, len(items), total_found,
             )
             if not items:
                 break
+            fetched += len(items)
 
             vacancy_ids = [str(it["id"]) for it in items if it.get("id")]
             employer_ids = [
@@ -156,7 +159,8 @@ async def _filter_candidate_stream(loop, agent, client, user_id: str, f: dict):
                     continue
                 # Non-empty relations = already interacted with this vacancy
                 # (responded / invited / rejected) → skip + blacklist employer
-                # so we never re-apply to the same company.
+                # so we never re-apply to the same company. (Not present in the
+                # web search shape — kept for the API path's contract.)
                 if it.get("relations"):
                     skipped_relations += 1
                     emp = it.get("employer") or {}
@@ -171,13 +175,10 @@ async def _filter_candidate_stream(loop, agent, client, user_id: str, f: dict):
                 if emp_id and str(emp_id) in blacklisted:
                     skipped_blacklist += 1
                     continue
-                snippet = it.get("snippet") or {}
                 page_candidates.append({
                     "id": vid,
                     "name": it.get("name") or "",
                     "employer_name": (it.get("employer") or {}).get("name") or "",
-                    "snippet_requirement": snippet.get("requirement") or "",
-                    "snippet_responsibility": snippet.get("responsibility") or "",
                 })
 
             if f.get("ai_filter_enabled") and page_candidates:
@@ -196,9 +197,10 @@ async def _filter_candidate_stream(loop, agent, client, user_id: str, f: dict):
             for c in page_candidates:
                 yield c["id"]
 
-            if pages_total is not None and page + 1 >= pages_total:
-                break
-            if len(items) < PER_PAGE:
+            # Stop on hh's own total, not on a guessed page size: the web search
+            # serves ~20 items/page, so the old `len(items) < 50` check broke
+            # after page 0 and the worker never saw vacancy #21 onward.
+            if total_found and fetched >= total_found:
                 break
     finally:
         if relations_blacklist:
@@ -237,16 +239,10 @@ async def produce_jobs(user_id: str, agent=None) -> tuple[int, int]:
         )
         return 0, 0
 
-    try:
-        client = await load_api_client(user_id)
-    except Exception:
-        logger.exception("producer: user=%s — failed to load hh ApiClient", user_id)
-        return 0, 0
-    original_access = client.access_token
     queue = get_user_queue(user_id)
     pushed = 0
 
-    streams = [_filter_candidate_stream(loop, agent, client, user_id, f) for f in filters]
+    streams = [_filter_candidate_stream(loop, agent, user_id, f) for f in filters]
     meta = [(f["resume_id"], f.get("id")) for f in filters]
     active = list(range(len(streams)))
     cursor = 0
@@ -278,7 +274,6 @@ async def produce_jobs(user_id: str, agent=None) -> tuple[int, int]:
     finally:
         for s in streams:
             await s.aclose()
-        await persist_if_refreshed(user_id, client, original_access)
 
     logger.info("producer: user=%s DONE pushed=%d total queue size=%d",
                 user_id, pushed, queue.qsize())

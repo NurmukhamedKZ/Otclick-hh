@@ -34,14 +34,10 @@ async def test_sync_resumes_upserts_items():
         ]
     }
 
-    async def fake_load(user_id):
-        return fake_client
+    async def fake_list(user_id):
+        return fake_client.get.return_value["items"]
 
-    async def fake_persist(*a, **kw):
-        return None
-
-    with patch.object(resume_sync, "load_api_client", side_effect=fake_load), \
-         patch.object(resume_sync, "persist_if_refreshed", side_effect=fake_persist), \
+    with patch.object(resume_sync.web, "list_resumes", new=fake_list), \
          patch.object(resume_sync, "_upsert_resumes", return_value=[
              {"id": "uuid1", "hh_resume_id": "r1", "title": "Backend dev", "status": "published", "synced_at": None},
              {"id": "uuid2", "hh_resume_id": "r2", "title": "DevOps", "status": "not_published", "synced_at": None},

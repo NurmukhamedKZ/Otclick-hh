@@ -19,6 +19,7 @@ NotificationType = Literal[
     "resume_missing",
     "recruiter_draft",
     "recruiter_todo",
+    "recruiter_question",
     "form_approval",
     "cover_letter_written",
     "web_session_expired",

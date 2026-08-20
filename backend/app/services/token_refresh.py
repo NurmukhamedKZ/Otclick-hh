@@ -62,6 +62,10 @@ def _select_due(threshold_days: int) -> list[dict]:
         service_client.table("hh_credentials")
         .select("user_id,expires_at")
         .is_("invalid_at", None)
+        # A cookies-only connection has no refresh token. Without this the cron
+        # would "refresh" it, fail, and mark the row invalid — killing a web
+        # session that works perfectly well.
+        .not_.is_("refresh_token_encrypted", None)
         .lte("expires_at", cutoff)
         .execute()
     )
