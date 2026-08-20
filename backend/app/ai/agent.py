@@ -15,9 +15,9 @@ from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 from app.ai.prompts import (
-    FILL_SYSTEM_PROMPT,
     build_chat_prompt,
     build_fill_prompt,
+    build_fill_system_prompt,
     build_recruiter_prompt,
     sanitize_ai_text,
 )
@@ -132,7 +132,7 @@ class HHAgent:
         try:
             plan = await self.llm.with_structured_output(_FillPlan).ainvoke(
                 [
-                    ("system", FILL_SYSTEM_PROMPT),
+                    ("system", build_fill_system_prompt()),
                     ("human", build_fill_prompt(context, page_text, snapshot)),
                 ]
             )
@@ -262,6 +262,8 @@ class HHAgent:
         self, negotiation_id: str, message_id: str,
         history: list[tuple[str, str]], client,
         question_text: str | None = None,
+        vacancy_id: str | None = None, vacancy_title: str | None = None,
+        employer_name: str | None = None,
     ) -> None:
         """Decide + act on the latest recruiter message via tools (send/escalate/
         todo) or no-op. Conversation memory keyed by negotiation_id. The
@@ -281,12 +283,15 @@ class HHAgent:
         ctx = RecruiterContext(
             self.user_id, negotiation_id, message_id, client,
             question_text=question_text,
+            vacancy_id=vacancy_id, vacancy_title=vacancy_title, employer_name=employer_name,
         )
         await self._run_recruiter(history, ctx)
 
     async def answer_recruiter_choice(
         self, negotiation_id: str, message_id: str,
         history: list[tuple[str, str]], client, question: str, labels: list[str],
+        vacancy_id: str | None = None, vacancy_title: str | None = None,
+        employer_name: str | None = None,
     ) -> None:
         """Answer a robot-recruiter quick-reply question via the langchain agent.
 
@@ -309,6 +314,7 @@ class HHAgent:
         ctx = RecruiterContext(
             self.user_id, negotiation_id, message_id, client,
             question_text=question, quick_reply_labels=labels,
+            vacancy_id=vacancy_id, vacancy_title=vacancy_title, employer_name=employer_name,
         )
         directive = (
             "Последнее сообщение - вопрос робота-рекрутёра с кнопками-вариантами. "

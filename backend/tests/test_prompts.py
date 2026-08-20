@@ -104,3 +104,21 @@ def test_cover_letter_full_adds_salary_and_tone_guidance():
     p = build_cover_letter_prompt(mode="full")
     assert "отчаянного тона" in p
     assert "Не выдумывай факты" in p
+
+
+# --- extension autofill -----------------------------------------------------
+
+def test_fill_balanced_forbids_positioning_optional_fields():
+    from app.ai.prompts import build_fill_system_prompt
+
+    p = build_fill_system_prompt(mode="balanced")
+    assert "позиционировать кандидата выгоднее" not in p
+    assert "Ничего не выдумывай" in p
+
+
+def test_fill_full_allows_positioning_optional_fields_never_contacts():
+    from app.ai.prompts import build_fill_system_prompt
+
+    p = build_fill_system_prompt(mode="full")
+    assert "позиционировать кандидата выгоднее" in p
+    assert "никогда не выдумывай" in p  # contact/personal fields guard stays
