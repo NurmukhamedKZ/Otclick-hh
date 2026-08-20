@@ -151,14 +151,28 @@ COVER_LETTER_SYSTEM_PROMPT = (
 
 # --- form-test answers -------------------------------------------------------
 
-def build_form_choice_prompt(question: str, options_block: str, resume_ctx: str) -> str:
+FORM_CHOICE_POSITIONING_BLOCKS: dict[str, str] = {
+    "balanced": "",
+    "full": (
+        "Если варианты касаются зарплаты, опыта или образования - при прочих "
+        "равных выбирай вариант, который не занижает кандидата (не самый "
+        "младший/дешёвый из тех, что честно подходят).\n"
+    ),
+}
+
+
+def build_form_choice_prompt(
+    question: str, options_block: str, resume_ctx: str, mode: str | None = None
+) -> str:
     """Pick an option id for a multiple-choice vacancy-test task."""
+    extra = FORM_CHOICE_POSITIONING_BLOCKS[_mode(mode)]
     return (
         "Ты отвечаешь на вопрос теста вакансии от имени кандидата, "
         "правдиво и на основе его резюме.\n"
         f"Данные кандидата:\n{resume_ctx or '(нет данных)'}\n\n"
         f"Вопрос: {question}\n"
         f"Варианты:\n{options_block}\n"
+        f"{extra}"
         "Выбери ID самого подходящего и правдивого ответа. Пришли ТОЛЬКО ID, ничего больше."
     )
 

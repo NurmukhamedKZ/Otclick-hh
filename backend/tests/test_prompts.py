@@ -69,3 +69,20 @@ def test_form_text_story_instructions_present_in_both_modes():
         p = build_form_text_prompt("Расскажите о сложном проекте", "ctx", mode=mode)
         assert "STAR" in p
         assert "не сухим канцеляритом" in p
+
+
+# --- vacancy-test multiple-choice answers -------------------------------------
+
+def test_form_choice_balanced_has_no_dumping_guard():
+    from app.ai.prompts import build_form_choice_prompt
+
+    p = build_form_choice_prompt("Опыт?", "1: 1 год\n2: 3 года", "ctx", mode="balanced")
+    assert "не занижает кандидата" not in p
+
+
+def test_form_choice_full_adds_dumping_guard():
+    from app.ai.prompts import build_form_choice_prompt
+
+    p = build_form_choice_prompt("Опыт?", "1: 1 год\n2: 3 года", "ctx", mode="full")
+    assert "не занижает кандидата" in p
+    assert "1: 1 год" in p  # options block still embedded verbatim
