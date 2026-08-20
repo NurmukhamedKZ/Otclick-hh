@@ -4,9 +4,17 @@ import { browser } from "wxt/browser";
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
-  auth: { persistSession: false },
-});
+// Lazy: constructing eagerly runs RealtimeClient's WebSocket lookup at
+// import time, which throws under plain Node (e.g. vitest) with no polyfill.
+let _supabase: ReturnType<typeof createClient> | undefined;
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
+      auth: { persistSession: false },
+    });
+  }
+  return _supabase;
+}
 
 const EXPIRY_SKEW_S = 60;
 const APP_BASE = (import.meta.env.VITE_APP_BASE as string) ?? "http://localhost:3000";
@@ -28,7 +36,7 @@ export async function persistExternalSession(
   refresh_token: string,
 ): Promise<string> {
   if (!access_token || !refresh_token) throw new Error("tokens missing");
-  const { data, error } = await supabase.auth.setSession({ access_token, refresh_token });
+  const { data, error } = await getSupabase().auth.setSession({ access_token, refresh_token });
   if (error || !data.user) throw error ?? new Error("session invalid");
   const email = data.user.email ?? "";
   await persistSession(access_token, refresh_token, email);
@@ -59,7 +67,7 @@ export async function getValidJwt(): Promise<string | null> {
     return null;
   }
   try {
-    const { data, error } = await supabase.auth.setSession({ access_token: jwt, refresh_token });
+    const { data, error } = await getSupabase().auth.setSession({ access_token: jwt, refresh_token });
     if (error || !data.session) {
       await signOut();
       return null;
