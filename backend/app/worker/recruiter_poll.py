@@ -14,7 +14,7 @@ import random
 import time
 
 from app.hh import web
-from app.services import chatik, recruiter
+from app.services import chatik, notifications, recruiter
 from app.services.hh_credentials import load_api_client, persist_if_refreshed
 from app.worker import throttle
 
@@ -91,11 +91,15 @@ async def poll_answered_questions(user_id: str, agent, client, states: dict[str,
                 vacancy_id=row["vacancy_id"], vacancy_title=row["vacancy_title"],
                 employer_name=row["employer_name"],
             )
-        except Exception:
+        except Exception as exc:
             logger.warning(
                 "recruiter poll: resume failed for question %s", row["id"], exc_info=True
             )
+            await notifications.notify_once(
+                user_id, "recruiter_error", {"detail": str(exc)[:300]}
+            )
             continue  # leave status='answered' — retried next poll
+        notifications.clear_once(user_id, "recruiter_error")
         await recruiter.mark_question_completed(user_id, row["id"])
 
 
@@ -126,13 +130,17 @@ async def poll_recruiter_chats(user_id: str, agent) -> None:
         for ref in chats:
             try:
                 handled = await _process_chat(user_id, agent, client, ref, states)
-            except Exception:
+            except Exception as exc:
                 # Do NOT advance the cursor — retry on the next poll.
                 logger.warning(
                     "recruiter poll: chat %s failed for %s", ref.get("nid"), user_id,
                     exc_info=True,
                 )
+                await notifications.notify_once(
+                    user_id, "recruiter_error", {"detail": str(exc)[:300]}
+                )
                 continue
+            notifications.clear_once(user_id, "recruiter_error")
             if handled:
                 await asyncio.sleep(throttle.next_delay(_rng))
     finally:

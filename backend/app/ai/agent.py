@@ -70,6 +70,13 @@ class HHAgent:
                 api_key=settings.OPENAI_API_KEY,
                 base_url=settings.OPENAI_BASE_URL,
                 model=settings.OPENAI_MODEL,
+                # gpt-5-family models default to a non-"none" reasoning effort
+                # server-side, which OpenAI's chat/completions endpoint refuses
+                # to combine with function tools ("Function tools with
+                # reasoning_effort are not supported ... set reasoning_effort
+                # to 'none'"). The recruiter agent (create_agent + tools) hit
+                # this on every single call — force it off.
+                reasoning_effort="none",
                 rate_limiter=InMemoryRateLimiter(
                     requests_per_second=settings.OPENAI_RATE_LIMIT / 60.0
                 ),

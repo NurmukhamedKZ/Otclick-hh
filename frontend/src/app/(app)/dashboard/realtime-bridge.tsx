@@ -18,6 +18,7 @@ const TYPE_KIND: Record<string, ToastKind> = {
   form_approval: "info",
   cover_letter_written: "success",
   web_session_expired: "error",
+  recruiter_error: "error",
 };
 
 const TYPE_TITLE: Record<string, string> = {
@@ -33,6 +34,7 @@ const TYPE_TITLE: Record<string, string> = {
   form_approval: "Анкета ждёт подтверждения",
   cover_letter_written: "ИИ написал сопроводительное",
   web_session_expired: "Сессия hh истекла - переподключите аккаунт",
+  recruiter_error: "Ошибка ИИ-агента в чате с рекрутёром",
 };
 
 function formatBody(n: NotificationRow): string | undefined {
