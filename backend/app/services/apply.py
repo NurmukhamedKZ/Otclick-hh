@@ -239,6 +239,24 @@ async def apply_one(
         await form_filler.report_dead_session(user_id, ex)
         await mark_invalid(user_id, f"web session dead on vacancy fetch: {ex}")
         return "token_dead"
+    except web.CaptchaRequired:
+        logger.warning("apply: user=%s vacancy=%s captcha on vacancy fetch", user_id, vacancy_id)
+        await loop.run_in_executor(
+            None,
+            lambda: _record_application(
+                user_id=user_id,
+                resume_uuid=resume_uuid,
+                vacancy_id=vacancy_id,
+                status="captcha",
+                cover_letter=None,
+                error="captcha on vacancy fetch",
+            ),
+        )
+        try:
+            await captcha_service.create_request(user_id, None)
+        except Exception:
+            logger.exception("apply: failed to create captcha_request")
+        return "captcha"
 
     employer_id = _extract_employer_id(vacancy)
     employer_name = (vacancy.get("employer") or {}).get("name")

@@ -36,6 +36,10 @@ SEARCH_URL = f"{WEB_BASE}/search/vacancy"
 class VacancyGone(Exception):
     """hh no longer serves this vacancy page (404/410) — archived or deleted."""
 
+
+class CaptchaRequired(Exception):
+    """hh redirected the web session to a captcha wall (/account/captcha)."""
+
 # client.DEFAULT_DELAY is the API's inter-request minimum; web traffic is not
 # less fingerprintable, so we keep at least the same cadence, per user.
 _MIN_DELAY_S = 0.345
@@ -55,6 +59,8 @@ def _get(session: requests.Session, user_id: str, url: str, **kw) -> requests.Re
         time.sleep(wait)
     resp = session.get(url, timeout=20, **kw)
     _last_request_at[user_id] = time.monotonic()
+    if "/account/captcha" in (resp.url or ""):
+        raise CaptchaRequired("hh redirected the web session to a captcha wall")
     if session_looks_dead(resp):
         raise WebSessionExpired(f"hh rejected the web session ({resp.status_code})")
     if resp.status_code in (404, 410):

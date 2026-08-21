@@ -473,6 +473,32 @@ async def test_apply_one_token_dead_when_the_web_session_died_mid_fetch():
     assert mark_calls and mark_calls[0][0] == "u1"
 
 
+async def test_apply_one_captcha_when_vacancy_fetch_hits_captcha_wall():
+    """hh redirecting the web session to /account/captcha must pause the
+    worker via the existing captcha flow, not fall through as a generic
+    "failed" (which silently re-queues the same vacancy forever)."""
+    from app.hh import web as web_mod
+    from app.services import apply as apply_mod
+
+    sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1"})
+    captcha_calls = []
+
+    async def _captcha(user_id, vacancy_id):
+        raise web_mod.CaptchaRequired("hh redirected the web session to a captcha wall")
+
+    async def fake_create_request(user_id, captcha_url):
+        captcha_calls.append((user_id, captcha_url))
+
+    with (
+        patch.object(apply_mod, "service_client", sb),
+        patch.object(apply_mod.web, "get_vacancy", new=_captcha),
+        patch.object(apply_mod.captcha_service, "create_request", side_effect=fake_create_request),
+    ):
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
+    assert result == "captcha"
+    assert captcha_calls == [("u1", None)]
+
+
 async def test_apply_one_skips_when_hh_says_a_negotiation_already_exists():
     """hh's own per-applicant block is authoritative — no guessing from the
     rejection wording after we already posted."""
