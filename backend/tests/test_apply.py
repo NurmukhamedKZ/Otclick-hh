@@ -548,12 +548,12 @@ async def test_apply_one_captcha_does_not_fall_through_to_failed():
         }
 
     async def _submitted(user_id, resume_id, vacancy_id, letter="", answers=None):
-        return "failed", "hh_rejected: 200 {\"error\":\"captcha required\"}"
+        return "failed", "captcha_wall: https://hh.ru/account/captcha?state=xyz"
 
     created = []
 
     async def _create(user_id, captcha_url):
-        created.append(user_id)
+        created.append((user_id, captcha_url))
         return {}
 
     with (
@@ -564,7 +564,71 @@ async def test_apply_one_captcha_does_not_fall_through_to_failed():
     ):
         result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
     assert result == "captcha"
-    assert created == ["u1"]
+    assert created == [("u1", "https://hh.ru/account/captcha?state=xyz")]
+
+
+async def test_submit_response_returns_captcha_wall_tag_on_captcha_redirect():
+    """form_filler.submit_response must surface hh's real captcha URL as an
+    exact "captcha_wall: <url>" tag, not bury it in a generic submit_error —
+    apply.py matches this exact prefix, not a loose substring."""
+    from unittest.mock import MagicMock
+
+    from app.services import form_filler as ff
+
+    session = MagicMock()
+    get_resp = MagicMock()
+    get_resp.url = "https://hh.ru/account/captcha?backurl=https%3A%2F%2Fhh.ru%2Fvacancy%2Fv1&state=abc"
+    session.get.return_value = get_resp
+
+    async def _fake_session(user_id):
+        return session
+
+    async def _fake_resume_id(user_id, resume_id):
+        return "hh-r1"
+
+    with (
+        patch.object(ff, "load_web_session", new=_fake_session),
+        patch.object(ff, "_get_hh_resume_id", new=_fake_resume_id),
+    ):
+        status, error = await ff.submit_response("u1", "r-uuid", "v1", letter="hi", answers=None)
+
+    assert status == "failed"
+    assert error == "captcha_wall: https://hh.ru/account/captcha?backurl=https%3A%2F%2Fhh.ru%2Fvacancy%2Fv1&state=abc"
+
+
+async def test_apply_one_captcha_fallback_when_post_rejects_without_challenge_url():
+    """No preceding-GET redirect captured (hh rejected the POST itself) —
+    still must not fall through to "failed", even with no known challenge URL."""
+    from app.services import apply as apply_mod
+
+    sb, _, _ = _supabase_mock({"id": "r-uuid", "hh_resume_id": "hh-r1", "title": "T"})
+
+    async def _vacancy(user_id, vacancy_id):
+        return {
+            "id": "v1",
+            "employer": {"id": "42", "name": "Acme"},
+            "has_test": False,
+            "response_letter_required": False,
+        }
+
+    async def _submitted(user_id, resume_id, vacancy_id, letter="", answers=None):
+        return "failed", "hh_rejected: 200 {\"error\":\"captcha required\"}"
+
+    created = []
+
+    async def _create(user_id, captcha_url):
+        created.append((user_id, captcha_url))
+        return {}
+
+    with (
+        patch.object(apply_mod, "service_client", sb),
+        patch.object(apply_mod.web, "get_vacancy", new=_vacancy),
+        patch.object(apply_mod.form_filler, "submit_response", new=_submitted),
+        patch.object(apply_mod.captcha_service, "create_request", new=_create),
+    ):
+        result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
+    assert result == "captcha"
+    assert created == [("u1", None)]
 
 
 async def test_apply_one_writes_a_letter_when_hh_demands_one_despite_the_page_flag():

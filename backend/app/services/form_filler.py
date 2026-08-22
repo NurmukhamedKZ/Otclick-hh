@@ -449,6 +449,8 @@ def _submit_response(
     # parsed out of it.
     page_url = _response_url(vacancy_id) if answers else f"https://hh.ru/vacancy/{vacancy_id}"
     r = session.get(page_url, timeout=15)
+    if "/account/captcha" in (r.url or ""):
+        raise CaptchaRequired(r.url)
     if session_looks_dead(r):
         raise WebSessionExpired(f"hh rejected the web session ({r.status_code})")
     r.raise_for_status()
@@ -579,6 +581,8 @@ async def submit_response(
         resp = await loop.run_in_executor(
             None, _submit_response, session, vacancy_id, hh_resume_id, letter, answers
         )
+    except CaptchaRequired as ex:
+        return "failed", f"captcha_wall: {ex.url}"
     except WebSessionExpired as ex:
         await report_dead_session(user_id, ex)
         return "failed", f"web_session_expired: {ex}"
