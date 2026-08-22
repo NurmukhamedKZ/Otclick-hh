@@ -47,6 +47,19 @@ Success criteria:
 - The OAuth-login captcha flow (`hh_auth.py`/`authorize.py`) — already works, untouched.
 - Any change to how `applications` rows are recorded for `status="captcha"`.
 
+## Correction found while planning
+
+`app` (FastAPI, `uvicorn app.main:app`) and `worker` (`python worker_main.py`) are **separate
+containers/processes** (`docker-compose.yml`) with no shared memory — confirmed by the fact
+`app/api/*.py` never imports `app.worker.runner` anywhere in the codebase today, and the existing
+(currently-dead) `WorkerRegistry.resume_captcha` is only ever exercised by its own unit test, never
+by an API route. Sections 3 and 5 below originally assumed `/api/captcha/{id}/solve` could reach
+into the worker process's live `RunnerHandle`/`asyncio.Queue` directly — it cannot. Every other
+cross-process signal in this codebase (worker flags, worker_runtime heartbeat, the old plan-B
+`_probe_me` poll) goes through the database, polled on a timer; the solution handoff follows the
+same pattern: `/solve` writes a new `captcha_requests.solution` column, the worker's pause loop
+polls for it. Sections below reflect this.
+
 ## Decisions (from brainstorming)
 
 - **Mechanism:** Playwright, loaded with the exact cookies `load_web_session` already decrypts —
@@ -67,11 +80,17 @@ Success criteria:
 
 ### 1. Detection — extend the existing URL check to the POST path
 
-`app/hh/web.py::CaptchaRequired` already exists (raised by `_get` on `/account/captcha` in
-`resp.url`). Add the same check to `form_filler._submit_response`'s pre-submit
-`session.get(page_url)` (the GET that fetches xsrf/test-meta before posting): if that response's
-`resp.url` contains `/account/captcha`, raise `CaptchaRequired(resp.url)` there too — same
-exception class, imported from `app.hh.web`.
+`app/hh/web.py::CaptchaRequired` exists today but lives in the wrong module for this: it needs to
+also be raised from `form_filler._submit_response`, and `web.py` already imports FROM
+`form_filler.py` (`WebSessionExpired`, `load_web_session`, `session_looks_dead`) — importing the
+other direction would be circular. Move `CaptchaRequired` into `form_filler.py` (next to
+`WebSessionExpired`, same reasoning), give it a real `url` attribute instead of a static message
+(`raise CaptchaRequired(resp.url)`, not today's placeholder string), and have `web.py` import it
+from there instead of defining its own.
+
+Add the matching check to `form_filler._submit_response`'s pre-submit `session.get(page_url)` (the
+GET that fetches xsrf/test-meta before posting): if that response's `resp.url` contains
+`/account/captcha`, raise `CaptchaRequired(resp.url)` there too.
 
 Keep the existing `"captcha" in err_text` substring check in `apply.py` as a **fallback** only,
 for the case where the POST itself (not the preceding GET) is rejected with no page navigation
@@ -87,80 +106,139 @@ has it.
 
 ### 2. `app/hh/web_captcha.py` (new) — the solving service
 
-```python
-class CaptchaBrowser:
-    async def open(self, challenge_url: str, cookies: list[dict]) -> bytes: ...   # -> screenshot png
-    async def submit(self, solution: str) -> tuple[Literal["cleared", "wrong", "no_widget"], bytes | None]: ...
-    async def cookies(self) -> list[dict]: ...   # only valid after "cleared"
-    async def close(self) -> None: ...
+Module-level functions over a process-local session registry (there is exactly one worker
+process, so no cross-process concern here — unlike the API↔worker split below):
 
-_sessions: dict[str, CaptchaBrowser] = {}          # process-local, keyed by user_id
-_semaphore = asyncio.Semaphore(MAX_CONCURRENT_CAPTCHA_BROWSERS)  # default 4
+```python
+class AtCapacity(Exception):
+    """No free captcha-browser slot — caller should back off and retry open_for later."""
+
+MAX_CONCURRENT_CAPTCHA_BROWSERS = 4
+_semaphore = asyncio.Semaphore(MAX_CONCURRENT_CAPTCHA_BROWSERS)
+_sessions: dict[str, _Session] = {}   # user_id -> live playwright/browser/context/page
+
+async def open_for(user_id: str, challenge_url: str, cookies: list[dict]) -> tuple[str, bytes | None]:
+    """Launch headless Chromium, load `cookies`, navigate to challenge_url.
+
+    Returns ("captcha", png) if hh's widget is present, ("cleared", None) if not
+    (wall already lifted), ("token_dead", None) if hh sent the session to a login
+    wall instead of a captcha. Raises AtCapacity if the semaphore is exhausted.
+    """
+
+async def submit_for(user_id: str, solution: str) -> tuple[str, bytes | None]:
+    """Fill SEL_CAPTCHA_INPUT, Enter, re-read the page. Same three-way result as open_for."""
+
+async def cookies_for(user_id: str) -> list[dict]:
+    """context.cookies() — call only after a "cleared" result."""
+
+async def close_for(user_id: str) -> None:
+    """Close browser/context, stop playwright, release the semaphore slot. No-op if not open."""
 ```
 
-`open()`: acquire the semaphore (or raise a distinct "at capacity" signal the caller treats as
-"stay queued"), launch headless Chromium, `context.add_cookies(cookies)`, navigate to
-`challenge_url`, wait for `SEL_CAPTCHA_IMAGE` (reuse `authorize.py`'s selector constants),
-screenshot it.
+Both `open_for` and `submit_for` share a `_read_challenge(page)` helper: `/account/login` in
+`page.url` → `"token_dead"`; `SEL_CAPTCHA_IMAGE` (reused from `authorize.py`) not found within a
+short wait → `"cleared"`; otherwise screenshot the image locator → `"captcha"`. Context is created
+via `pw.devices["Galaxy A55"]` (same mobile-emulation profile `authorize.py` uses) so the reused
+cookies aren't presented under a different device fingerprint than the one they were issued to.
 
-`submit(solution)`: `page.fill(SEL_CAPTCHA_INPUT, solution)` → Enter → wait for navigation/DOM
-settle → if `SEL_CAPTCHA_IMAGE` is gone, `"cleared"`; if a (new) captcha image is still present,
-screenshot it and return `"wrong"` with the new bytes; if neither hh pattern matches, `"no_widget"`
-(treat as cleared).
+### 3. `app/worker/runner.py` — `paused_captcha` owns the browser lifecycle, polling the DB
 
-`close()` releases the semaphore slot and closes the browser/context.
+**Correction from the first pass of this section (see above): no in-process queue.** The
+challenge URL and the user's typed solution both live on the `captcha_requests` row (`captcha_url`,
+new `solution` column below) and the pause loop polls it on `CAPTCHA_POLL_S` (5s, an existing
+constant) — the same rhythm every other cross-process signal in this codebase already uses
+(`worker_main`'s enabled-flag poll, the `_probe_me` loop this replaces).
 
-### 3. `app/worker/runner.py` — `paused_captcha` owns the browser lifecycle
-
-Replace `handle.captcha_event: asyncio.Event` with `handle.captcha_solution_queue:
-asyncio.Queue[str]`. The challenge URL doesn't need a new field on `RunnerHandle` — it's already
-persisted as `captcha_url` on the `captcha_requests` row `apply_one` creates via
-`captcha_service.create_request(user_id, challenge_url)`; the pause loop reads it back with
-`captcha_service.get_pending(user_id)`.
-
-Pause-loop shape:
+Pause-loop shape (`request_id`/`idle_ticks` are loop-local; `_resume_from_captcha` is a nested
+closure next to the file's existing `_hb()`, so it shares `handle`/`user_id`/`_hb` by closure):
 
 ```python
 while handle.state == "paused_captcha":
     if user_id not in web_captcha._sessions:
-        pending = await captcha_service.get_pending(user_id)
-        challenge_url = pending[0]["captcha_url"] if pending else "https://hh.ru/account/captcha"
         try:
-            screenshot = await web_captcha.open_for(user_id, challenge_url, cookies)
-        except AtCapacity:
-            await asyncio.sleep(CAPTCHA_QUEUE_RETRY_S)   # e.g. 10s, just re-tries open()
+            cookies = await form_filler.load_web_cookies(user_id)
+        except ValueError:
+            await _stop_token_dead("no stored web session")
+            return
+        pending = await captcha_service.get_pending(user_id)
+        request_id = pending[0]["id"] if pending else None
+        challenge_url = (pending[0].get("captcha_url") if pending else None) or "https://hh.ru/account/captcha"
+        try:
+            result, screenshot = await web_captcha.open_for(user_id, challenge_url, cookies)
+        except web_captcha.AtCapacity:
+            await asyncio.sleep(CAPTCHA_OPEN_RETRY_S)
             continue
-        await captcha_service.attach_screenshot(user_id, screenshot)  # updates storage_path
+        if result == "token_dead":
+            await web_captcha.close_for(user_id)
+            await _stop_token_dead("captcha page")
+            return
+        if result == "cleared":
+            await _resume_from_captcha()
+            continue
+        if request_id:
+            await captcha_service.attach_screenshot(request_id, screenshot)
+        idle_ticks = 0
 
-    solution = await handle.captcha_solution_queue.get()   # blocks until /solve posts
-    result, new_shot = await web_captcha.submit_for(user_id, solution)
-    if result in ("cleared", "no_widget"):
-        cookies = await web_captcha.cookies_for(user_id)
+    await asyncio.sleep(CAPTCHA_POLL_S)
+    if handle.state != "paused_captcha":
+        break
+    solution = await captcha_service.get_solution(request_id) if request_id else None
+    if not solution:
+        idle_ticks += 1
+        if idle_ticks * CAPTCHA_POLL_S > CAPTCHA_BROWSER_IDLE_TIMEOUT_S:
+            await web_captcha.close_for(user_id)   # next tick reopens + re-screenshots —
+        continue                                    # also catches a wall that cleared on its own
+
+    await captcha_service.clear_solution(request_id)
+    result, screenshot = await web_captcha.submit_for(user_id, solution)
+    if result == "captcha":                 # wrong answer, hh re-rendered
+        if request_id:
+            await captcha_service.attach_screenshot(request_id, screenshot)
+        idle_ticks = 0
+        continue
+    if result == "token_dead":
         await web_captcha.close_for(user_id)
-        await persist_refreshed_cookies(user_id, cookies)   # encrypt + save + drop cached session
-        await captcha_service.mark_solved(user_id)
-        await notify(user_id, "captcha", {"resolved": True})
-        handle.state = "running"
-    else:  # "wrong"
-        await captcha_service.attach_screenshot(user_id, new_shot)   # same row, new storage_path
-        # loop back to queue.get()
+        await _stop_token_dead("after captcha submit")
+        return
+    await _resume_from_captcha()   # "cleared"
 ```
 
-A bounded wait on `queue.get()` (mirroring OAuth's `CAPTCHA_TIMEOUT_SECONDS`) closes the browser
-and drops back to "no session open, no pending solution" so an abandoned tab doesn't hold a
-Chromium (and a semaphore slot) forever; the pause itself does not end — only the browser does.
+`_resume_from_captcha()`: `cookies = await web_captcha.cookies_for(user_id)` →
+`await web_captcha.close_for(user_id)` → persist via `hh_auth._persist_web_session_only` (already
+does encrypt + upsert + drop the cached `requests.Session` + clear the `web_session_expired`
+one-shot notice) → `captcha_service.mark_solved(user_id)` → `notify(user_id, "captcha",
+{"resolved": True})` → `handle.state = "running"` → `_hb()`.
+
+The whole `paused_captcha` block sits inside `try/finally: if user_id in web_captcha._sessions:
+await web_captcha.close_for(user_id)` so a `stop()`-triggered task cancellation (worker turned off
+mid-pause) still releases the browser and its semaphore slot.
+
+This retires `_probe_me` entirely — its `WebSessionExpired`/`ValueError` → `token_dead` detection
+moves into `open_for`, its `list_resumes()` health check is subsumed by navigating the real
+challenge page. Delete it, its now-dead imports (`hh_web`, `WebSessionExpired`, `mark_invalid` —
+verify each has no other caller left in the file first), and its 4 dedicated tests.
+`WorkerRegistry.resume_captcha` is dead code too — confirmed by the "Correction" section above,
+never called outside its own unit test — delete it and that test rather than repurpose it; the API
+process has no reachable registry to call into for this flow.
 
 ### 4. `app/services/captcha.py` — extend, don't replace
 
 - `create_request(user_id, captcha_url)` — unchanged shape, now actually called with a real URL
   from both trigger points.
-- New: `attach_screenshot(user_id, png_bytes) -> None` — uploads to the existing
-  `captcha-screenshots` bucket, updates the user's open `captcha_requests` row's `storage_path`
-  (same row, so the frontend's existing Realtime UPDATE subscription picks it up — no schema
-  change).
-- `mark_solved` unchanged.
+- New: `attach_screenshot(request_id, png_bytes) -> None` — uploads to the existing
+  `captcha-screenshots` bucket, updates that specific row's `storage_path` (frontend's existing
+  Realtime UPDATE subscription on `captcha_requests` picks it up — no frontend schema change).
+- New: `get_solution(request_id) -> str | None` / `clear_solution(request_id) -> None` — read and
+  null out the new `solution` column.
+- `mark_solved`, `get_pending` unchanged.
 
-### 5. `app/api/captcha.py` — `/solve` gets a body
+### 5. Migration — `captcha_requests.solution`
+
+`infra/supabase/migrations/034_captcha_solution.sql`: `ALTER TABLE captcha_requests ADD COLUMN IF
+NOT EXISTS solution text;`. No RLS change — only `service_role` (the API's `/solve` handler and the
+worker) ever reads or writes it.
+
+### 6. `app/api/captcha.py` — `/solve` writes the DB, no registry involved
 
 ```python
 class SolveRequest(BaseModel):
@@ -168,15 +246,17 @@ class SolveRequest(BaseModel):
 
 @router.post("/{request_id}/solve", response_model=RecheckResponse)
 async def solve(request_id: str, body: SolveRequest, user_id=Depends(get_current_user)):
-    get_registry().submit_captcha_solution(user_id, body.solution)  # puts onto the queue
+    await captcha_service.submit_solution(user_id, body.solution)
     return RecheckResponse(rechecking=True)
 ```
 
-`/dismiss` additionally calls a new `get_registry().close_captcha_browser(user_id)` (frees the
-browser/semaphore slot; runner stays `paused_captcha` with no auto-recovery — the user must come
-back and solve it, or stop the worker).
+`submit_solution(user_id, solution)` = `UPDATE captcha_requests SET solution=... WHERE user_id=...
+AND solved=false` (mirrors `mark_solved`'s scoping). `/dismiss` is unchanged — it already just hides
+the modal (`mark_solved`) while leaving the runner paused to keep working the row on its own; the
+browser-idle-timeout in section 3 is what actually frees resources if the user walks away, not
+dismiss.
 
-### 6. `frontend/src/components/captcha-modal.tsx`
+### 7. `frontend/src/components/captcha-modal.tsx`
 
 Add a text `<input>` + submit button below the image (currently just "я решил, проверить" /
 "закрыть", neither takes text). Submit calls
@@ -189,14 +269,15 @@ worker подхватит сам") since solving now happens in-app.
 ## Testing
 
 - `tests/test_apply.py`: extend today's `test_apply_one_captcha_when_vacancy_fetch_hits_captcha_wall`
-  with a symmetric `test_apply_one_captcha_when_submit_hits_captcha_wall` (mocks
-  `form_filler.submit_response` raising `web.CaptchaRequired`).
-- `tests/test_web_captcha.py` (new): `CaptchaBrowser` against a mocked Playwright
-  page/context (open → screenshot; submit wrong → new screenshot; submit right → cleared;
-  semaphore denies a 5th concurrent `open`).
-- `tests/test_runner.py`: extend the `paused_captcha` coverage — queue delivers a solution →
-  `"cleared"` resumes and persists cookies; `"wrong"` loops without leaving the paused state;
-  queue timeout closes the browser without ending the pause.
+  with a symmetric case for the POST-submit path (mocks `form_filler.submit_response` returning
+  `("failed", "captcha_wall: <url>")`).
+- `tests/test_web_captcha.py` (new): `open_for`/`submit_for`/`cookies_for`/`close_for` against a
+  mocked Playwright (`async_playwright`, browser, context, page) — captcha present → screenshot;
+  no widget → cleared; login wall → token_dead; a 5th concurrent `open_for` raises `AtCapacity`.
+- `tests/test_runner.py`: extend `paused_captcha` coverage for the new DB-polled shape — a
+  `get_solution` returning a value drives `submit_for` and, on `"cleared"`, persists cookies and
+  resumes; `"captcha"` (wrong answer) loops without leaving the paused state; no solution for
+  longer than `CAPTCHA_BROWSER_IDLE_TIMEOUT_S` closes the browser without ending the pause.
 
 Unit-level only, mocked Playwright/Supabase — no real hh network calls, following existing test
 conventions (`_fluent` Supabase mock, `pytest-asyncio`).
