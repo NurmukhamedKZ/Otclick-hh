@@ -119,6 +119,19 @@ async def load_web_session(user_id: str) -> requests.Session:
     return session
 
 
+async def load_web_cookies(user_id: str) -> list[dict]:
+    """Raw decrypted cookie list — for callers that need cookies outside a
+    requests.Session (Playwright's context.add_cookies wants this exact shape,
+    which is also exactly how they're stored: captured via context.cookies()
+    during OAuth login, JSON-serialized as-is). Raises ValueError if no
+    session is stored, same contract as load_web_session."""
+    loop = asyncio.get_running_loop()
+    enc = await loop.run_in_executor(None, _load_cookies_encrypted, user_id)
+    if not enc:
+        raise ValueError(f"no stored web session for user {user_id} — reconnect required")
+    return json.loads(decrypt_token(enc))
+
+
 def extract_xsrf_token(page_html: str) -> str:
     """Pull the xsrfToken out of an hh.ru page's inline JSON state."""
     marker = ',"xsrfToken":"'

@@ -407,3 +407,26 @@ def test_submit_syncs_the_xsrf_cookie_with_the_token_it_sends():
         "_xsrf", "FRESH", domain="hh.ru", path="/"
     )
     assert session.post.call_args.kwargs["headers"]["X-Xsrftoken"] == "FRESH"
+
+
+async def test_load_web_cookies_returns_decrypted_list():
+    from app.services import form_filler as ff
+
+    def _fake_enc(user_id):
+        return "encrypted-blob"
+
+    with (
+        patch.object(ff, "_load_cookies_encrypted", side_effect=_fake_enc),
+        patch.object(ff, "decrypt_token", return_value='[{"name": "a", "value": "b", "domain": "hh.ru", "path": "/"}]'),
+    ):
+        cookies = await ff.load_web_cookies("u1")
+
+    assert cookies == [{"name": "a", "value": "b", "domain": "hh.ru", "path": "/"}]
+
+
+async def test_load_web_cookies_raises_when_nothing_stored():
+    from app.services import form_filler as ff
+
+    with patch.object(ff, "_load_cookies_encrypted", return_value=None):
+        with pytest.raises(ValueError):
+            await ff.load_web_cookies("u1")
