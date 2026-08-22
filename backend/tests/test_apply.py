@@ -476,7 +476,8 @@ async def test_apply_one_token_dead_when_the_web_session_died_mid_fetch():
 async def test_apply_one_captcha_when_vacancy_fetch_hits_captcha_wall():
     """hh redirecting the web session to /account/captcha must pause the
     worker via the existing captcha flow, not fall through as a generic
-    "failed" (which silently re-queues the same vacancy forever)."""
+    "failed" (which silently re-queues the same vacancy forever), and must
+    carry the real challenge URL through to the captcha_requests row."""
     from app.hh import web as web_mod
     from app.services import apply as apply_mod
 
@@ -484,7 +485,7 @@ async def test_apply_one_captcha_when_vacancy_fetch_hits_captcha_wall():
     captcha_calls = []
 
     async def _captcha(user_id, vacancy_id):
-        raise web_mod.CaptchaRequired("hh redirected the web session to a captcha wall")
+        raise web_mod.CaptchaRequired("https://hh.ru/account/captcha?state=abc123")
 
     async def fake_create_request(user_id, captcha_url):
         captcha_calls.append((user_id, captcha_url))
@@ -496,7 +497,7 @@ async def test_apply_one_captcha_when_vacancy_fetch_hits_captcha_wall():
     ):
         result = await apply_mod.apply_one("u1", "r-uuid", "v1", _fake_agent())
     assert result == "captcha"
-    assert captcha_calls == [("u1", None)]
+    assert captcha_calls == [("u1", "https://hh.ru/account/captcha?state=abc123")]
 
 
 async def test_apply_one_skips_when_hh_says_a_negotiation_already_exists():

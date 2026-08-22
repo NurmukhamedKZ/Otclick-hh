@@ -41,6 +41,14 @@ class WebSessionExpired(Exception):
     """hh no longer accepts the stored web cookies — the user must reconnect."""
 
 
+class CaptchaRequired(Exception):
+    """hh redirected the web session to a captcha wall (/account/captcha)."""
+
+    def __init__(self, url: str):
+        super().__init__(url)
+        self.url = url
+
+
 def session_looks_dead(resp: requests.Response) -> bool:
     """True when hh answered a logged-out request (auth wall, not a real error)."""
     if resp.status_code in (401, 403):
