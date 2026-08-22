@@ -98,3 +98,71 @@ def _get_pending_sync(user_id: str) -> list[dict]:
 async def get_pending(user_id: str) -> list[dict]:
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, _get_pending_sync, user_id)
+
+
+def _attach_screenshot_sync(request_id: str, png: bytes) -> None:
+    path = f"{uuid.uuid4()}.png"
+    try:
+        service_client.storage.from_(SCREENSHOT_BUCKET).upload(
+            path, png, {"content-type": "image/png", "upsert": "true"}
+        )
+    except Exception:
+        logger.warning("captcha: screenshot upload failed for request %s", request_id, exc_info=True)
+        return
+    (
+        service_client.table("captcha_requests")
+        .update({"storage_path": path})
+        .eq("id", request_id)
+        .execute()
+    )
+
+
+async def attach_screenshot(request_id: str, png: bytes) -> None:
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _attach_screenshot_sync, request_id, png)
+
+
+def _get_solution_sync(request_id: str) -> str | None:
+    res = (
+        service_client.table("captcha_requests")
+        .select("solution")
+        .eq("id", request_id)
+        .maybe_single()
+        .execute()
+    )
+    data = res.data if res else None
+    return (data or {}).get("solution")
+
+
+async def get_solution(request_id: str) -> str | None:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _get_solution_sync, request_id)
+
+
+def _clear_solution_sync(request_id: str) -> None:
+    (
+        service_client.table("captcha_requests")
+        .update({"solution": None})
+        .eq("id", request_id)
+        .execute()
+    )
+
+
+async def clear_solution(request_id: str) -> None:
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _clear_solution_sync, request_id)
+
+
+def _submit_solution_sync(user_id: str, solution: str) -> None:
+    (
+        service_client.table("captcha_requests")
+        .update({"solution": solution})
+        .eq("user_id", user_id)
+        .eq("solved", False)
+        .execute()
+    )
+
+
+async def submit_solution(user_id: str, solution: str) -> None:
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _submit_solution_sync, user_id, solution)
