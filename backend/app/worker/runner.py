@@ -18,13 +18,12 @@ import requests as _requests
 
 from app.ai.agent import HHAgent
 from app.hh import errors as hh_errors
-from app.hh import web as hh_web
+from app.hh import web_captcha
 from app.services import apply as apply_service
 from app.services import captcha as captcha_service
+from app.services import form_filler
 from app.services import plan as plan_service
 from app.services import worker_control
-from app.services.form_filler import WebSessionExpired
-from app.services.hh_credentials import mark_invalid
 from app.services.notifications import notify
 from app.services.worker_runtime import heartbeat
 from app.worker import limiter, throttle
@@ -45,8 +44,18 @@ IDLE_REFILL_MAX_SLEEP_S = 15 * 60
 # Pause before retrying an apply that hh answered with 429.
 RETRY_THROTTLED_SLEEP_S = 60
 
-# Plan-B captcha poll interval (seconds) — re-probe GET /me while paused.
+# Plan-B captcha poll interval (seconds) — the API and worker are separate
+# processes with no shared memory, so the typed solution can only cross that
+# boundary through the database; this is how often the paused loop checks.
 CAPTCHA_POLL_S = 5
+
+# How long to keep a captcha browser open with no solution submitted before
+# freeing its semaphore slot. Reopening on the next tick also re-screenshots,
+# which catches a wall that quietly cleared on its own.
+CAPTCHA_BROWSER_IDLE_TIMEOUT_S = 5 * 60
+
+# Backoff before retrying open_for() after AtCapacity.
+CAPTCHA_OPEN_RETRY_S = 15
 
 # Recruiter chat poll cadence — runs in its own task, independent of apply limits.
 RECRUITER_POLL_INTERVAL_S = 120
@@ -60,7 +69,6 @@ class RunnerHandle:
     next_run_at: datetime | None = None
     task: asyncio.Task | None = None
     recruiter_task: asyncio.Task | None = None
-    captcha_event: asyncio.Event = field(default_factory=asyncio.Event)
     agent_stop: asyncio.Event = field(default_factory=asyncio.Event)
     cluster: throttle.SessionCluster = field(default_factory=throttle.SessionCluster)
     agent: HHAgent | None = None
@@ -152,37 +160,115 @@ async def _finish_batch(handle: RunnerHandle) -> None:
     logger.info("user %s: manual batch done — stopping", handle.user_id)
 
 
-async def _probe_me(user_id: str) -> str:
-    """Probe GET /me to detect whether the hh captcha lifted.
-
-    Returns 'ok' (clear), 'captcha' (still blocked / transient — keep polling),
-    'token_dead' (creds unusable — stop), or 'banned' (account blocked — stop).
-    """
-    try:
-        # Same page the apply loop uses, so the probe fails exactly when
-        # applying would. The old /me call went through the OAuth API, which is
-        # not on this path any more — it would have reported a healthy account
-        # while every apply died on a login wall.
-        await hh_web.list_resumes(user_id)
-        return "ok"
-    except WebSessionExpired as ex:
-        await mark_invalid(user_id, f"web session dead (/probe): {ex}")
-        return "token_dead"
-    except ValueError:
-        logger.warning("probe_me: no stored web session for %s — token_dead", user_id)
-        return "token_dead"
-    except Exception:
-        logger.warning(
-            "probe_me: transient error for %s — keep polling", user_id, exc_info=True
-        )
-        return "captcha"
-
-
 def _seconds_until_next_local_midnight(user_id: str) -> float:
     tz = limiter._tz_for_user(user_id)  # ok — both worker module
     now = datetime.now(tz)
     tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=10, microsecond=0)
     return max(60.0, (tomorrow - now).total_seconds())
+
+
+async def _stop_worker_token_dead(handle: RunnerHandle, context: str) -> None:
+    user_id = handle.user_id
+    handle.state = "stopped"
+    handle.last_error = "hh token dead — reconnect required"
+    await notify(user_id, "token_dead", {})
+    await notify(user_id, "worker_stop", {"reason": "token_dead"})
+    await _disable_worker(user_id)
+    await heartbeat(
+        user_id, state="stopped", queued=0, next_run_at=None, last_error=handle.last_error
+    )
+    logger.error("user %s: token dead (%s) — stopping", user_id, context)
+
+
+async def _resume_from_captcha(handle: RunnerHandle) -> None:
+    user_id = handle.user_id
+    from app.services.hh_auth import _persist_web_session_only
+
+    cookies = await web_captcha.cookies_for(user_id)
+    await web_captcha.close_for(user_id)
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _persist_web_session_only, user_id, cookies)
+    await captcha_service.mark_solved(user_id)
+    await notify(user_id, "captcha", {"resolved": True})
+    handle.state = "running"
+    await heartbeat(
+        user_id,
+        state="running",
+        queued=0,
+        next_run_at=handle.next_run_at,
+        last_error=None,
+    )
+    logger.info("user %s: captcha cleared — resuming", user_id)
+
+
+async def _run_paused_captcha(handle: RunnerHandle) -> None:
+    """Own the captcha browser for the duration of one pause: open it, show
+    the challenge, poll the database for a typed solution (the API process
+    that receives it has no other way to reach this one), submit, repeat on
+    a wrong answer, resume on a right one."""
+    user_id = handle.user_id
+    handle.next_run_at = None
+    request_id: str | None = None
+    idle_ticks = 0
+
+    try:
+        while handle.state == "paused_captcha":
+            if user_id not in web_captcha._sessions:
+                try:
+                    cookies = await form_filler.load_web_cookies(user_id)
+                except ValueError:
+                    await _stop_worker_token_dead(handle, "no stored web session")
+                    return
+
+                pending = await captcha_service.get_pending(user_id)
+                request_id = pending[0]["id"] if pending else None
+                challenge_url = (
+                    (pending[0].get("captcha_url") if pending else None)
+                    or "https://hh.ru/account/captcha"
+                )
+                try:
+                    result, screenshot = await web_captcha.open_for(user_id, challenge_url, cookies)
+                except web_captcha.AtCapacity:
+                    await asyncio.sleep(CAPTCHA_OPEN_RETRY_S)
+                    continue
+
+                if result == "token_dead":
+                    await web_captcha.close_for(user_id)
+                    await _stop_worker_token_dead(handle, "captcha page")
+                    return
+                if result == "cleared":
+                    await _resume_from_captcha(handle)
+                    continue
+                if request_id:
+                    await captcha_service.attach_screenshot(request_id, screenshot)
+                idle_ticks = 0
+
+            await asyncio.sleep(CAPTCHA_POLL_S)
+            if handle.state != "paused_captcha":
+                break
+
+            solution = await captcha_service.get_solution(request_id) if request_id else None
+            if not solution:
+                idle_ticks += 1
+                if idle_ticks * CAPTCHA_POLL_S > CAPTCHA_BROWSER_IDLE_TIMEOUT_S:
+                    await web_captcha.close_for(user_id)
+                continue
+
+            await captcha_service.clear_solution(request_id)
+            result, screenshot = await web_captcha.submit_for(user_id, solution)
+            if result == "captcha":
+                if request_id:
+                    await captcha_service.attach_screenshot(request_id, screenshot)
+                idle_ticks = 0
+                continue
+            if result == "token_dead":
+                await web_captcha.close_for(user_id)
+                await _stop_worker_token_dead(handle, "after captcha submit")
+                return
+            await _resume_from_captcha(handle)
+    finally:
+        if user_id in web_captcha._sessions:
+            await web_captcha.close_for(user_id)
 
 
 async def _run_loop(handle: RunnerHandle) -> None:
@@ -215,49 +301,11 @@ async def _run_loop(handle: RunnerHandle) -> None:
             "runner: user=%s tick state=%s queue=%d today=%d",
             user_id, handle.state, queue.qsize(), handle.today_count,
         )
-        # Captcha pause — wait until external resume sets event.
+        # Captcha pause — open a browser holding the account's cookies, show
+        # the real challenge, poll the DB for a typed solution, resume on a
+        # right answer.
         if handle.state == "paused_captcha":
-            handle.next_run_at = None
-            while handle.state == "paused_captcha":
-                try:
-                    await asyncio.wait_for(
-                        handle.captcha_event.wait(), timeout=CAPTCHA_POLL_S
-                    )
-                except TimeoutError:
-                    pass
-                handle.captcha_event.clear()
-                if handle.state != "paused_captcha":
-                    break
-                result = await _probe_me(user_id)
-                if result == "ok":
-                    await captcha_service.mark_solved(user_id)
-                    await notify(user_id, "captcha", {"resolved": True})
-                    handle.state = "running"
-                    await _hb()
-                    logger.info("user %s: captcha cleared — resuming", user_id)
-                elif result == "token_dead":
-                    handle.state = "stopped"
-                    handle.last_error = "hh token dead — reconnect required"
-                    await notify(user_id, "token_dead", {})
-                    await notify(user_id, "worker_stop", {"reason": "token_dead"})
-                    await _disable_worker(user_id)
-                    await _hb()
-                    logger.error(
-                        "user %s: token dead during captcha probe — stopping", user_id
-                    )
-                    return
-                elif result == "banned":
-                    handle.state = "stopped"
-                    handle.last_error = "hh account banned"
-                    await notify(user_id, "account_banned", {})
-                    await notify(user_id, "worker_stop", {"reason": "account_banned"})
-                    await _disable_worker(user_id)
-                    await _hb()
-                    logger.error(
-                        "user %s: account banned during captcha probe — stopping", user_id
-                    )
-                    return
-                # "captcha" → keep polling
+            await _run_paused_captcha(handle)
             if handle.state == "stopped":
                 return
 
@@ -360,7 +408,6 @@ async def _run_loop(handle: RunnerHandle) -> None:
             handle.cluster.record_apply()
         elif status == "captcha":
             handle.state = "paused_captcha"
-            handle.captcha_event.clear()
             handle.last_error = f"captcha on vacancy {job.vacancy_id}"
             logger.warning("user %s: captcha — pausing", user_id)
             await notify(user_id, "captcha", {"vacancy_id": job.vacancy_id})
@@ -595,13 +642,6 @@ class WorkerRegistry:
             if apply_live or agent_live:
                 out.append(uid)
         return out
-
-    def resume_captcha(self, user_id: str) -> bool:
-        handle = self._handles.get(user_id)
-        if not handle or handle.state != "paused_captcha":
-            return False
-        handle.captcha_event.set()
-        return True
 
     async def stop_all(self) -> None:
         for user_id in list(self._handles.keys()):

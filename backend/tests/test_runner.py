@@ -155,31 +155,6 @@ async def test_registry_reconcile_independent_loops():
         assert registry.active_user_ids() == []
 
 
-async def test_registry_resume_captcha():
-    from app.worker import runner
-
-    runner.reset_registry()
-    registry = runner.get_registry()
-
-    import asyncio
-
-    async def idle_loop(handle):
-        try:
-            await asyncio.sleep(60)
-        except asyncio.CancelledError:
-            raise
-
-    with patch.object(runner, "_run_loop", side_effect=idle_loop):
-        handle = await registry.start("u2")
-        handle.state = "paused_captcha"
-        assert registry.resume_captcha("u2") is True
-        assert handle.captcha_event.is_set()
-        # Wrong state returns False.
-        handle.state = "running"
-        assert registry.resume_captcha("u2") is False
-        await registry.stop("u2")
-
-
 async def _drain_loop(handle, *, limits, check_result="allowed", produce=(0, 0)):
     """Прогнать _run_loop с замоканными зависимостями до самоостановки."""
     import asyncio
@@ -240,53 +215,205 @@ async def test_limit_total_stops_runner_and_clears_flag():
     assert notify_mock.await_args[0][1] == "limit_total"
 
 
-async def test_probe_me_ok():
+async def test_paused_captcha_opens_browser_and_resumes_on_cleared():
+    """A pending captcha_requests row with a solution ready should drive
+    open_for → submit_for → "cleared" → persisted cookies → running."""
     from app.worker import runner
 
-    async def _ok(user_id):
-        return [{"id": "r1"}]
+    runner.reset_registry()
+    runner.web_captcha._sessions.clear()
 
-    with patch.object(runner.hh_web, "list_resumes", new=_ok):
-        assert await runner._probe_me("u1") == "ok"
+    handle = runner.RunnerHandle(user_id="u1")
+    handle.state = "paused_captcha"
 
+    persisted = []
 
-async def test_probe_me_transient_keeps_polling():
-    from app.worker import runner
+    async def _fake_load_cookies(user_id):
+        return [{"name": "a", "value": "b"}]
 
-    async def _boom(user_id):
-        raise RuntimeError("connection reset")
+    async def _fake_get_pending(user_id):
+        return [{"id": "req1", "captcha_url": "https://hh.ru/account/captcha?state=x"}]
 
-    with patch.object(runner.hh_web, "list_resumes", new=_boom):
-        assert await runner._probe_me("u1") == "captcha"
+    async def _fake_open_for(user_id, challenge_url, cookies):
+        runner.web_captcha._sessions[user_id] = object()
+        return "captcha", b"PNG"
 
+    async def _fake_attach(request_id, png):
+        pass
 
-async def test_probe_me_dead_web_session_is_terminal():
-    """The probe must fail where applying fails. Probing the OAuth API used to
-    report a healthy account while every apply died on a login wall."""
-    from app.services.form_filler import WebSessionExpired
-    from app.worker import runner
+    async def _fake_get_solution(request_id):
+        return "AB12"
 
-    async def _dead(user_id):
-        raise WebSessionExpired("hh rejected the web session (403)")
+    async def _fake_clear_solution(request_id):
+        pass
 
-    marked = []
+    async def _fake_submit_for(user_id, solution):
+        return "cleared", None
 
-    async def _mark(user_id, reason):
-        marked.append(user_id)
+    async def _fake_cookies_for(user_id):
+        return [{"name": "fresh", "value": "cookie"}]
+
+    async def _fake_close_for(user_id):
+        runner.web_captcha._sessions.pop(user_id, None)
+
+    def _fake_persist(user_id, cookies):
+        persisted.append((user_id, cookies))
+
+    async def _fake_mark_solved(user_id):
+        pass
+
+    async def _fake_notify(user_id, type_, payload=None):
+        pass
+
+    async def _fake_hb(*a, **k):
+        pass
 
     with (
-        patch.object(runner.hh_web, "list_resumes", new=_dead),
-        patch.object(runner, "mark_invalid", new=_mark),
+        patch.object(runner.form_filler, "load_web_cookies", new=_fake_load_cookies),
+        patch.object(runner.captcha_service, "get_pending", new=_fake_get_pending),
+        patch.object(runner.web_captcha, "open_for", new=_fake_open_for),
+        patch.object(runner.captcha_service, "attach_screenshot", new=_fake_attach),
+        patch.object(runner.captcha_service, "get_solution", new=_fake_get_solution),
+        patch.object(runner.captcha_service, "clear_solution", new=_fake_clear_solution),
+        patch.object(runner.web_captcha, "submit_for", new=_fake_submit_for),
+        patch.object(runner.web_captcha, "cookies_for", new=_fake_cookies_for),
+        patch.object(runner.web_captcha, "close_for", new=_fake_close_for),
+        patch.object(runner.captcha_service, "mark_solved", new=_fake_mark_solved),
+        patch.object(runner, "notify", new=_fake_notify),
+        patch.object(runner, "heartbeat", new=_fake_hb),
+        patch("app.services.hh_auth._persist_web_session_only", side_effect=_fake_persist),
+        patch.object(runner, "CAPTCHA_POLL_S", 0),
     ):
-        assert await runner._probe_me("u1") == "token_dead"
-    assert marked == ["u1"]
+        await runner._run_paused_captcha(handle)
+
+    assert handle.state == "running"
+    assert persisted == [("u1", [{"name": "fresh", "value": "cookie"}])]
 
 
-async def test_probe_me_no_stored_session_is_terminal():
+async def test_paused_captcha_wrong_answer_loops_without_leaving_pause():
     from app.worker import runner
 
-    async def _none(user_id):
-        raise ValueError("no stored web session for user u1")
+    runner.reset_registry()
+    runner.web_captcha._sessions.clear()
 
-    with patch.object(runner.hh_web, "list_resumes", new=_none):
-        assert await runner._probe_me("u1") == "token_dead"
+    handle = runner.RunnerHandle(user_id="u1")
+    handle.state = "paused_captcha"
+
+    submit_calls = []
+    solutions = iter(["wrong-once", "right-answer"])
+    results = iter([("captcha", b"PNG2"), ("cleared", None)])
+
+    async def _fake_load_cookies(user_id):
+        return []
+
+    async def _fake_get_pending(user_id):
+        return [{"id": "req1", "captcha_url": "https://hh.ru/account/captcha"}]
+
+    async def _fake_open_for(user_id, challenge_url, cookies):
+        runner.web_captcha._sessions[user_id] = object()
+        return "captcha", b"PNG1"
+
+    async def _fake_attach(request_id, png):
+        pass
+
+    async def _fake_get_solution(request_id):
+        return next(solutions, None)
+
+    async def _fake_clear_solution(request_id):
+        pass
+
+    async def _fake_submit_for(user_id, solution):
+        submit_calls.append(solution)
+        return next(results)
+
+    async def _fake_cookies_for(user_id):
+        return []
+
+    async def _fake_close_for(user_id):
+        runner.web_captcha._sessions.pop(user_id, None)
+
+    async def _fake_mark_solved(user_id):
+        pass
+
+    async def _fake_notify(user_id, type_, payload=None):
+        pass
+
+    async def _fake_hb(*a, **k):
+        pass
+
+    def _fake_persist(user_id, cookies):
+        pass
+
+    with (
+        patch.object(runner.form_filler, "load_web_cookies", new=_fake_load_cookies),
+        patch.object(runner.captcha_service, "get_pending", new=_fake_get_pending),
+        patch.object(runner.web_captcha, "open_for", new=_fake_open_for),
+        patch.object(runner.captcha_service, "attach_screenshot", new=_fake_attach),
+        patch.object(runner.captcha_service, "get_solution", new=_fake_get_solution),
+        patch.object(runner.captcha_service, "clear_solution", new=_fake_clear_solution),
+        patch.object(runner.web_captcha, "submit_for", new=_fake_submit_for),
+        patch.object(runner.web_captcha, "cookies_for", new=_fake_cookies_for),
+        patch.object(runner.web_captcha, "close_for", new=_fake_close_for),
+        patch.object(runner.captcha_service, "mark_solved", new=_fake_mark_solved),
+        patch.object(runner, "notify", new=_fake_notify),
+        patch.object(runner, "heartbeat", new=_fake_hb),
+        patch("app.services.hh_auth._persist_web_session_only", side_effect=_fake_persist),
+        patch.object(runner, "CAPTCHA_POLL_S", 0),
+    ):
+        await runner._run_paused_captcha(handle)
+
+    assert submit_calls == ["wrong-once", "right-answer"]
+    assert handle.state == "running"
+
+
+async def test_paused_captcha_idle_timeout_closes_browser_without_ending_pause():
+    """No solution ever arrives for CAPTCHA_BROWSER_IDLE_TIMEOUT_S — the
+    browser must free its slot on its own; the pause itself must not end
+    (no solve, no resume) — only the test's own sentinel in _fake_close_for
+    ends the loop, so a pass here proves the close happened without also
+    proving a real resume happened."""
+    from app.worker import runner
+
+    runner.reset_registry()
+    runner.web_captcha._sessions.clear()
+
+    handle = runner.RunnerHandle(user_id="u1")
+    handle.state = "paused_captcha"
+
+    async def _fake_load_cookies(user_id):
+        return []
+
+    async def _fake_get_pending(user_id):
+        return [{"id": "req1", "captcha_url": "https://hh.ru/account/captcha"}]
+
+    async def _fake_open_for(user_id, challenge_url, cookies):
+        runner.web_captcha._sessions[user_id] = object()
+        return "captcha", b"PNG"
+
+    async def _fake_attach(request_id, png):
+        pass
+
+    async def _fake_get_solution(request_id):
+        return None  # never solved
+
+    closed = []
+
+    async def _fake_close_for(user_id):
+        closed.append(user_id)
+        runner.web_captcha._sessions.pop(user_id, None)
+        handle.state = "stopped"  # test sentinel: end the loop once we've seen one close
+
+    with (
+        patch.object(runner.form_filler, "load_web_cookies", new=_fake_load_cookies),
+        patch.object(runner.captcha_service, "get_pending", new=_fake_get_pending),
+        patch.object(runner.web_captcha, "open_for", new=_fake_open_for),
+        patch.object(runner.captcha_service, "attach_screenshot", new=_fake_attach),
+        patch.object(runner.captcha_service, "get_solution", new=_fake_get_solution),
+        patch.object(runner.web_captcha, "close_for", new=_fake_close_for),
+        patch.object(runner, "CAPTCHA_POLL_S", 0.001),
+        patch.object(runner, "CAPTCHA_BROWSER_IDLE_TIMEOUT_S", 0.002),
+    ):
+        await runner._run_paused_captcha(handle)
+
+    assert closed == ["u1"]
+    assert handle.state == "stopped"  # test's own sentinel, not a captcha resolution
