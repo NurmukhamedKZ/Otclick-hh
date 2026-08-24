@@ -407,3 +407,34 @@ def test_submit_syncs_the_xsrf_cookie_with_the_token_it_sends():
         "_xsrf", "FRESH", domain="hh.ru", path="/"
     )
     assert session.post.call_args.kwargs["headers"]["X-Xsrftoken"] == "FRESH"
+
+
+def test_session_looks_dead_detects_200_antibot_interstitial():
+    """hh serves a 200 antibot interstitial WITHOUT the inline state JSON.
+    A real page always carries xsrfToken; its absence + missing shortVacancy
+    means hh replaced the page — must look dead so the runner backs off."""
+    from types import SimpleNamespace
+
+    from app.services.form_filler import session_looks_dead
+
+    real_page = SimpleNamespace(
+        status_code=200,
+        url="https://hh.ru/vacancy/1",
+        text='{"xsrfToken":"abc","shortVacancy":{}}',
+    )
+    assert session_looks_dead(real_page) is False
+
+    interstitial = SimpleNamespace(
+        status_code=200,
+        url="https://hh.ru/vacancy/1",
+        text="<html>please verify you are human</html>",
+    )
+    assert session_looks_dead(interstitial) is True
+
+    # A real search page has xsrfToken but no shortVacancy — must NOT be flagged.
+    real_search = SimpleNamespace(
+        status_code=200,
+        url="https://hh.ru/search/vacancy",
+        text='{"xsrfToken":"abc","vacancySearchResult":{}}',
+    )
+    assert session_looks_dead(real_search) is False

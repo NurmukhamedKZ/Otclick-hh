@@ -33,9 +33,14 @@ export default function WeeklyPlan() {
     let cancelled = false;
     (async () => {
       const start = startOfWeek(new Date());
+      // Note: supabase-js sends a HEAD request for `head: true`, but the local
+      // shim does not implement HEAD (returns 405 → count is undefined → 0).
+      // Use a real GET with count=exact: the shim honours Prefer: count=exact
+      // and returns the total in content-range, while still shipping rows.
+      // We select only `id` to keep the payload tiny.
       const { count } = await supabase
         .from("applications")
-        .select("*", { count: "exact", head: true })
+        .select("id", { count: "exact" })
         .gte("created_at", start.toISOString())
         .in("status", ["sent", "form_sent"]);
       if (cancelled) return;

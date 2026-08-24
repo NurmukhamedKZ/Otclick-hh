@@ -22,7 +22,9 @@ import requests
 
 from app.hh.page_json import find_state
 from app.services.form_filler import (
+    AntibotBlock,
     WebSessionExpired,
+    dump_blocked_page,
     load_web_session,
     session_looks_dead,
 )
@@ -124,7 +126,20 @@ async def get_vacancy(user_id: str, vacancy_id: str) -> dict:
     url = f"{WEB_BASE}/vacancy/{vacancy_id}"
     resp = await loop.run_in_executor(None, _get, session, user_id, url)
 
-    short = find_state(resp.text, "shortVacancy")
+    try:
+        short = find_state(resp.text, "shortVacancy")
+    except ValueError:
+        # hh served a 200 page without the inline state JSON — an antibot
+        # interstitial. Dump it for confirmation, then surface as a typed
+        # error the runner can back off from.
+        dump_path = dump_blocked_page(user_id, vacancy_id, resp.text)
+        logger.warning(
+            "get_vacancy: shortVacancy absent for %s/%s (dump=%s, len=%d)",
+            user_id, vacancy_id, dump_path, len(resp.text or ""),
+        )
+        raise AntibotBlock(
+            f"antibot interstitial on vacancy {vacancy_id} (dump={dump_path})"
+        )
     vacancy = _normalise_vacancy(short)
 
     try:

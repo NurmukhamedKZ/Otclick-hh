@@ -117,7 +117,7 @@ function ApplicationsView() {
     if (status !== "all") q = q.eq("status", status);
     const term = sanitizeSearch(view.q);
     if (term) {
-      q = q.or(`vacancy_id.ilike.%${term}%,employer_id.ilike.%${term}%`);
+      q = q.or(`vacancy_id.ilike.%${term}%,employer_id.ilike.%${term}%,vacancy_title.ilike.%${term}%,employer_name.ilike.%${term}%`);
     }
 
     const { data, count, error } = await q;
@@ -220,7 +220,7 @@ function ApplicationsView() {
           >
             <ISearch size={16} stroke="var(--muted)" />
             <input
-              placeholder="vacancy_id, employer_id…"
+              placeholder="vacancy, работодатель…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               style={{
@@ -337,7 +337,7 @@ function ApplicationsView() {
                       whiteSpace: "nowrap",
                     }}
                   >
-                    vacancy {a.vacancy_id}
+                    {a.vacancy_title ? a.vacancy_title : `Вакансия ${a.vacancy_id}`}
                   </div>
                   {a.resume_id && (
                     <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
@@ -391,7 +391,7 @@ function ApplicationsView() {
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {a.employer_id ?? "—"}
+                    {a.employer_name ? a.employer_name : (a.employer_id ?? "—")}
                   </span>
                 </div>
                 <div

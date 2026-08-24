@@ -27,3 +27,10 @@ extension/
 # recon dumps (contain a logged-in hh page)
 backend/recon_oauth_out/
 backend/recon_web_out/
+
+# antibot interstitial page dumps (debugging artifacts, may contain session tokens)
+backend/var/
+
+# local env backups & scratch files (never commit — contain secrets)
+.env.bak.*
+q.sql

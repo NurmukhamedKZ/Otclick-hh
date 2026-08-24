@@ -1,3 +1,4 @@
+import json
 import os
 
 os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
@@ -187,7 +188,7 @@ async def test_send_draft_posts_to_hh_and_marks_sent():
 
 
 @pytest.mark.asyncio
-async def test_send_draft_saves_qa_memory_only_when_edited():
+async def test_send_draft_saves_qa_memory_on_send():
     from app.services import recruiter
 
     row = {
@@ -205,12 +206,14 @@ async def test_send_draft_saves_qa_memory_only_when_edited():
          patch.object(recruiter.qa_memory, "upsert", new=AsyncMock()) as up:
         await recruiter.send_draft("u1", "d1", message="edited reply")
     up.assert_awaited_once_with(
-        "u1", "Готовы к переезду?", "edited reply", source="recruiter", vacancy_id="n9"
+        "u1", "Готовы к переезду?", "edited reply", source="chat", vacancy_id="n9"
     )
 
 
 @pytest.mark.asyncio
-async def test_send_draft_skips_qa_memory_when_unchanged():
+async def test_send_draft_saves_qa_memory_even_when_unchanged():
+    """Sending confirms the reply — it is source-of-truth regardless of whether
+    the user edited the AI draft, so qa_memory is always populated on send."""
     from app.services import recruiter
 
     row = {
@@ -227,7 +230,9 @@ async def test_send_draft_skips_qa_memory_when_unchanged():
          patch.object(recruiter, "persist_if_refreshed", new=_async_noop()), \
          patch.object(recruiter.qa_memory, "upsert", new=AsyncMock()) as up:
         await recruiter.send_draft("u1", "d1", message="orig")
-    up.assert_not_awaited()
+    up.assert_awaited_once_with(
+        "u1", "Готовы к переезду?", "orig", source="chat", vacancy_id="n9"
+    )
 
 
 # --- questions (ask-only escalation) ----------------------------------------
@@ -245,7 +250,7 @@ async def test_insert_question_writes_row():
     assert args["user_id"] == "u1"
     assert args["negotiation_id"] == "n1"
     assert args["chat_id"] == "c1" and args["applicant_id"] == "me"
-    assert args["questions"] == ["Когда удобно?"]
+    assert json.loads(args["questions"]) == ["Когда удобно?"]
     assert args["reason"] == "scheduling"
     assert args["status"] == "pending"
 
@@ -279,7 +284,7 @@ async def test_submit_answers_sets_answered():
         await recruiter.submit_answers("u1", "q1", ["среда"])
     upd = chain.update.call_args[0][0]
     assert upd["status"] == "answered"
-    assert upd["answers"] == ["среда"]
+    assert json.loads(upd["answers"]) == ["среда"]
     assert upd["answered_at"] is not None
 
 

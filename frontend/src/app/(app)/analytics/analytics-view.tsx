@@ -361,7 +361,7 @@ export default function AnalyticsView() {
                   rel="noopener noreferrer"
                   style={{ color: "var(--ink)" }}
                 >
-                  {e.employer_name || `employer ${e.employer_id}`}
+                  {e.employer_name || `Работодатель ${e.employer_id}`}
                 </a>
                 <span style={{ color: "var(--muted)" }}>{e.sent} откликов без ответа</span>
               </div>

@@ -69,7 +69,7 @@ export type BlacklistCreate = {
 };
 
 export type WorkerStatus = {
-  state: "starting" | "running" | "paused_captcha" | "paused_limit" | "idle" | "stopped";
+  state: "starting" | "running" | "paused_captcha" | "paused_limit" | "paused_antibot" | "idle" | "stopped";
   agent_state: "running" | "stopped";
   today_count: number;
   daily_limit: number;
@@ -114,7 +114,9 @@ export type Application = {
   user_id: string;
   resume_id: string | null;
   vacancy_id: string;
+  vacancy_title: string | null;
   employer_id: string | null;
+  employer_name: string | null;
   status: string;
   cover_letter: string | null;
   applied_at: string | null;

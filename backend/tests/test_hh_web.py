@@ -120,6 +120,26 @@ async def test_get_vacancy_raises_vacancy_gone_on_404(monkeypatch):
         await web.get_vacancy("u1", "42")
 
 
+@pytest.mark.asyncio
+async def test_get_vacancy_raises_antibot_block_when_state_absent(monkeypatch):
+    """A 200 page without the inline state JSON is an antibot interstitial, not
+    a parse error — must surface as a typed error the runner backs off from,
+    not a bare ValueError that becomes 'failed'."""
+    from app.hh import web
+    from app.services.form_filler import AntibotBlock
+
+    async def _load_web_session(_user_id):
+        return SimpleNamespace()
+
+    # A 200 interstitial: no shortVacancy, no xsrfToken (so session_looks_dead
+    # is bypassed by stubbing _get directly and feeding raw HTML).
+    monkeypatch.setattr(web, "_get", _fake_get("<html>please verify you are human</html>"))
+    monkeypatch.setattr(web, "load_web_session", _load_web_session)
+    monkeypatch.setattr(web, "dump_blocked_page", lambda *a: None)
+    with pytest.raises(AntibotBlock):
+        await web.get_vacancy("u1", "42")
+
+
 RESUMES_PAGE = (
     '<html>{&#34;applicantResumes&#34;:[{'
     '&#34;title&#34;:[{&#34;string&#34;:&#34;AI-инженер&#34;}],'
