@@ -414,11 +414,14 @@ async def _handle_text(token: str, chat_id: str, text: str, user_id: str) -> Non
     try:
         if pending["kind"] == "qans":
             from app.services import recruiter as svc
-            # Single-message mode: split by newlines if multiple questions.
+            # Split by newlines; drop empties.
             answers = [p.strip() for p in text.split("\n") if p.strip()]
-            if len(answers) == 1:
-                # Repeat the single answer for every question (common case).
-                pass
+            # One line for a multi-question set → fan out the same answer to all
+            # questions (the common case: the user gives one answer that covers
+            # all). submit_answers validates len == len(questions).
+            need = int(pending.get("left") or "1")
+            if len(answers) == 1 and need > 1:
+                answers = answers * need
             await svc.submit_answers(user_id, pending["entity_id"], answers)
             await _send_text(
                 token, chat_id,
