@@ -65,7 +65,7 @@ async def open_for(user_id: str, challenge_url: str, cookies: list[dict]) -> tup
     await _semaphore.acquire()
     pw = await async_playwright().start()
     try:
-        browser = await pw.chromium.launch(headless=True)
+        browser = await pw.chromium.launch(headless=True, args=["--disable-dev-shm-usage"])
         device = pw.devices["Galaxy A55"]
         context = await browser.new_context(**device)
         await context.add_cookies(cookies)

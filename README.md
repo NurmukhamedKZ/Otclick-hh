@@ -189,8 +189,10 @@ Nothing to fill in by hand. AI features are optional — add `OPENAI_API_KEY` to
 Re-run with `--force` to rotate every secret (existing sessions and encrypted
 hh tokens become unreadable).
 
-No cloud account needed. Everything runs locally — there is no hosted Supabase
-project, this stack is the only environment. There is exactly **one** env file:
+No cloud account needed. Everything runs locally — the default path is a
+self-hosted Supabase stack, not a hosted Supabase project. (If you'd rather not
+run a server yourself, see [Cloud deployment](#cloud-deployment-vercel--railway--supabase-cloud)
+below for a Vercel + Railway + Supabase Cloud alternative.) There is exactly **one** env file:
 the repo-root `.env`. Compose reads it for its own `${...}` substitutions, the
 `api`/`worker` containers get it as `env_file`, and `cd backend && uvicorn`
 picks up the same file. (`frontend/.env.local` is only for running `npm run dev`
@@ -211,6 +213,57 @@ If your database predates the ledger, the first run **baselines** it: every
 migration currently on disk is recorded as applied without being replayed
 (replaying them into a live DB would fail). Verify the newest ones really
 landed before trusting it.
+
+### Cloud deployment (Vercel + Railway + Supabase Cloud)
+
+If you'd rather not run Docker Compose on your own server, the same codebase
+deploys to managed platforms instead — no self-hosted Postgres/Auth/Kong stack.
+This trades the "no cloud account needed" simplicity of Docker Compose for
+"no server to patch or back up."
+
+1. **Database — Supabase Cloud.** Create a project at
+   [supabase.com](https://supabase.com/dashboard), then push the schema:
+   ```bash
+   supabase link --project-ref <your-project-ref>
+   supabase db push --include-all
+   ```
+   In **Auth → URL Configuration**, set Site URL to your frontend's URL and
+   add it to the redirect allow-list. If you don't have SMTP configured, turn
+   **off** "Confirm email" (mailer autoconfirm) — otherwise sign-up dead-ends
+   waiting on a confirmation email nothing sends. Grab the project URL and its
+   `anon`/`service_role` keys from **Project Settings → API**.
+
+2. **Backend — Railway.** Create two services from this repo, both building
+   `backend/Dockerfile` with the **root directory set to the repo root**
+   (the Dockerfile's `COPY` paths assume that build context):
+   - `api` — healthcheck path `/health`, needs a public domain (`PORT=8000`).
+   - `worker` — same image, override the start command to `python worker_main.py`.
+
+   Set the same variables as `.env.example` on both services, except point
+   `SUPABASE_URL` / `SUPABASE_PUBLIC_URL` at your Supabase Cloud project URL
+   (there's no `kong:8000` to route through) and set `CORS_ORIGINS` to your
+   frontend's domain. Railway containers can't get Docker Compose's
+   `shm_size: 1gb` for Playwright's Chromium — this repo already launches it
+   with `--disable-dev-shm-usage` to compensate (see `backend/app/hh/authorize.py`
+   and `backend/app/hh/web_captcha.py`), so no extra config needed there.
+
+   Deploy from your machine (no GitHub integration required — re-run this after
+   every backend change):
+   ```bash
+   railway up --service api
+   railway up --service worker
+   ```
+
+3. **Frontend — Vercel.** Import the repo with **Root Directory** set to
+   `frontend/`. Set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+   `NEXT_PUBLIC_API_URL` (your Railway `api` domain), and `NEXT_PUBLIC_APP_URL`
+   (your Vercel domain), then deploy.
+
+4. **Scheduled jobs.** There's no host crontab on a PaaS. The simplest fix is a
+   tiny third Railway service on a cron schedule (`alpine:latest`, no HTTP port)
+   whose start command `curl`s the two endpoints from
+   [Scheduled jobs](#scheduled-jobs-self-hosted) below — or point any external
+   cron (e.g. cron-job.org) at them instead.
 
 ### Backend-only dev
 

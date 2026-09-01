@@ -109,7 +109,7 @@ async def get_auth_code(
                 If captcha appears and callback is None, raises RuntimeError.
     """
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=headless)
+        browser = await pw.chromium.launch(headless=headless, args=["--disable-dev-shm-usage"])
         try:
             device = pw.devices["Galaxy A55"]
             context = await browser.new_context(**device)
@@ -207,7 +207,7 @@ async def get_auth_code_via_email_code(
     on_captcha: async callback (screenshot_png_bytes) → solution_string.
     """
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=headless)
+        browser = await pw.chromium.launch(headless=headless, args=["--disable-dev-shm-usage"])
         try:
             device = pw.devices["Galaxy A55"]
             context = await browser.new_context(**device)
