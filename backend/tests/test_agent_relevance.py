@@ -24,7 +24,7 @@ async def test_filter_relevant_vacancies_grounds_and_classifies():
          patch("app.services.form_filler._resume_summary",
                return_value="AI engineer resume"), \
          patch("app.ai.agent.filter_relevant",
-               return_value={"v1": (True, ""), "v2": (False, "sales")}) as fr:
+               return_value=({"v1": (True, ""), "v2": (False, "sales")}, [])) as fr:
         out = await agent.filter_relevant_vacancies("r1", ITEMS)
     assert out["v2"][0] is False
     # grounded in the loaded summary
@@ -39,7 +39,7 @@ async def test_filter_relevant_vacancies_caches_summary_per_resume():
     load = AsyncMock(return_value={"title": "AI Engineer"})
     with patch("app.services.form_filler.load_resume", new=load), \
          patch("app.services.form_filler._resume_summary", return_value="sum"), \
-         patch("app.ai.agent.filter_relevant", return_value={}):
+         patch("app.ai.agent.filter_relevant", return_value=({}, [])):
         await agent.filter_relevant_vacancies("r1", ITEMS)
         await agent.filter_relevant_vacancies("r1", ITEMS)
     assert load.await_count == 1  # second call uses cached summary

@@ -1,6 +1,7 @@
-import httpx
 import json
 from typing import Any
+
+import httpx
 from supabase import Client, create_client
 from supabase.lib.client_options import SyncClientOptions
 

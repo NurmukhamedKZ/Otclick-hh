@@ -19,6 +19,7 @@ class FilterCreate(BaseModel):
     excluded_text: str | None = None
     enabled: bool = True
     ai_filter_enabled: bool = False
+    relevance_criteria: str | None = None
 
 
 class FilterUpdate(BaseModel):
@@ -34,6 +35,7 @@ class FilterUpdate(BaseModel):
     excluded_text: str | None = None
     enabled: bool | None = None
     ai_filter_enabled: bool | None = None
+    relevance_criteria: str | None = None
 
     @model_validator(mode="after")
     def _at_least_one(self):
@@ -56,6 +58,7 @@ class FilterResponse(BaseModel):
     excluded_text: str | None = None
     enabled: bool = True
     ai_filter_enabled: bool = False
+    relevance_criteria: str | None = None
     created_at: datetime | None = None
 
 
@@ -71,3 +74,21 @@ class VacancyPreviewItem(BaseModel):
 class FilterPreviewResponse(BaseModel):
     found: int
     items: list[VacancyPreviewItem]
+
+
+class AutoFilterRequest(BaseModel):
+    resume_id: str = Field(min_length=1)
+
+
+class FilterSuggestion(BaseModel):
+    """One LLM-proposed filter draft — NOT persisted; the client reviews and
+    creates a real filter via POST /api/filters."""
+    name: str | None = None
+    text: str | None = None
+    area: int | None = None
+    experience: str | None = None
+    work_format: str | None = None
+    employment_form: str | None = None
+    search_field: str | None = None
+    period: int | None = None
+    excluded_text: str | None = None

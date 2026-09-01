@@ -25,7 +25,8 @@ def _load_enabled_filters(user_id: str) -> list[dict]:
         service_client.table("filters")
         .select(
             "id,resume_id,text,area,experience,work_format,employment_form,"
-            "search_field,period,excluded_text,ai_filter_enabled"
+            "search_field,period,excluded_text,ai_filter_enabled,"
+            "relevance_criteria"
         )
         .eq("user_id", user_id)
         .eq("enabled", True)
@@ -68,12 +69,15 @@ def _blacklisted_employer_ids(user_id: str, employer_ids: list[str]) -> set[str]
 
 
 async def _relevant_ids(
-    loop, agent, user_id: str, resume_id: str, candidates: list[dict]
+    loop, agent, user_id: str, resume_id: str, candidates: list[dict],
+    criteria: str | None = None,
 ) -> set[str]:
     """Return the subset of candidate vacancy ids that are relevant.
 
-    Cache-first: only uncached items hit the LLM. Fail-open: no agent → all
-    relevant. candidates carry {id, name, snippet_requirement, snippet_responsibility}.
+    Cache-first: only uncached items hit the LLM. Stage 2 (full-description
+    recheck of "uncertain" vacancies) runs inside agent.filter_relevant_vacancies.
+    Fail-open: no agent → all relevant. candidates carry
+    {id, name, snippet_requirement, snippet_responsibility}.
     """
     ids = [c["id"] for c in candidates]
     if agent is None or not ids:
@@ -84,7 +88,9 @@ async def _relevant_ids(
     uncached = [c for c in candidates if c["id"] not in cached]
     fresh: dict[str, tuple[bool, str]] = {}
     if uncached:
-        fresh = await agent.filter_relevant_vacancies(resume_id, uncached)
+        fresh = await agent.filter_relevant_vacancies(
+            resume_id, uncached, criteria=criteria
+        )
         await loop.run_in_executor(
             None, relevance.store_verdicts, user_id, resume_id, fresh, uncached
         )
@@ -183,7 +189,8 @@ async def _filter_candidate_stream(loop, agent, user_id: str, f: dict):
 
             if f.get("ai_filter_enabled") and page_candidates:
                 keep = await _relevant_ids(
-                    loop, agent, user_id, f["resume_id"], page_candidates
+                    loop, agent, user_id, f["resume_id"], page_candidates,
+                    criteria=f.get("relevance_criteria"),
                 )
                 dropped = len(page_candidates) - len(keep)
                 if dropped:

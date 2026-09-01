@@ -317,22 +317,109 @@ def build_form_text_prompt(question: str, resume_ctx: str, mode: str | None = No
 
 # --- vacancy relevance ------------------------------------------------------
 
-def build_relevance_prompt(resume_summary: str, items_block: str) -> str:
-    """Classify which vacancies clearly do NOT match the candidate's resume.
-
-    Conservative: only flag clear mismatches; when in doubt, keep (omit)."""
+def _relevance_criteria_block(criteria: str | None) -> str:
+    if not criteria:
+        return ""
     return (
-        "Ты фильтруешь вакансии для кандидата по его резюме. Твоя задача — "
-        "найти ТОЛЬКО те вакансии, которые ЯВНО НЕ подходят кандидату по сути "
+        "\nДополнительные критерии пользователя — ОБЯЗАТЕЛЬНЫ. Вакансия, "
+        "нарушающая хотя бы один критерий, помечается как не подходящая "
+        "(правило «сомневаешься — оставь» на критерии НЕ действует):\n"
+        f"{criteria.strip()}\n"
+    )
+
+
+def build_relevance_prompt(
+    resume_summary: str, items_block: str, criteria: str | None = None
+) -> str:
+    """Stage 1: classify vacancies from search snippets only.
+
+    Conservative on the profession rule: only flag clear mismatches.
+    Borderline cases go to "uncertain" — the caller rechecks them against the
+    full vacancy description (stage 2) or keeps them (fail-open)."""
+    return (
+        "Ты фильтруешь вакансии для кандидата по его резюме. Классифицируй "
+        "каждую вакансию в один из трёх классов:\n"
+        '- "irrelevant" — вакансия ЯВНО НЕ подходит кандидату по сути '
         "(другая профессия/специализация: например AI-инженеру не подходят "
         "'Менеджер по продажам', 'Android-разработчик', 'Бухгалтер').\n"
-        "ПРАВИЛО: сомневаешься — НЕ помечай (оставь). Помечай только очевидные "
-        "несовпадения профессии.\n\n"
-        f"Резюме кандидата:\n{resume_summary or '(нет данных)'}\n\n"
+        '- "uncertain" — по названию и сниппету нельзя уверенно решить '
+        "(смежная специализация, двусмысленное название). Их проверят по "
+        "полному описанию.\n"
+        "- всё остальное — подходит (не указывай ни в одном списке).\n"
+        "ПРАВИЛО: помечай в irrelevant только очевидные несовпадения "
+        "профессии; сомневаешься — отправляй в uncertain, а не в irrelevant.\n"
+        f"{_relevance_criteria_block(criteria)}"
+        f"\nРезюме кандидата:\n{resume_summary or '(нет данных)'}\n\n"
         f"Вакансии:\n{items_block}\n\n"
+        'Верни СТРОГО JSON без пояснений в формате: {"irrelevant": '
+        '[{"id": "<id>", "reason": "<кратко почему>"}], "uncertain": '
+        '[{"id": "<id>", "reason": "<что непонятно>"}]}. '
+        'Если списки пусты — верни {"irrelevant": [], "uncertain": []}.'
+    )
+
+
+def build_relevance_recheck_prompt(
+    resume_summary: str, item: dict, description: str, criteria: str | None = None
+) -> str:
+    """Stage 2: reclassify one borderline vacancy against its full description.
+
+    Still conservative: only clear mismatches get dropped; doubt keeps the
+    vacancy (the worker prefers a wasted apply over a missed one)."""
+    name = item.get("name") or ""
+    ctx = " ".join(filter(None, [
+        name,
+        item.get("snippet_requirement") or "",
+        item.get("snippet_responsibility") or "",
+    ]))
+    desc = (description or "").strip() or "(описание недоступно)"
+    return (
+        "Ты проверяешь одну вакансию для кандидата по ПОЛНОМУ описанию "
+        "вакансии. Реши, подходит ли она кандидату по сути (профессия, "
+        "специализация).\n"
+        "ПРАВИЛО: помечай \"не подходит\" только при ЯВНОМ несоответствии "
+        "профессии или нарушении критериев пользователя; сомневаешься — "
+        "оставляй.\n"
+        f"{_relevance_criteria_block(criteria)}"
+        f"\nРезюме кандидата:\n{resume_summary or '(нет данных)'}\n\n"
+        f"Вакансия: {name or item.get('id', '')}\n"
+        f"Сниппет: {ctx}\n"
+        f"Полное описание:\n{desc}\n\n"
         'Верни СТРОГО JSON без пояснений в формате: '
-        '{"irrelevant": [{"id": "<id>", "reason": "<кратко почему>"}]}. '
-        "Если все подходят — верни {\"irrelevant\": []}."
+        '{"irrelevant": <true|false>, "reason": "<кратко почему>"}.'
+    )
+
+
+def build_filter_suggest_prompt(resume_summary: str) -> str:
+    """Draft 2–3 search filters from the full resume (wide / narrow / alt).
+
+    Every field is whitelisted again in agent.suggest_filters, so a wrong
+    literal degrades to None instead of a broken filter."""
+    return (
+        "Ты формируешь поисковые фильтры hh.ru для кандидата по его резюме. "
+        "Верни 2–3 варианта фильтра:\n"
+        "1. «широкий» — разные формулировки должности и смежные роли, чтобы "
+        "охватить больше подходящих вакансий;\n"
+        "2. «узкий» — точное соответствие основной специальности;\n"
+        "3. (опционально) альтернативный ракурс — та же специальность через "
+        "другие ключевые слова, если это реально отличается.\n\n"
+        "Правила:\n"
+        "- text — поисковый запрос так, как его пишут работодатели в "
+        "названиях вакансий (короткая строка из ключевых слов).\n"
+        "- excluded_text — слова-мусор через запятую, которые точно дают "
+        "нерелевантную выдачу для этой профессии (или null).\n"
+        "- experience: null | noExperience | between1And3 | between3And6 | "
+        "moreThan6 — только если резюме это явно подсказывает.\n"
+        "- work_format: null | ON_SITE | REMOTE | HYBRID | FIELD_WORK.\n"
+        "- employment_form: null | FULL | PART | PROJECT | SIDE_JOB.\n"
+        "- period: null или 7/14/30 (дней).\n"
+        "- area: null | 40 (Казахстан) | 113 (Россия) — по городу резюме.\n"
+        "- name — короткое понятное имя фильтра на русском.\n"
+        "- Не выдумывай: если поле нельзя обосновать резюме — null.\n\n"
+        f"Резюме кандидата:\n{resume_summary or '(нет данных)'}\n\n"
+        'Верни СТРОГО JSON без пояснений: {"filters": [{"name": "...", '
+        '"text": "...", "area": null, "experience": null, "work_format": '
+        'null, "employment_form": null, "period": null, "excluded_text": '
+        "null}]}."
     )
 
 

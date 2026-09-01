@@ -65,6 +65,15 @@ def _get(session: requests.Session, user_id: str, url: str, **kw) -> requests.Re
     return resp
 
 
+def _clean_description(value, limit: int = 4000) -> str:
+    """Strip HTML and collapse whitespace; capped so an LLM prompt can't blow up."""
+    import re
+
+    text = re.sub(r"<[^>]+>", " ", str(value or ""))
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:limit]
+
+
 def _normalise_vacancy(v: dict) -> dict:
     company = v.get("company") or {}
     emp = {}
@@ -152,6 +161,18 @@ async def get_vacancy(user_id: str, vacancy_id: str) -> dict:
         vacancy["has_test"] = bool(status["test"].get("hasTests"))
     topics = (status.get("negotiations") or {}).get("topicList") or []
     vacancy["already_responded"] = bool(topics)
+
+    # Full description for the stage-2 relevance recheck: the parsed
+    # shortVacancy block first, then the vacancyView block. Absence degrades
+    # to "" — the recheck then judges on name + snippets.
+    desc = short.get("description")
+    if not desc:
+        try:
+            desc = (find_state(resp.text, "vacancyView") or {}).get("description")
+        except ValueError:
+            desc = None
+    if desc:
+        vacancy["description"] = _clean_description(desc)
     return vacancy
 
 

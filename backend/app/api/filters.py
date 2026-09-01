@@ -1,15 +1,38 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.ai.agent import HHAgent
 from app.api.deps import get_current_user
 from app.schemas.filters import (
+    AutoFilterRequest,
     FilterCreate,
     FilterPreviewResponse,
     FilterResponse,
+    FilterSuggestion,
     FilterUpdate,
 )
 from app.services import filters_service
 
 router = APIRouter(prefix="/api/filters", tags=["filters"])
+
+
+@router.post("/auto", response_model=list[FilterSuggestion])
+async def auto(
+    body: AutoFilterRequest,
+    user_id: str = Depends(get_current_user),
+):
+    agent = HHAgent(user_id)
+    if agent.llm is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="OPENAI_API_KEY is not configured",
+        )
+    suggestions = await agent.suggest_filters(body.resume_id)
+    if not suggestions:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="не удалось сгенерировать фильтры — попробуйте ещё раз",
+        )
+    return [FilterSuggestion(**s) for s in suggestions]
 
 
 @router.get("", response_model=list[FilterResponse])

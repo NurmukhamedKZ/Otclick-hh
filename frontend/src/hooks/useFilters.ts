@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import type { Filter, FilterCreate, FilterPreview } from "@/lib/types";
+import type {
+  Filter,
+  FilterCreate,
+  FilterPreview,
+  FilterSuggestion,
+} from "@/lib/types";
 
 export function useFilters() {
   const [items, setItems] = useState<Filter[] | null>(null);
@@ -53,5 +58,12 @@ export function useFilters() {
     return apiFetch<FilterPreview>(`/api/filters/${id}/preview`);
   }, []);
 
-  return { items, error, reload: load, create, update, remove, preview };
+  const suggest = useCallback(async (resumeId: string) => {
+    return apiFetch<FilterSuggestion[]>("/api/filters/auto", {
+      method: "POST",
+      body: JSON.stringify({ resume_id: resumeId }),
+    });
+  }, []);
+
+  return { items, error, reload: load, create, update, remove, preview, suggest };
 }

@@ -22,6 +22,7 @@ export type Filter = {
   excluded_text: string | null;
   enabled: boolean;
   ai_filter_enabled: boolean;
+  relevance_criteria: string | null;
   created_at: string | null;
 };
 
@@ -38,6 +39,19 @@ export type FilterCreate = {
   excluded_text?: string | null;
   enabled?: boolean;
   ai_filter_enabled?: boolean;
+  relevance_criteria?: string | null;
+};
+
+export type FilterSuggestion = {
+  name?: string | null;
+  text?: string | null;
+  area?: number | null;
+  experience?: string | null;
+  work_format?: string | null;
+  employment_form?: string | null;
+  search_field?: string | null;
+  period?: number | null;
+  excluded_text?: string | null;
 };
 
 export type VacancyPreviewItem = {

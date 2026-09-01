@@ -245,6 +245,7 @@ async def apply_one(
         return "token_dead"
     except AntibotBlock as ex:
         logger.warning("apply: antibot block on vacancy fetch: %s", ex)
+        block_error = str(ex)  # except-as name is deleted on block exit
         await loop.run_in_executor(
             None,
             lambda: _record_application(
@@ -253,7 +254,7 @@ async def apply_one(
                 vacancy_id=vacancy_id,
                 status="antibot_block",
                 cover_letter=None,
-                error=str(ex),
+                error=block_error,
             ),
         )
         return "antibot_block"

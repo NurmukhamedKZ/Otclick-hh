@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     # only fix it by editing SQL.
     BILLING_ENABLED: bool = False
     PAID_DAILY_APPLIES: int = 150
+    FREE_TOTAL_APPLIES: int = 30  # lifetime cap for the free tier, not per day
 
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
