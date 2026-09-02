@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { NotificationRow } from "@/lib/types";
 import { Btn } from "@/components/otclick/ui";
 import { IBolt, ICheck, IClose, ILink, IShield, ITrash } from "@/components/otclick/icons";
+import { formatNotificationBody } from "@/lib/format-notification";
 
 const EVENT = "notifications-drawer";
 
@@ -16,6 +17,8 @@ export function openNotificationsDrawer() {
 const ICON: Record<string, React.ReactNode> = {
   captcha: <IShield size={14} />,
   limit_reached: <IBolt size={14} />,
+  limit_total: <IBolt size={14} />,
+  antibot_pause: <IShield size={14} />,
   token_dead: <IClose size={14} />,
   account_banned: <IClose size={14} />,
   worker_stop: <ILink size={14} />,
@@ -31,6 +34,8 @@ const ICON: Record<string, React.ReactNode> = {
 const COLOR: Record<string, string> = {
   captcha: "var(--coral)",
   limit_reached: "var(--yellow)",
+  limit_total: "var(--err)",
+  antibot_pause: "var(--coral)",
   token_dead: "var(--err)",
   account_banned: "var(--err)",
   worker_stop: "var(--muted-2)",
@@ -46,6 +51,8 @@ const COLOR: Record<string, string> = {
 const TITLE: Record<string, string> = {
   captcha: "Нужна капча",
   limit_reached: "Достигнут дневной лимит",
+  limit_total: "Исчерпан бесплатный лимит",
+  antibot_pause: "Антибот-пауза",
   worker_stop: "Worker остановлен",
   token_dead: "Токен hh умер",
   account_banned: "Аккаунт hh заблокирован",
@@ -293,19 +300,18 @@ export default function NotificationsDrawer() {
                       <div style={{ fontSize: 14, fontWeight: 600 }}>
                         {TITLE[n.type] ?? n.type}
                       </div>
-                      {n.payload && (
+                      {n.payload && formatNotificationBody(n) && (
                         <div
                           style={{
                             fontSize: 11,
                             color: "var(--muted)",
                             marginTop: 2,
-                            fontFamily: "JetBrains Mono, monospace",
                             overflow: "hidden",
                             textOverflow: "ellipsis",
                             whiteSpace: "nowrap",
                           }}
                         >
-                          {JSON.stringify(n.payload)}
+                          {formatNotificationBody(n)}
                         </div>
                       )}
                     </div>

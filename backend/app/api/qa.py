@@ -38,3 +38,15 @@ async def delete_qa(
 ) -> OkResponse:
     await qa_memory.delete(user_id, qa_id)
     return OkResponse()
+
+
+class ExportResponse(BaseModel):
+    text: str
+    count: int
+
+
+@router.get("/export")
+async def export_qa(user_id: str = Depends(get_current_user)) -> ExportResponse:
+    text = await qa_memory.export_all(user_id)
+    # Rough pair count: each rendered pair has an indented "  О: " line.
+    return ExportResponse(text=text, count=text.count("\n  О: "))

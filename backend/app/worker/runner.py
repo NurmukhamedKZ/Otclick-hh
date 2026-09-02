@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -33,7 +34,7 @@ from app.worker.recruiter_poll import poll_recruiter_chats
 
 logger = logging.getLogger(__name__)
 
-State = Literal["running", "paused_captcha", "paused_limit", "idle", "stopped"]
+State = Literal["running", "paused_captcha", "paused_limit", "paused_antibot", "idle", "stopped"]
 
 # Sleep when producer found 0 jobs and we're idle. Backs off exponentially:
 # each empty producer run scans up to MAX_PAGES_PER_FILTER pages *per filter*,
@@ -51,6 +52,14 @@ CAPTCHA_POLL_S = 5
 # Recruiter chat poll cadence — runs in its own task, independent of apply limits.
 RECRUITER_POLL_INTERVAL_S = 120
 
+# Antibot auto-pause: when ≥ANTIBOT_THRESHOLD of the last ANTIBOT_WINDOW apply
+# attempts are antibot_block, the session is soft-blocked. Pause for a long
+# cooldown (reuses the cluster-break floor) so hh lifts the block. One isolated
+# block does NOT trigger this — it's common during normal operation.
+ANTIBOT_WINDOW = 10
+ANTIBOT_THRESHOLD = 3
+ANTIBOT_PAUSE_S = 60 * 60  # 1h — matches throttle.BREAK_MIN_S
+
 
 @dataclass
 class RunnerHandle:
@@ -66,6 +75,10 @@ class RunnerHandle:
     agent: HHAgent | None = None
     last_error: str | None = None
     skipped_has_test: int = 0
+    # Ring buffer of recent apply statuses for antibot burst detection.
+    # Only "antibot_block" entries count toward the threshold; every status
+    # fills the window so 3/10 is meaningful, not 3/3 after a fresh start.
+    recent_statuses: deque[str] = field(default_factory=lambda: deque(maxlen=ANTIBOT_WINDOW))
 
     def __post_init__(self) -> None:
         if self.agent is None:
@@ -355,9 +368,19 @@ async def _run_loop(handle: RunnerHandle) -> None:
         )
         await _hb()
 
+        # Track for antibot burst detection. Only "antibot_block" counts
+        # toward the threshold, but every status fills the window so a burst
+        # of 3/10 is meaningful, not 3/3 after a fresh start.
+        if status != "antibot_block":
+            handle.recent_statuses.append(status)
+
         if status in ("sent", "form_sent"):
             handle.today_count = await limiter.increment(user_id)
             handle.cluster.record_apply()
+            # A successful apply clears the last error — otherwise a single
+            # transient failure (antibot block, 429) stays in the header
+            # forever, even though the worker is healthy again.
+            handle.last_error = None
         elif status == "captcha":
             handle.state = "paused_captcha"
             handle.captcha_event.clear()
@@ -406,6 +429,38 @@ async def _run_loop(handle: RunnerHandle) -> None:
             handle.skipped_has_test += 1
         elif status == "vacancy_gone":
             pass
+        elif status == "antibot_block":
+            handle.recent_statuses.append("antibot_block")
+            antibot_count = sum(
+                1 for s in handle.recent_statuses if s == "antibot_block"
+            )
+            handle.last_error = (
+                f"antibot block on vacancy {job.vacancy_id} "
+                f"({antibot_count}/{len(handle.recent_statuses)})"
+            )
+            if antibot_count >= ANTIBOT_THRESHOLD:
+                handle.state = "paused_antibot"
+                handle.next_run_at = datetime.now(UTC) + timedelta(seconds=ANTIBOT_PAUSE_S)
+                logger.warning(
+                    "user %s: antibot burst %d/%d — pausing %.0fs",
+                    user_id, antibot_count, len(handle.recent_statuses), ANTIBOT_PAUSE_S,
+                )
+                await notify(
+                    user_id, "antibot_pause",
+                    {
+                        "reason": "antibot_block",
+                        "window": ANTIBOT_WINDOW,
+                        "count": antibot_count,
+                        "pause_s": ANTIBOT_PAUSE_S,
+                    },
+                )
+                await _hb()
+                await asyncio.sleep(ANTIBOT_PAUSE_S)
+                handle.state = "running"
+                handle.recent_statuses.clear()
+                handle.last_error = None
+                await _hb()
+                logger.info("user %s: antibot pause elapsed — resuming", user_id)
         elif status == "resume_missing":
             handle.last_error = f"resume {job.resume_id} missing"
             await notify(

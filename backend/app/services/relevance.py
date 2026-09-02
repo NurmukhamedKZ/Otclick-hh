@@ -1,17 +1,24 @@
 """Batch semantic relevance filter for found vacancies.
 
-filter_relevant: pure classifier (llm + resume summary + items) → per-id verdict.
-Conservative (only clear mismatches dropped) and fail-open (any failure → keep all).
-Cache helpers persist verdicts in relevance_cache (service_role).
+Stage 1 (`filter_relevant`): pure classifier (llm + resume summary + snippet
+items) → per-id verdict + borderline list. Structured output instead of
+hand-rolled JSON parsing.
+Stage 2 (`recheck_uncertain`): borderline vacancies are reclassified against
+their full description (fetched over the web session). Fail-open: no llm /
+error → keep all. Verdicts persist in relevance_cache (service_role).
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import re
 
-from app.ai.prompts import build_relevance_prompt
+from pydantic import BaseModel, Field
+
+from app.ai.prompts import (
+    build_relevance_prompt,
+    build_relevance_recheck_prompt,
+)
+from app.ai.structured import structured_call, structured_call_sync
 from app.db.supabase import service_client
 
 logger = logging.getLogger(__name__)
@@ -19,28 +26,46 @@ logger = logging.getLogger(__name__)
 # verdict = (relevant: bool, reason: str)
 Verdict = tuple[bool, str]
 
-_JSON_OBJ = re.compile(r"\{.*\}", re.DOTALL)
+# Stage-2 cap per producer pass: full-description fetches go through the
+# rate-limited web session, so the batch must stay small.
+MAX_RECHECK_PER_PASS = 10
 
 
-def _llm_text(llm, prompt: str) -> str:
-    content = llm.invoke(prompt).content
-    if isinstance(content, list):  # some models return content parts
-        content = " ".join(str(c) for c in content)
-    return (content or "").strip()
+class _Flag(BaseModel):
+    id: str
+    reason: str = ""
 
 
-def filter_relevant(llm, resume_summary: str, items: list[dict]) -> dict[str, Verdict]:
-    """Return {vacancy_id: (relevant, reason)} for each item.
+class RelevanceVerdicts(BaseModel):
+    """Stage-1 structured output. Ids absent from both lists are relevant."""
+
+    irrelevant: list[_Flag] = Field(default_factory=list)
+    uncertain: list[_Flag] = Field(default_factory=list)
+
+
+class _RecheckVerdict(BaseModel):
+    irrelevant: bool = False
+    reason: str = ""
+
+
+def filter_relevant(
+    llm,
+    resume_summary: str,
+    items: list[dict],
+    criteria: str | None = None,
+) -> tuple[dict[str, Verdict], list[str]]:
+    """Stage 1. Return ({vacancy_id: (relevant, reason)}, [uncertain ids]).
 
     items carry {id, name, snippet_requirement, snippet_responsibility}.
     Conservative: an id is irrelevant only if the LLM explicitly lists it.
+    Uncertain ids go to stage 2 (or stay relevant if stage 2 is unavailable).
     Fail-open: no llm / parse error / exception → every item relevant.
     """
-    if not items:
-        return {}
     ids = [str(it["id"]) for it in items if it.get("id")]
+    if not items:
+        return {}, []
     if not llm:
-        return {vid: (True, "fail_open") for vid in ids}
+        return {vid: (True, "fail_open") for vid in ids}, []
 
     lines = []
     for it in items:
@@ -53,25 +78,69 @@ def filter_relevant(llm, resume_summary: str, items: list[dict]) -> dict[str, Ve
             it.get("snippet_responsibility") or "",
         ]))
         lines.append(f"- id={vid}: {ctx}")
-    prompt = build_relevance_prompt(resume_summary, "\n".join(lines))
+    prompt = build_relevance_prompt(resume_summary, "\n".join(lines), criteria)
 
     try:
-        raw = _llm_text(llm, prompt)
-        match = _JSON_OBJ.search(raw)
-        parsed = json.loads(match.group(0) if match else raw)
-        irrelevant = {
-            str(e["id"]): str(e.get("reason") or "")
-            for e in parsed.get("irrelevant", [])
-            if isinstance(e, dict) and e.get("id") is not None
-        }
+        parsed = structured_call_sync(llm, RelevanceVerdicts, prompt)
+        irrelevant = {str(f.id): str(f.reason or "") for f in parsed.irrelevant}
+        uncertain = [str(f.id) for f in parsed.uncertain]
     except Exception:
         logger.warning("relevance: LLM parse failed — fail-open (keep all)", exc_info=True)
-        return {vid: (True, "fail_open") for vid in ids}
+        return {vid: (True, "fail_open") for vid in ids}, []
 
-    return {
+    uncertain = [vid for vid in uncertain if vid not in irrelevant]
+    verdicts = {
         vid: ((False, irrelevant[vid]) if vid in irrelevant else (True, ""))
         for vid in ids
     }
+    return verdicts, uncertain
+
+
+async def recheck_uncertain(
+    user_id: str,
+    llm,
+    resume_summary: str,
+    items: list[dict],
+    criteria: str | None = None,
+) -> dict[str, Verdict]:
+    """Stage 2. Reclassify borderline vacancies against the full description.
+
+    Each vacancy is fetched over the stored web session (rate-limited by
+    web._get). A vacancy that cannot be fetched or classified stays relevant
+    (absent from the result → the caller's fail-open default)."""
+    if not llm or not items:
+        return {}
+    if len(items) > MAX_RECHECK_PER_PASS:
+        items = items[:MAX_RECHECK_PER_PASS]
+
+    from app.hh import web  # local: web imports form_filler, avoid a cycle
+
+    out: dict[str, Verdict] = {}
+    for it in items:
+        vid = str(it.get("id") or "")
+        if not vid:
+            continue
+        try:
+            vacancy = await web.get_vacancy(user_id, vid)
+        except Exception:
+            logger.warning(
+                "relevance: recheck fetch failed for %s/%s — keeping",
+                user_id, vid, exc_info=True,
+            )
+            continue
+        prompt = build_relevance_recheck_prompt(
+            resume_summary, it, str(vacancy.get("description") or ""), criteria
+        )
+        try:
+            parsed = await structured_call(llm, _RecheckVerdict, prompt)
+        except Exception:
+            logger.warning(
+                "relevance: recheck LLM failed for %s/%s — keeping",
+                user_id, vid, exc_info=True,
+            )
+            continue
+        out[vid] = (not parsed.irrelevant, str(parsed.reason or ""))
+    return out
 
 
 def get_cached_verdicts(resume_id: str, vacancy_ids: list[str]) -> dict[str, Verdict]:

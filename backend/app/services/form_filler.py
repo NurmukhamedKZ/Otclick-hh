@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import time
+from pathlib import Path
 from typing import Literal
 
 import requests
@@ -41,11 +42,32 @@ class WebSessionExpired(Exception):
     """hh no longer accepts the stored web cookies — the user must reconnect."""
 
 
+class AntibotBlock(Exception):
+    """hh served a 200 antibot interstitial — the page is alive but the inline
+    state JSON is absent. Cooldown resolves it; a dead session does not."""
+
+
 def session_looks_dead(resp: requests.Response) -> bool:
-    """True when hh answered a logged-out request (auth wall, not a real error)."""
+    """True when hh answered a logged-out or soft-blocked request.
+
+    Three cases:
+      1. 401/403 — hard auth rejection.
+      2. /account/login redirect — login wall.
+      3. 200 antibot interstitial — hh serves a 200 page WITHOUT the inline
+         state JSON. A real hh.ru page always carries xsrfToken; its absence
+         alongside a missing expected marker means hh replaced the page with an
+         antibot interstitial. Conservative: requires BOTH markers absent so a
+         partially-rendered real page is not misclassified.
+    """
     if resp.status_code in (401, 403):
         return True
-    return "/account/login" in (resp.url or "")
+    if "/account/login" in (resp.url or ""):
+        return True
+    if resp.status_code == 200:
+        text = resp.text or ""
+        if "xsrfToken" not in text and "shortVacancy" not in text:
+            return True
+    return False
 
 
 # One session per user instead of one per call: chatik polls it once per chat,
@@ -58,6 +80,34 @@ _sessions: dict[str, tuple[float, requests.Session]] = {}
 
 def drop_web_session(user_id: str) -> None:
     _sessions.pop(user_id, None)
+
+
+# Antibot interstitial dumps: debugging artifacts (logged-in hh.ru HTML),
+# kept local — never to Supabase Storage. Capped so disk never fills.
+_PAGE_DUMP_DIR = Path("backend/var/page_dumps")
+_PAGE_DUMP_MAX = 50
+
+
+def dump_blocked_page(user_id: str, vacancy_id: str, html: str) -> str | None:
+    """Persist an antibot interstitial page for offline confirmation.
+
+    Returns the path (for the log line) or None on failure. Keeps only the
+    most recent _PAGE_DUMP_MAX files — oldest get evicted.
+    """
+    try:
+        _PAGE_DUMP_DIR.mkdir(parents=True, exist_ok=True)
+        ts = int(time.time())
+        path = _PAGE_DUMP_DIR / f"{user_id}_{vacancy_id}_{ts}.html"
+        path.write_text(html, encoding="utf-8")
+        files = sorted(_PAGE_DUMP_DIR.glob("*.html"), key=lambda p: p.stat().st_mtime)
+        for old in files[:-_PAGE_DUMP_MAX]:
+            old.unlink(missing_ok=True)
+        return str(path)
+    except Exception:
+        logger.warning(
+            "dump_blocked_page failed for %s/%s", user_id, vacancy_id, exc_info=True
+        )
+        return None
 
 
 async def report_dead_session(user_id: str, ex: Exception) -> None:

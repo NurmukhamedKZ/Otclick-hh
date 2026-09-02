@@ -167,10 +167,10 @@ export default function RecentApplicationsCard() {
                       display: "block",
                     }}
                   >
-                    vacancy {a.vacancy_id}
+                    {a.vacancy_title?.trim() || `Вакансия ${a.vacancy_id}`}
                   </a>
                   <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
-                    employer {a.employer_id ?? "—"}
+                    {a.employer_name?.trim() || a.employer_id || "—"}
                     {a.error ? ` · ${a.error}` : ""}
                   </div>
                 </div>

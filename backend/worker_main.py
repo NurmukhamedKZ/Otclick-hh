@@ -60,9 +60,19 @@ async def main() -> None:
         stop_event.set()
 
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, _request_stop, sig.name)
+        try:
+            loop.add_signal_handler(sig, _request_stop, sig.name)
+        except NotImplementedError:
+            # Windows doesn't implement loop.add_signal_handler — Ctrl+C still
+            # raises KeyboardInterrupt into asyncio.run, which is fine here.
+            pass
 
     registry = get_registry()
+    # Inbound Telegram bot: lets the user answer/approve via inline buttons in
+    # Telegram instead of the web UI. Optional and independent of the reconcile
+    # loop; a failure here never affects apply/agent cycles.
+    from app.services.telegram_notify import start_bot_loop, stop_bot_loop
+    start_bot_loop(stop_event)
     logger.info("worker_main: reconcile loop start (every %ds)", POLL_INTERVAL_S)
     while not stop_event.is_set():
         try:
@@ -76,6 +86,7 @@ async def main() -> None:
 
     logger.info("stopping all runners")
     await registry.stop_all()
+    await stop_bot_loop()
     logger.info("worker_main shutdown complete")
 
 

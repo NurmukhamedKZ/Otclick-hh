@@ -11,7 +11,7 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 
-from app.db.supabase import service_client
+from app.db.supabase import jsonb_row, service_client
 from app.services import qa_memory
 from app.services.hh_credentials import load_api_client, persist_if_refreshed
 
@@ -107,21 +107,25 @@ async def insert_draft(
     question_text: str | None = None,
     vacancy_id: str | None = None, vacancy_title: str | None = None,
     employer_name: str | None = None,
-) -> None:
+) -> str:
+    """Insert a pending draft; returns the new row id for callback routing."""
     def _q():
-        return service_client.table("recruiter_drafts").insert({
-            "user_id": user_id,
-            "negotiation_id": negotiation_id,
-            "message_id": message_id,
-            "draft_text": draft_text,
-            "reason": reason,
-            "question_text": question_text,
-            "vacancy_id": vacancy_id,
-            "vacancy_title": vacancy_title,
-            "employer_name": employer_name,
-            "status": "pending",
-        }).execute()
-    await _run(_q)
+        return service_client.table("recruiter_drafts").insert(
+            jsonb_row({
+                "user_id": user_id,
+                "negotiation_id": negotiation_id,
+                "message_id": message_id,
+                "draft_text": draft_text,
+                "reason": reason,
+                "question_text": question_text,
+                "vacancy_id": vacancy_id,
+                "vacancy_title": vacancy_title,
+                "employer_name": employer_name,
+                "status": "pending",
+            })
+        ).execute()
+    res = await _run(_q)
+    return (res.data or [{}])[0].get("id", "") if res else ""
 
 
 async def insert_question(
@@ -130,23 +134,27 @@ async def insert_question(
     chat_id: str | None = None, applicant_id: str | None = None,
     vacancy_id: str | None = None, vacancy_title: str | None = None,
     employer_name: str | None = None,
-) -> None:
+) -> str:
+    """Insert a pending question set; returns the new row id for callback routing."""
     def _q():
-        return service_client.table("recruiter_questions").insert({
-            "user_id": user_id,
-            "negotiation_id": negotiation_id,
-            "chat_id": chat_id,
-            "applicant_id": applicant_id,
-            "message_id": message_id,
-            "questions": questions,
-            "reason": reason,
-            "question_text": question_text,
-            "vacancy_id": vacancy_id,
-            "vacancy_title": vacancy_title,
-            "employer_name": employer_name,
-            "status": "pending",
-        }).execute()
-    await _run(_q)
+        return service_client.table("recruiter_questions").insert(
+            jsonb_row({
+                "user_id": user_id,
+                "negotiation_id": negotiation_id,
+                "chat_id": chat_id,
+                "applicant_id": applicant_id,
+                "message_id": message_id,
+                "questions": questions,
+                "reason": reason,
+                "question_text": question_text,
+                "vacancy_id": vacancy_id,
+                "vacancy_title": vacancy_title,
+                "employer_name": employer_name,
+                "status": "pending",
+            })
+        ).execute()
+    res = await _run(_q)
+    return (res.data or [{}])[0].get("id", "") if res else ""
 
 
 # --- questions (ask-only escalation) ----------------------------------------
@@ -211,11 +219,26 @@ async def submit_answers(user_id: str, question_id: str, answers: list[str]) -> 
     def _upd():
         return (
             service_client.table("recruiter_questions")
-            .update({"answers": answers, "status": "answered", "answered_at": datetime.now(UTC).isoformat()})
+            .update(jsonb_row({"answers": answers, "status": "answered", "answered_at": datetime.now(UTC).isoformat()}))
             .eq("user_id", user_id).eq("id", question_id)
             .execute()
         )
     await _run(_upd)
+
+    # The user confirmed these answers — port them into qa_memory so the AI
+    # sees them as source-of-truth for future forms and chats.
+    pairs = [
+        {"question": q, "answer": a}
+        for q, a in zip(row.get("questions") or [], answers)
+        if q and a
+    ]
+    if pairs:
+        try:
+            await qa_memory.save_confirmed_answers(user_id, pairs, source="chat")
+        except Exception:
+            logger.warning(
+                "recruiter: qa_memory port failed for question %s", question_id, exc_info=True
+            )
 
 
 async def mark_question_completed(user_id: str, question_id: str) -> None:
@@ -234,7 +257,8 @@ async def insert_todo(
     title: str, detail: str | None, link: str | None,
     vacancy_id: str | None = None, vacancy_title: str | None = None,
     employer_name: str | None = None,
-) -> None:
+) -> str:
+    """Insert an open todo; returns the new row id for callback routing."""
     def _q():
         return service_client.table("recruiter_todos").insert({
             "user_id": user_id,
@@ -248,7 +272,8 @@ async def insert_todo(
             "employer_name": employer_name,
             "status": "open",
         }).execute()
-    await _run(_q)
+    res = await _run(_q)
+    return (res.data or [{}])[0].get("id", "") if res else ""
 
 
 # --- query + send ------------------------------------------------------------
@@ -324,14 +349,15 @@ async def send_draft(user_id: str, draft_id: str, message: str | None = None) ->
     text = message if message is not None else draft["draft_text"]
     nid = draft["negotiation_id"]
 
-    # Remember only edits the user actually made — his correction on a recruiter's
-    # verbatim question is the same kind of source-of-truth as an edited form answer.
+    # The user confirmed this reply by sending it — it is source-of-truth
+    # regardless of whether he edited the AI draft. (Previously only edits
+    # were saved, leaving verbatim AI replies out of qa_memory.)
     question = (draft.get("question_text") or "").strip()
-    if question and text.strip() != (draft.get("draft_text") or "").strip():
+    if question:
         try:
             await qa_memory.upsert(
                 user_id, question, text.strip(),
-                source="recruiter", vacancy_id=draft.get("negotiation_id"),
+                source="chat", vacancy_id=draft.get("negotiation_id"),
             )
         except Exception:
             logger.warning("recruiter: qa_memory save failed for draft %s", draft_id, exc_info=True)

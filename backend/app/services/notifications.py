@@ -6,7 +6,7 @@ import asyncio
 import logging
 from typing import Any, Literal
 
-from app.db.supabase import service_client
+from app.db.supabase import jsonb_row, service_client
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +14,7 @@ NotificationType = Literal[
     "captcha",
     "worker_stop",
     "limit_reached",
+    "limit_total",
     "token_dead",
     "account_banned",
     "resume_missing",
@@ -23,20 +24,28 @@ NotificationType = Literal[
     "form_approval",
     "cover_letter_written",
     "web_session_expired",
+    "antibot_pause",
 ]
 
 # Types that would otherwise fire on every poll cycle. Process-local: a worker
 # restart re-notifies once, which is the behaviour we want anyway.
 _once_sent: set[tuple[str, str]] = set()
 
-
 def _insert_sync(user_id: str, type_: str, payload: dict[str, Any]) -> None:
     try:
+        # postgrest 2.30 does not auto-serialize dicts/lists into jsonb columns
+        # (raises "can't adapt type 'dict'"); jsonb_row wraps them as JSON.
         service_client.table("notifications").insert(
-            {"user_id": user_id, "type": type_, "payload": payload}
+            jsonb_row({"user_id": user_id, "type": type_, "payload": payload})
         ).execute()
     except Exception:
         logger.exception("failed to insert notification %s for %s", type_, user_id)
+    # Auxiliary Telegram push - never affects the worker path on failure.
+    try:
+        from app.services import telegram_notify
+        telegram_notify.push_sync(user_id, type_, payload)
+    except Exception:
+        logger.warning("telegram push failed for %s", type_, exc_info=True)
 
 
 async def notify(
