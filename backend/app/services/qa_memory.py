@@ -1,7 +1,8 @@
 """User-curated Q&A memory.
 
 Rows land here two ways:
-  1. the user EDITED an AI answer while approving a form draft (`save_edited`)
+  1. confirmed answers from a sent form / answered recruiter question
+     (`save_confirmed_answers`) — nothing is saved before the send succeeds
   2. manual entry from the account page (`upsert`)
 
 `prompt_block(user_id)` renders them for injection into any prompt that needs

@@ -130,13 +130,10 @@ async def approve(
     final_answers = answers if answers is not None else draft["answers"]
     final_letter = letter if letter is not None else (draft.get("letter") or "")
 
-    # Remember only what the user actually edited — those corrections are the
-    # source of truth for future forms and recruiter replies.
-    if answers is not None:
-        await qa_memory.save_edited(
-            user_id, draft["answers"], final_answers, vacancy_id=draft["vacancy_id"]
-        )
-
+    # Nothing enters qa_memory before the submit succeeds: the table is the
+    # candidate's CONFIRMED source-of-truth, so a failed send must not leak
+    # the edits into future prompts. The success branch below persists
+    # everything that was actually sent (user edits included).
     status, error = await form_filler.submit_prepared_form(
         user_id=user_id,
         resume_id=draft["resume_id"],
