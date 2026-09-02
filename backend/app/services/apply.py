@@ -326,6 +326,10 @@ async def apply_one(
                     "vacancy_id": vacancy_id,
                     "vacancy_title": vacancy.get("name"),
                     "employer": (vacancy.get("employer") or {}).get("name"),
+                    # Telegram formatter renders these as Q→A pairs + letter
+                    # block, so the user can decide without opening the UI.
+                    "answers": form_answers or [],
+                    "letter": draft_letter,
                 },
             )
         await loop.run_in_executor(

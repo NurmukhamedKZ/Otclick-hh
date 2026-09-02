@@ -118,7 +118,7 @@ def _format_message(type_: str, payload: dict[str, Any]) -> str | None:
                     q = a.get("question") or a.get("q") or ""
                     ans = a.get("answer") or a.get("value") or ""
                     if q:
-                        lines.append(f"{i}. {q}: {ans}")
+                        lines.append(f"{i}. {_truncate(str(q), 200)}: {_truncate(str(ans), 200)}")
         letter = payload.get("letter")
         if letter:
             lines.append(f"\n✉️ Сопроводительное:\n{_truncate(str(letter), 400)}")
