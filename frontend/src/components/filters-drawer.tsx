@@ -5,7 +5,13 @@ import { useFilters } from "@/hooks/useFilters";
 import { useBlacklist } from "@/hooks/useBlacklist";
 import { Btn, Card, Toggle } from "@/components/otclick/ui";
 import { IClose, IFilter, IPlus, ITrash } from "@/components/otclick/icons";
-import type { Filter, FilterCreate, Resume, ResumesList } from "@/lib/types";
+import type {
+  Filter,
+  FilterCreate,
+  FilterSuggestion,
+  Resume,
+  ResumesList,
+} from "@/lib/types";
 import { apiFetch } from "@/lib/api";
 import { pushToast } from "@/components/toaster";
 
@@ -87,10 +93,13 @@ export default function FiltersDrawer() {
   const [creating, setCreating] = useState(false);
   const [newResumeId, setNewResumeId] = useState("");
 
-  const { items: filters, error: filterError, create, update, remove } = useFilters();
+  const { items: filters, error: filterError, create, update, remove, suggest } = useFilters();
   const { items: blacklist, error: blacklistError, add: addBl, remove: removeBl } = useBlacklist();
   const [newCompany, setNewCompany] = useState("");
   const [newCompanyId, setNewCompanyId] = useState("");
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestions, setSuggestions] = useState<FilterSuggestion[] | null>(null);
+  const [sugIndex, setSugIndex] = useState(0);
 
   useEffect(() => {
     function onToggle(e: Event) {
@@ -147,6 +156,37 @@ export default function FiltersDrawer() {
       pushToast({ kind: "error", title: e instanceof Error ? e.message : "create failed" });
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function handleSuggest() {
+    if (!newResumeId) {
+      pushToast({ kind: "error", title: "Выбери резюме для генерации" });
+      return;
+    }
+    setSuggesting(true);
+    try {
+      const list = await suggest(newResumeId);
+      setSuggestions(list);
+      setSugIndex(0);
+      if (list.length === 0) {
+        pushToast({ kind: "error", title: "ИИ не предложил фильтров — попробуй ещё раз" });
+      }
+    } catch (e) {
+      pushToast({ kind: "error", title: e instanceof Error ? e.message : "generate failed" });
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
+  async function handleCreateFromSuggestion(sug: FilterSuggestion) {
+    try {
+      const row = await create({ enabled: true, resume_id: newResumeId, ...sug });
+      setSelectedId(row.id);
+      setSuggestions(null);
+      pushToast({ kind: "success", title: "фильтр создан — проверь параметры" });
+    } catch (e) {
+      pushToast({ kind: "error", title: e instanceof Error ? e.message : "create failed" });
     }
   }
 
@@ -372,7 +412,87 @@ export default function FiltersDrawer() {
                 >
                   <IPlus size={14} /> {creating ? "создаём…" : "новый фильтр"}
                 </button>
+                <button
+                  type="button"
+                  onClick={handleSuggest}
+                  disabled={suggesting || !newResumeId}
+                  style={{
+                    border: "1px solid var(--ink)",
+                    background: "transparent",
+                    borderRadius: 12,
+                    padding: "10px 16px",
+                    color: "var(--ink)",
+                    fontWeight: 600,
+                    fontSize: 13,
+                    cursor: newResumeId ? "pointer" : "not-allowed",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    fontFamily: "inherit",
+                    flexShrink: 0,
+                    opacity: newResumeId ? 1 : 0.5,
+                  }}
+                >
+                  <IFilter size={14} /> {suggesting ? "думаем…" : "сгенерировать из резюме"}
+                </button>
               </div>
+              {suggestions !== null && suggestions.length > 0 && (
+                <div
+                  style={{
+                    border: "1.5px solid var(--yellow)",
+                    borderRadius: 14,
+                    padding: 14,
+                    background: "var(--surface)",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginBottom: 10,
+                    }}
+                  >
+                    <div style={{ fontSize: 13, fontWeight: 700 }}>
+                      Варианты ИИ — выбери и отредактируй перед созданием
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSuggestions(null)}
+                      aria-label="close suggestions"
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        color: "var(--muted)",
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        padding: 0,
+                      }}
+                    >
+                      <IClose size={14} />
+                    </button>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+                    {suggestions.map((s, i) => (
+                      <button
+                        type="button"
+                        key={i}
+                        onClick={() => setSugIndex(i)}
+                        style={pillStyle(sugIndex === i)}
+                      >
+                        {s.name || `Вариант ${i + 1}`}
+                      </button>
+                    ))}
+                  </div>
+                  <SuggestionEditor
+                    key={sugIndex}
+                    suggestion={suggestions[sugIndex]}
+                    onCreate={() =>
+                      handleCreateFromSuggestion(suggestions[sugIndex])
+                    }
+                  />
+                </div>
+              )}
             </div>
 
             {selected && (
@@ -543,6 +663,7 @@ function FilterEditor({
   const [period, setPeriod] = useState(filter.period ? String(filter.period) : "");
   const [experience, setExperience] = useState(filter.experience ?? "");
   const [resumeId, setResumeId] = useState(filter.resume_id ?? "");
+  const [criteria, setCriteria] = useState(filter.relevance_criteria ?? "");
 
   async function commit(patch: Partial<FilterCreate>) {
     try {
@@ -821,7 +942,111 @@ function FilterEditor({
           onChange={(next) => commit({ ai_filter_enabled: next })}
         />
       </div>
+
+      {filter.ai_filter_enabled && (
+        <EditorField
+          label="дополнительные критерии релевантности"
+          hint="Свободным текстом, для ИИ: что считать подходящим, чего избегать (город, скиллы, тип компании). Вакансия, нарушающая критерий, будет отброшена."
+        >
+          <textarea
+            value={criteria}
+            onChange={(e) => setCriteria(e.target.value)}
+            onBlur={() =>
+              criteria !== (filter.relevance_criteria ?? "") &&
+              commit({ relevance_criteria: criteria.trim() || null })
+            }
+            rows={3}
+            placeholder="только удалённо; без call-центров; обязателен опыт с Python"
+            style={{ ...inputStyle, resize: "vertical" }}
+          />
+        </EditorField>
+      )}
     </Card>
+  );
+}
+
+function SuggestionEditor({
+  suggestion,
+  onCreate,
+}: {
+  suggestion: FilterSuggestion;
+  onCreate: () => Promise<void> | void;
+}) {
+  const [draft, setDraft] = useState<FilterSuggestion>({ ...suggestion });
+  const set = (patch: Partial<FilterSuggestion>) =>
+    setDraft((d) => ({ ...d, ...patch }));
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <EditorField label="позиция">
+        <input
+          value={draft.text ?? ""}
+          onChange={(e) => set({ text: e.target.value })}
+          style={inputStyle}
+        />
+      </EditorField>
+      <EditorField label="исключить слова" hint="Через запятую.">
+        <input
+          value={draft.excluded_text ?? ""}
+          onChange={(e) => set({ excluded_text: e.target.value || null })}
+          style={inputStyle}
+        />
+      </EditorField>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 150px), 1fr))", gap: 14 }}>
+        <EditorField label="регион">
+          <select
+            value={draft.area ? String(draft.area) : ""}
+            onChange={(e) => set({ area: e.target.value ? Number(e.target.value) : null })}
+            style={inputStyle}
+          >
+            {AREAS.map((a) => (
+              <option key={a.value} value={a.value}>
+                {a.label}
+              </option>
+            ))}
+          </select>
+        </EditorField>
+        <EditorField label="формат работы">
+          <select
+            value={draft.work_format ?? ""}
+            onChange={(e) => set({ work_format: e.target.value || null })}
+            style={inputStyle}
+          >
+            {WORK_FORMAT.map((w) => (
+              <option key={w.value} value={w.value}>
+                {w.label}
+              </option>
+            ))}
+          </select>
+        </EditorField>
+        <EditorField label="опыт работы">
+          <select
+            value={draft.experience ?? ""}
+            onChange={(e) => set({ experience: e.target.value || null })}
+            style={inputStyle}
+          >
+            {EXPERIENCE.map((x) => (
+              <option key={x.value} value={x.value}>
+                {x.label}
+              </option>
+            ))}
+          </select>
+        </EditorField>
+      </div>
+      <Btn
+        kind="primary"
+        icon={<IPlus size={14} />}
+        onClick={async () => {
+          if (!(draft.text ?? "").trim()) {
+            pushToast({ kind: "error", title: "Укажи поисковый запрос" });
+            return;
+          }
+          await onCreate();
+        }}
+      >
+        создать фильтр
+      </Btn>
+    </div>
   );
 }
 

@@ -60,3 +60,41 @@ def test_render_block_empty_and_populated():
     assert qa_memory.render_block([]) == ""
     block = qa_memory.render_block([{"question": "Доход?", "answer": "350 000"}])
     assert "В: Доход?" in block and "О: 350 000" in block
+
+
+@pytest.mark.asyncio
+async def test_save_confirmed_answers_persists_all_pairs():
+    from app.services import qa_memory
+
+    pairs = [
+        {"question": "Доход?", "answer": "300 000"},
+        {"question": "Переезд?", "answer": "Да"},
+    ]
+    with patch.object(qa_memory, "upsert", new=AsyncMock()) as up:
+        saved = await qa_memory.save_confirmed_answers("u1", pairs, source="form", vacancy_id="v1")
+    assert saved == 2
+    assert up.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_save_confirmed_answers_skips_empty():
+    from app.services import qa_memory
+
+    pairs = [
+        {"question": "Доход?", "answer": "300 000"},
+        {"question": "", "answer": "Да"},
+        {"question": "Переезд?", "answer": ""},
+    ]
+    with patch.object(qa_memory, "upsert", new=AsyncMock()) as up:
+        saved = await qa_memory.save_confirmed_answers("u1", pairs, source="chat")
+    assert saved == 1
+    assert up.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_save_confirmed_answers_survives_failure():
+    from app.services import qa_memory
+
+    pairs = [{"question": "Доход?", "answer": "300 000"}]
+    with patch.object(qa_memory, "upsert", new=AsyncMock(side_effect=RuntimeError("db"))):
+        assert await qa_memory.save_confirmed_answers("u1", pairs, source="form") == 0

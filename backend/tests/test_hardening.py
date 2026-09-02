@@ -108,18 +108,31 @@ def test_recruiter_agent_is_built_without_a_checkpointer():
 # --- dead web session is detected and reported once (high 8) ----------------
 
 @pytest.mark.parametrize(
-    "status_code,url,expected",
+    "status_code,url,text,expected",
     [
-        (200, "https://hh.ru/applicant/vacancy_response?vacancyId=1", False),
-        (403, "https://hh.ru/applicant/vacancy_response?vacancyId=1", True),
-        (401, "https://hh.ru/x", True),
-        (200, "https://hh.ru/account/login?backurl=%2F", True),
+        # Real hh page carries xsrfToken → alive.
+        (
+            200,
+            "https://hh.ru/applicant/vacancy_response?vacancyId=1",
+            '{"xsrfToken":"abc","shortVacancy":{}}',
+            False,
+        ),
+        (403, "https://hh.ru/applicant/vacancy_response?vacancyId=1", "", True),
+        (401, "https://hh.ru/x", "", True),
+        (200, "https://hh.ru/account/login?backurl=%2F", "", True),
+        # 200 antibot interstitial: no xsrfToken AND no shortVacancy → dead.
+        (
+            200,
+            "https://hh.ru/vacancy/1",
+            "<html>please verify you are human</html>",
+            True,
+        ),
     ],
 )
-def test_session_looks_dead(status_code, url, expected):
+def test_session_looks_dead(status_code, url, text, expected):
     from app.services.form_filler import session_looks_dead
 
-    resp = MagicMock(status_code=status_code, url=url)
+    resp = MagicMock(status_code=status_code, url=url, text=text)
     assert session_looks_dead(resp) is expected
 
 

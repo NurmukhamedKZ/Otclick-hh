@@ -75,22 +75,39 @@ async def do_answer(ctx: RecruiterContext, message: str) -> str:
         matched = match_label(ctx.quick_reply_labels, message)
         if matched is None:
             return f"error: '{message}' не входит в варианты {ctx.quick_reply_labels}"
-        await recruiter.insert_draft(
+        draft_id = await recruiter.insert_draft(
             ctx.user_id, ctx.negotiation_id, ctx.message_id, matched, "",
             question_text=ctx.question_text,
             vacancy_id=ctx.vacancy_id, vacancy_title=ctx.vacancy_title,
             employer_name=ctx.employer_name,
         )
-        await notify(ctx.user_id, "recruiter_draft", {"negotiation_id": ctx.negotiation_id})
+        await notify(ctx.user_id, "recruiter_draft", {
+            "negotiation_id": ctx.negotiation_id,
+            "draft_id": draft_id,
+            "draft_text": matched,
+            "question_text": ctx.question_text or "",
+            "vacancy_id": ctx.vacancy_id or "",
+            "vacancy_title": ctx.vacancy_title or "",
+            "employer": ctx.employer_name or "",
+        })
         ctx.acted = True
         return "escalated"
-    await recruiter.insert_draft(
-        ctx.user_id, ctx.negotiation_id, ctx.message_id, sanitize_ai_text(message), "",
+    draft_text = sanitize_ai_text(message)
+    draft_id = await recruiter.insert_draft(
+        ctx.user_id, ctx.negotiation_id, ctx.message_id, draft_text, "",
         question_text=ctx.question_text,
         vacancy_id=ctx.vacancy_id, vacancy_title=ctx.vacancy_title,
         employer_name=ctx.employer_name,
     )
-    await notify(ctx.user_id, "recruiter_draft", {"negotiation_id": ctx.negotiation_id})
+    await notify(ctx.user_id, "recruiter_draft", {
+        "negotiation_id": ctx.negotiation_id,
+        "draft_id": draft_id,
+        "draft_text": draft_text,
+        "question_text": ctx.question_text or "",
+        "vacancy_id": ctx.vacancy_id or "",
+        "vacancy_title": ctx.vacancy_title or "",
+        "employer": ctx.employer_name or "",
+    })
     ctx.acted = True
     return "escalated"
 
@@ -101,25 +118,43 @@ async def do_ask(ctx: RecruiterContext, questions: list[str], reason: str) -> st
     user answers on the Todo page, and the worker poller re-invokes the agent
     with the answers fed back in as a tool response (see
     HHAgent.resume_recruiter_with_answers) to produce the real reply draft."""
-    await recruiter.insert_question(
+    question_id = await recruiter.insert_question(
         ctx.user_id, ctx.negotiation_id, ctx.message_id, questions, reason,
         question_text=ctx.question_text,
         chat_id=ctx.chat_id, applicant_id=ctx.applicant_id,
         vacancy_id=ctx.vacancy_id, vacancy_title=ctx.vacancy_title,
         employer_name=ctx.employer_name,
     )
-    await notify(ctx.user_id, "recruiter_question", {"negotiation_id": ctx.negotiation_id})
+    await notify(ctx.user_id, "recruiter_question", {
+        "negotiation_id": ctx.negotiation_id,
+        "question_id": question_id,
+        "questions": questions,
+        "question_text": ctx.question_text or "",
+        "reason": reason,
+        "vacancy_id": ctx.vacancy_id or "",
+        "vacancy_title": ctx.vacancy_title or "",
+        "employer": ctx.employer_name or "",
+    })
     ctx.acted = True
     return "asked"
 
 
 async def do_todo(ctx: RecruiterContext, title: str, detail: str, link: str | None) -> str:
-    await recruiter.insert_todo(
+    todo_id = await recruiter.insert_todo(
         ctx.user_id, ctx.negotiation_id, ctx.message_id, title, detail, link,
         vacancy_id=ctx.vacancy_id, vacancy_title=ctx.vacancy_title,
         employer_name=ctx.employer_name,
     )
-    await notify(ctx.user_id, "recruiter_todo", {"negotiation_id": ctx.negotiation_id, "title": title})
+    await notify(ctx.user_id, "recruiter_todo", {
+        "negotiation_id": ctx.negotiation_id,
+        "todo_id": todo_id,
+        "title": title,
+        "detail": detail or "",
+        "link": link or "",
+        "vacancy_id": ctx.vacancy_id or "",
+        "vacancy_title": ctx.vacancy_title or "",
+        "employer": ctx.employer_name or "",
+    })
     ctx.acted = True
     return "todo_created"
 

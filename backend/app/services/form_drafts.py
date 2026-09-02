@@ -11,7 +11,7 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 
-from app.db.supabase import service_client
+from app.db.supabase import jsonb_row, service_client
 from app.services import form_filler, qa_memory
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,8 @@ async def insert_draft(
     vacancy: dict,
     answers: list[dict],
     letter: str = "",
-) -> None:
+) -> str:
+    """Upsert a pending form draft; returns the row id for callback routing."""
     vacancy_id = str(vacancy.get("id") or "")
     emp = vacancy.get("employer") if isinstance(vacancy, dict) else None
     row = {
@@ -50,10 +51,29 @@ async def insert_draft(
     def _q():
         return (
             service_client.table("form_drafts")
-            .upsert(row, on_conflict="user_id,vacancy_id")
+            .upsert(jsonb_row(row), on_conflict="user_id,vacancy_id")
             .execute()
         )
-    await _run(_q)
+    res = await _run(_q)
+    # upsert returns representation by default; fall back to a select.
+    data = (res.data or [{}])[0] if res else {}
+    draft_id = data.get("id", "")
+    if draft_id:
+        return draft_id
+    def _sel():
+        return (
+            service_client.table("form_drafts")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("vacancy_id", vacancy_id)
+            .eq("status", "pending")
+            .order("created_at", desc=True)
+            .limit(1)
+            .maybe_single()
+            .execute()
+        )
+    sel = await _run(_sel)
+    return (sel.data or {}).get("id", "")
 
 
 async def list_pending(user_id: str) -> list[dict]:
@@ -87,7 +107,7 @@ async def _update(draft_id: str, patch: dict) -> None:
     def _q():
         return (
             service_client.table("form_drafts")
-            .update(patch)
+            .update(jsonb_row(patch))
             .eq("id", draft_id)
             .execute()
         )
@@ -110,13 +130,10 @@ async def approve(
     final_answers = answers if answers is not None else draft["answers"]
     final_letter = letter if letter is not None else (draft.get("letter") or "")
 
-    # Remember only what the user actually edited — those corrections are the
-    # source of truth for future forms and recruiter replies.
-    if answers is not None:
-        await qa_memory.save_edited(
-            user_id, draft["answers"], final_answers, vacancy_id=draft["vacancy_id"]
-        )
-
+    # Nothing enters qa_memory before the submit succeeds: the table is the
+    # candidate's CONFIRMED source-of-truth, so a failed send must not leak
+    # the edits into future prompts. The success branch below persists
+    # everything that was actually sent (user edits included).
     status, error = await form_filler.submit_prepared_form(
         user_id=user_id,
         resume_id=draft["resume_id"],
@@ -134,6 +151,17 @@ async def approve(
         patch["status"] = "sent"
         patch["error"] = None
         await _update(draft_id, patch)
+        # All answers the user just sent are confirmed source-of-truth —
+        # port them into qa_memory so the AI sees them next time. Never
+        # blocks a successful submit on a qa_memory failure.
+        try:
+            await qa_memory.save_confirmed_answers(
+                user_id, final_answers, source="form", vacancy_id=draft["vacancy_id"],
+            )
+        except Exception:
+            logger.warning(
+                "form_drafts: qa_memory port failed for draft %s", draft_id, exc_info=True
+            )
         await _mirror_application(
             user_id, draft["resume_id"], draft["vacancy_id"],
             status="form_sent", answers=final_answers,
@@ -160,7 +188,7 @@ async def _mirror_application(
     """After successful submit, update the applications row to form_sent."""
     def _q():
         return service_client.table("applications").upsert(
-            {
+            jsonb_row({
                 "user_id": user_id,
                 "resume_id": resume_id,
                 "vacancy_id": vacancy_id,
@@ -168,7 +196,7 @@ async def _mirror_application(
                 "applied_at": _now(),
                 "form_answers": answers,
                 "error": None,
-            },
+            }),
             on_conflict="user_id,vacancy_id",
         ).execute()
     try:

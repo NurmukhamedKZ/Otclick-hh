@@ -23,6 +23,7 @@ const STATE_LABEL: Record<WorkerStatus["state"], string> = {
   running: "работает",
   paused_captcha: "капча",
   paused_limit: "лимит",
+  paused_antibot: "антибот-пауза",
   idle: "пачка отработана",
   stopped: "остановлен",
 };
@@ -110,7 +111,7 @@ export default function WorkerBar() {
   // "запускается"/"капча"/"лимит" — это включённый воркер, показываем «стоп».
   const isOn = state !== "stopped";
   const isErr = !!status?.last_error;
-  const dot = isErr ? "err" : isRunning ? "ok" : state === "paused_captcha" || state === "paused_limit" || state === "starting" ? "warn" : "muted";
+  const dot = isErr ? "err" : isRunning ? "ok" : state === "paused_captcha" || state === "paused_limit" || state === "paused_antibot" || state === "starting" ? "warn" : "muted";
   const label = STATE_LABEL[state];
   const busy = startM.isPending || stopM.isPending;
   // Бесплатный тир автономным не бывает: воркер проходит очередь один раз и

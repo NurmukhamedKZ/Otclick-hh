@@ -53,13 +53,26 @@ class Settings(BaseSettings):
     # self-hoster would sit on 30 applies inside their own instance and could
     # only fix it by editing SQL.
     BILLING_ENABLED: bool = False
-    FREE_TOTAL_APPLIES: int = 30      # lifetime, not per day
-    PAID_DAILY_APPLIES: int = 100
+    PAID_DAILY_APPLIES: int = 150
+    FREE_TOTAL_APPLIES: int = 30  # lifetime cap for the free tier, not per day
 
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_MODEL: str = "gpt-5.4-nano"
     OPENAI_RATE_LIMIT: int = 60
+
+    # Telegram bot for out-of-band notifications (captcha, ban, limits, etc.).
+    # TELEGRAM_BOT_TOKEN is the "123:ABC" from @BotFather; TELEGRAM_CHAT_ID is
+    # the destination chat (your own id or a channel). Empty token => off.
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_CHAT_ID: str = ""
+    # When True, every notify() also pushes to Telegram. False (default) keeps
+    # the original in-app-only behaviour - set True to turn it on.
+    TELEGRAM_NOTIFY_ENABLED: bool = False
+    # Inbound bot: long-polls getUpdates so you can answer questions / approve
+    # drafts via inline buttons + free text. Separate from push so you can run
+    # outbound-only. Requires TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID.
+    TELEGRAM_BOT_ENABLED: bool = False
 
     # Positioning tactics baked into AI-generated candidate-facing text. See
     # docs/spec-ai-positioning.md. "full" opts into the guide's more

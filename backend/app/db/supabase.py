@@ -1,9 +1,33 @@
+import json
+from typing import Any
+
 import httpx
 from supabase import Client, create_client
 from supabase.lib.client_options import SyncClientOptions
 
 from app.config import settings
 
+
+def _jsonify(value: Any) -> Any:
+    """Serialize dict/list values to JSON strings for jsonb columns.
+
+    postgrest 2.30 does not auto-adapt Python dicts/lists into jsonb (raises
+    "can't adapt type 'dict'"). Wrapping them as JSON strings makes the shim's
+    PostgREST layer land them correctly. Scalars pass through unchanged.
+    """
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return value
+
+
+def jsonb_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Return a copy of `row` with every dict/list value JSON-encoded.
+
+    Call this on any row about to be inserted/upserted/updated through the
+    postgrest client, so jsonb columns receive a JSON string instead of a raw
+    Python object the client can't adapt.
+    """
+    return {k: _jsonify(v) for k, v in row.items()}
 
 def _make_client(key: str) -> Client:
     # Force HTTP/1.1. These clients are singletons called concurrently from

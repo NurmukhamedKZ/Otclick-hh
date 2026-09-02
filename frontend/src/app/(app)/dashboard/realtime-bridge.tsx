@@ -4,10 +4,13 @@ import { useEffect, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pushToast, type ToastKind } from "@/components/toaster";
 import type { NotificationRow } from "@/lib/types";
+import { formatNotificationBody } from "@/lib/format-notification";
 
 const TYPE_KIND: Record<string, ToastKind> = {
   captcha: "warning",
   limit_reached: "warning",
+  limit_total: "error",
+  antibot_pause: "warning",
   worker_stop: "info",
   token_dead: "error",
   account_banned: "error",
@@ -23,6 +26,8 @@ const TYPE_KIND: Record<string, ToastKind> = {
 const TYPE_TITLE: Record<string, string> = {
   captcha: "Нужна капча на hh",
   limit_reached: "Достигнут дневной лимит",
+  limit_total: "Исчерпан бесплатный лимит",
+  antibot_pause: "Антибот-пауза на hh",
   worker_stop: "Worker остановлен",
   token_dead: "Токен hh умер — переподключи аккаунт",
   account_banned: "Аккаунт hh заблокирован",
@@ -34,16 +39,6 @@ const TYPE_TITLE: Record<string, string> = {
   cover_letter_written: "ИИ написал сопроводительное",
   web_session_expired: "Сессия hh истекла - переподключите аккаунт",
 };
-
-function formatBody(n: NotificationRow): string | undefined {
-  if (!n.payload) return undefined;
-  try {
-    const parts = Object.entries(n.payload).map(([k, v]) => `${k}: ${String(v)}`);
-    return parts.slice(0, 3).join(" · ");
-  } catch {
-    return undefined;
-  }
-}
 
 export default function RealtimeBridge() {
   const supabase = useMemo(() => createClient(), []);
@@ -68,7 +63,7 @@ export default function RealtimeBridge() {
             pushToast({
               kind: TYPE_KIND[n.type] ?? "info",
               title,
-              body: formatBody(n),
+              body: formatNotificationBody(n),
             });
           },
         )

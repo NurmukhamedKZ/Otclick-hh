@@ -20,12 +20,14 @@ from app.ai.prompts import (
     build_chat_prompt,
     build_fill_prompt,
     build_fill_system_prompt,
+    build_filter_suggest_prompt,
     build_recruiter_prompt,
     sanitize_ai_text,
 )
 from app.ai.recruiter_tools import RECRUITER_TOOLS, RecruiterContext, do_ask
+from app.ai.structured import structured_call
 from app.config import settings
-from app.services import qa_memory
+from app.services import qa_memory, relevance
 from app.services.cover_letter import generate as _generate_cover_letter
 from app.services.form_filler import FillStatus, prepare_form_answers
 from app.services.relevance import Verdict, filter_relevant
@@ -41,6 +43,21 @@ class _FillField(BaseModel):
 
 class _FillPlan(BaseModel):
     fields: list[_FillField] = Field(default_factory=list)
+
+
+class _FilterSuggestion(BaseModel):
+    name: str = ""
+    text: str = ""
+    area: int | None = None
+    experience: str | None = None
+    work_format: str | None = None
+    employment_form: str | None = None
+    period: int | None = None
+    excluded_text: str | None = None
+
+
+class _FilterSuggestions(BaseModel):
+    filters: list[_FilterSuggestion] = Field(default_factory=list)
 
 
 def snap_to_option(value: str, options: list[str]) -> str | None:
@@ -106,14 +123,80 @@ class HHAgent:
         )
 
     async def filter_relevant_vacancies(
-        self, resume_id: str, items: list[dict]
+        self, resume_id: str, items: list[dict], criteria: str | None = None
     ) -> dict[str, Verdict]:
         """Per-vacancy relevance verdicts grounded in the filter's resume.
 
+        Stage 1: classify from search snippets. Stage 2: recheck the
+        "uncertain" subset against the full vacancy description.
         items: {id, name, snippet_requirement, snippet_responsibility}.
         Fail-open: no llm → all relevant (handled inside filter_relevant)."""
         summary = await self._summary_for(resume_id)
-        return filter_relevant(self.llm, summary, items)
+        verdicts, uncertain = filter_relevant(self.llm, summary, items, criteria)
+        if uncertain:
+            recheck = await relevance.recheck_uncertain(
+                self.user_id,
+                self.llm,
+                summary,
+                [it for it in items if str(it.get("id")) in set(uncertain)],
+                criteria,
+            )
+            verdicts.update(recheck)
+            logger.info(
+                "relevance: user=%s rechecked %d uncertain → %d verdicts",
+                self.user_id, len(uncertain), len(recheck),
+            )
+        return verdicts
+
+    # --- filter suggestion ----------------------------------------------------
+
+    _EXPERIENCE_VALUES = ("noExperience", "between1And3", "between3And6", "moreThan6")
+    _WORK_FORMAT_VALUES = ("ON_SITE", "REMOTE", "HYBRID", "FIELD_WORK")
+    _EMPLOYMENT_FORM_VALUES = ("FULL", "PART", "PROJECT", "SIDE_JOB")
+
+    async def suggest_filters(self, resume_id: str) -> list[dict]:
+        """2–3 draft search filters proposed from the full resume.
+
+        Every value is whitelisted against the hh enums the UI offers, so a
+        hallucinated literal degrades to None rather than a dead filter.
+        Empty list when there is no LLM or the call fails — the UI keeps the
+        manual creation path."""
+        if not self.llm:
+            return []
+        summary = await self._summary_for(resume_id)
+        try:
+            plan = await structured_call(
+                self.llm, _FilterSuggestions, build_filter_suggest_prompt(summary)
+            )
+        except Exception:
+            logger.warning("filter suggest: llm call failed", exc_info=True)
+            return []
+        out: list[dict] = []
+        for f in plan.filters[:3]:
+            out.append({
+                "name": sanitize_ai_text(f.name).strip() or None,
+                "text": sanitize_ai_text(f.text).strip() or None,
+                "area": f.area if f.area in (40, 113) else None,
+                "experience": (
+                    f.experience if f.experience in self._EXPERIENCE_VALUES else None
+                ),
+                "work_format": (
+                    f.work_format if f.work_format in self._WORK_FORMAT_VALUES else None
+                ),
+                "employment_form": (
+                    f.employment_form
+                    if f.employment_form in self._EMPLOYMENT_FORM_VALUES
+                    else None
+                ),
+                "search_field": "name",
+                "period": f.period if f.period and 1 <= f.period <= 30 else None,
+                "excluded_text": (
+                    sanitize_ai_text(f.excluded_text).strip()
+                    if f.excluded_text
+                    else None
+                ),
+            })
+        return [f for f in out if f["text"]]
 
     # --- browser extension ---------------------------------------------------
 

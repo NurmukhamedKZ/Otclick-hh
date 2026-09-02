@@ -22,11 +22,11 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from app.ai.agent import HHAgent
-from app.db.supabase import service_client
+from app.db.supabase import jsonb_row, service_client
 from app.hh import web
 from app.services import captcha as captcha_service
 from app.services import form_drafts, form_filler, notifications
-from app.services.form_filler import WebSessionExpired
+from app.services.form_filler import AntibotBlock, WebSessionExpired
 from app.services.hh_credentials import mark_invalid
 
 logger = logging.getLogger(__name__)
@@ -44,6 +44,7 @@ ApplyStatus = Literal[
     "form_required",
     "resume_missing",
     "vacancy_gone",
+    "antibot_block",
 ]
 
 # Statuses that are NOT a spent attempt: the vacancy never reached hh, so it may
@@ -145,6 +146,7 @@ def _record_application(
     form_answers: list[dict] | None = None,
     employer_name: str | None = None,
     filter_id: str | None = None,
+    vacancy_title: str | None = None,
 ) -> None:
     row = {
         "user_id": user_id,
@@ -161,13 +163,15 @@ def _record_application(
         row["employer_name"] = employer_name
     if filter_id:
         row["filter_id"] = filter_id
+    if vacancy_title:
+        row["vacancy_title"] = vacancy_title
     if status in ("sent", "form_sent"):
         row["applied_at"] = datetime.now(UTC).isoformat()
     if form_answers:
         row["form_answers"] = form_answers
     try:
         service_client.table("applications").upsert(
-            row, on_conflict="user_id,vacancy_id"
+            jsonb_row(row), on_conflict="user_id,vacancy_id"
         ).execute()
     except Exception:  # pragma: no cover
         logger.exception("failed to persist application row")
@@ -239,9 +243,25 @@ async def apply_one(
         await form_filler.report_dead_session(user_id, ex)
         await mark_invalid(user_id, f"web session dead on vacancy fetch: {ex}")
         return "token_dead"
+    except AntibotBlock as ex:
+        logger.warning("apply: antibot block on vacancy fetch: %s", ex)
+        block_error = str(ex)  # except-as name is deleted on block exit
+        await loop.run_in_executor(
+            None,
+            lambda: _record_application(
+                user_id=user_id,
+                resume_uuid=resume_uuid,
+                vacancy_id=vacancy_id,
+                status="antibot_block",
+                cover_letter=None,
+                error=block_error,
+            ),
+        )
+        return "antibot_block"
 
     employer_id = _extract_employer_id(vacancy)
     employer_name = (vacancy.get("employer") or {}).get("name")
+    vacancy_title = vacancy.get("name")
 
     # hh itself says this user already has a negotiation on this vacancy.
     # Authoritative, unlike matching hh's rejection wording after the POST.
@@ -292,7 +312,7 @@ async def apply_one(
                     logger.exception(
                         "apply: draft cover letter failed vacancy=%s", vacancy_id
                     )
-            await form_drafts.insert_draft(
+            draft_id = await form_drafts.insert_draft(
                 user_id=user_id,
                 resume_id=resume_uuid,
                 vacancy=vacancy,
@@ -302,6 +322,7 @@ async def apply_one(
             await notifications.notify(
                 user_id, "form_approval",
                 {
+                    "draft_id": draft_id,
                     "vacancy_id": vacancy_id,
                     "vacancy_title": vacancy.get("name"),
                     "employer": (vacancy.get("employer") or {}).get("name"),
@@ -359,6 +380,7 @@ async def apply_one(
                     cover_letter=None,
                     error="cover_letter_generation_failed",
                     employer_id=employer_id,
+                    vacancy_title=vacancy_title,
                 ),
             )
             return "failed"
@@ -417,6 +439,7 @@ async def apply_one(
                 employer_id=employer_id,
                 employer_name=employer_name,
                 filter_id=filter_id,
+                vacancy_title=vacancy_title,
             ),
         )
         return "sent"
@@ -450,6 +473,7 @@ async def apply_one(
                 cover_letter=cover_letter or None,
                 error=error,
                 employer_id=employer_id,
+                vacancy_title=vacancy_title,
             ),
         )
         try:
@@ -469,6 +493,7 @@ async def apply_one(
                 cover_letter=cover_letter or None,
                 error=f"already_applied: {error}",
                 employer_id=employer_id,
+                vacancy_title=vacancy_title,
             ),
         )
         return "skipped"
@@ -487,6 +512,7 @@ async def apply_one(
                 cover_letter=cover_letter or None,
                 error=f"form_required: {error}",
                 employer_id=employer_id,
+                vacancy_title=vacancy_title,
             ),
         )
         return "form_required"
@@ -514,7 +540,7 @@ async def apply_one(
             cover_letter=cover_letter or None,
             error=f"hh_submit_rejected: {error}",
             employer_id=employer_id,
+            vacancy_title=vacancy_title,
         ),
     )
     return "failed"
-

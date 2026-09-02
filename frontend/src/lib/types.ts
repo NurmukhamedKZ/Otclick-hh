@@ -22,6 +22,7 @@ export type Filter = {
   excluded_text: string | null;
   enabled: boolean;
   ai_filter_enabled: boolean;
+  relevance_criteria: string | null;
   created_at: string | null;
 };
 
@@ -38,6 +39,19 @@ export type FilterCreate = {
   excluded_text?: string | null;
   enabled?: boolean;
   ai_filter_enabled?: boolean;
+  relevance_criteria?: string | null;
+};
+
+export type FilterSuggestion = {
+  name?: string | null;
+  text?: string | null;
+  area?: number | null;
+  experience?: string | null;
+  work_format?: string | null;
+  employment_form?: string | null;
+  search_field?: string | null;
+  period?: number | null;
+  excluded_text?: string | null;
 };
 
 export type VacancyPreviewItem = {
@@ -69,7 +83,7 @@ export type BlacklistCreate = {
 };
 
 export type WorkerStatus = {
-  state: "starting" | "running" | "paused_captcha" | "paused_limit" | "idle" | "stopped";
+  state: "starting" | "running" | "paused_captcha" | "paused_limit" | "paused_antibot" | "idle" | "stopped";
   agent_state: "running" | "stopped";
   today_count: number;
   daily_limit: number;
@@ -114,7 +128,9 @@ export type Application = {
   user_id: string;
   resume_id: string | null;
   vacancy_id: string;
+  vacancy_title: string | null;
   employer_id: string | null;
+  employer_name: string | null;
   status: string;
   cover_letter: string | null;
   applied_at: string | null;

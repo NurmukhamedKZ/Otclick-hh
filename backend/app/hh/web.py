@@ -22,7 +22,9 @@ import requests
 
 from app.hh.page_json import find_state
 from app.services.form_filler import (
+    AntibotBlock,
     WebSessionExpired,
+    dump_blocked_page,
     load_web_session,
     session_looks_dead,
 )
@@ -61,6 +63,15 @@ def _get(session: requests.Session, user_id: str, url: str, **kw) -> requests.Re
         raise VacancyGone(f"{resp.status_code} for {url}")
     resp.raise_for_status()
     return resp
+
+
+def _clean_description(value, limit: int = 4000) -> str:
+    """Strip HTML and collapse whitespace; capped so an LLM prompt can't blow up."""
+    import re
+
+    text = re.sub(r"<[^>]+>", " ", str(value or ""))
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:limit]
 
 
 def _normalise_vacancy(v: dict) -> dict:
@@ -124,7 +135,20 @@ async def get_vacancy(user_id: str, vacancy_id: str) -> dict:
     url = f"{WEB_BASE}/vacancy/{vacancy_id}"
     resp = await loop.run_in_executor(None, _get, session, user_id, url)
 
-    short = find_state(resp.text, "shortVacancy")
+    try:
+        short = find_state(resp.text, "shortVacancy")
+    except ValueError:
+        # hh served a 200 page without the inline state JSON — an antibot
+        # interstitial. Dump it for confirmation, then surface as a typed
+        # error the runner can back off from.
+        dump_path = dump_blocked_page(user_id, vacancy_id, resp.text)
+        logger.warning(
+            "get_vacancy: shortVacancy absent for %s/%s (dump=%s, len=%d)",
+            user_id, vacancy_id, dump_path, len(resp.text or ""),
+        )
+        raise AntibotBlock(
+            f"antibot interstitial on vacancy {vacancy_id} (dump={dump_path})"
+        )
     vacancy = _normalise_vacancy(short)
 
     try:
@@ -137,6 +161,18 @@ async def get_vacancy(user_id: str, vacancy_id: str) -> dict:
         vacancy["has_test"] = bool(status["test"].get("hasTests"))
     topics = (status.get("negotiations") or {}).get("topicList") or []
     vacancy["already_responded"] = bool(topics)
+
+    # Full description for the stage-2 relevance recheck: the parsed
+    # shortVacancy block first, then the vacancyView block. Absence degrades
+    # to "" — the recheck then judges on name + snippets.
+    desc = short.get("description")
+    if not desc:
+        try:
+            desc = (find_state(resp.text, "vacancyView") or {}).get("description")
+        except ValueError:
+            desc = None
+    if desc:
+        vacancy["description"] = _clean_description(desc)
     return vacancy
 
 

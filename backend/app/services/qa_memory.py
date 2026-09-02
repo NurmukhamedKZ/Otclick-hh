@@ -1,7 +1,8 @@
 """User-curated Q&A memory.
 
 Rows land here two ways:
-  1. the user EDITED an AI answer while approving a form draft (`save_edited`)
+  1. confirmed answers from a sent form / answered recruiter question
+     (`save_confirmed_answers`) — nothing is saved before the send succeeds
   2. manual entry from the account page (`upsert`)
 
 `prompt_block(user_id)` renders them for injection into any prompt that needs
@@ -36,10 +37,94 @@ async def list_all(user_id: str) -> list[dict]:
             .select("*")
             .eq("user_id", user_id)
             .order("updated_at", desc=True)
+            .limit(500)
             .execute()
         )
     res = await _run(_q)
     return res.data or []
+
+
+async def export_all(user_id: str) -> str:
+    """Combined export of all confirmed Q&A from qa_memory, form_drafts and
+    recruiter_questions/recruiter_drafts. Returns plain text, human-readable.
+    """
+    sections: list[str] = []
+
+    # 1. qa_memory — the curated source-of-truth.
+    qa_rows = await list_all(user_id)
+    if qa_rows:
+        lines = [
+            f"- В: {r['question']}\n  О: {r['answer']}"
+            for r in qa_rows
+            if r.get("question") and r.get("answer")
+        ]
+        if lines:
+            sections.append("== Проверенные ответы (qa_memory) ==\n" + "\n".join(lines))
+
+    # 2. form_drafts — answers from sent forms.
+    def _forms():
+        return (
+            service_client.table("form_drafts")
+            .select("vacancy_title,answers")
+            .eq("user_id", user_id)
+            .eq("status", "sent")
+            .order("resolved_at", desc=True)
+            .execute()
+        )
+    res = await _run(_forms)
+    form_lines: list[str] = []
+    for fd in res.data or []:
+        title = fd.get("vacancy_title") or "—"
+        for a in fd.get("answers") or []:
+            q = (a.get("question") or "").strip()
+            ans = (a.get("answer") or "").strip()
+            if q and ans:
+                form_lines.append(f"- [{title}] В: {q}\n  О: {ans}")
+    if form_lines:
+        sections.append("== Ответы из форм (form_drafts) ==\n" + "\n".join(form_lines))
+
+    # 3. recruiter_questions — answered/completed.
+    def _rq():
+        return (
+            service_client.table("recruiter_questions")
+            .select("questions,answers,vacancy_title")
+            .in_("status", ["answered", "completed"])
+            .eq("user_id", user_id)
+            .order("answered_at", desc=True)
+            .execute()
+        )
+    res = await _run(_rq)
+    rq_lines: list[str] = []
+    for rq in res.data or []:
+        title = rq.get("vacancy_title") or "—"
+        for q, a in zip(rq.get("questions") or [], rq.get("answers") or []):
+            if q and a:
+                rq_lines.append(f"- [{title}] В: {q}\n  О: {a}")
+    if rq_lines:
+        sections.append("== Ответы рекрутёрам (recruiter_questions) ==\n" + "\n".join(rq_lines))
+
+    # 4. recruiter_drafts — sent replies.
+    def _rd():
+        return (
+            service_client.table("recruiter_drafts")
+            .select("question_text,draft_text,vacancy_title")
+            .eq("user_id", user_id)
+            .eq("status", "sent")
+            .order("resolved_at", desc=True)
+            .execute()
+        )
+    res = await _run(_rd)
+    rd_lines: list[str] = []
+    for rd in res.data or []:
+        title = rd.get("vacancy_title") or "—"
+        q = (rd.get("question_text") or "").strip()
+        a = (rd.get("draft_text") or "").strip()
+        if q and a:
+            rd_lines.append(f"- [{title}] В: {q}\n  О: {a}")
+    if rd_lines:
+        sections.append("== Отправленные ответы (recruiter_drafts) ==\n" + "\n".join(rd_lines))
+
+    return "\n\n".join(sections) if sections else "Нет подтверждённых ответов."
 
 
 async def upsert(
@@ -105,6 +190,32 @@ async def save_edited(
             continue  # untouched by the user
         try:
             await upsert(user_id, question, answer, source="form", vacancy_id=vacancy_id)
+            saved += 1
+        except Exception:
+            logger.warning("qa_memory: upsert failed for %s", question[:60], exc_info=True)
+    return saved
+
+
+async def save_confirmed_answers(
+    user_id: str,
+    pairs: list[dict],
+    source: str,
+    vacancy_id: str | None = None,
+) -> int:
+    """Upsert ALL Q&A pairs from a confirmed source (form sent / chat answered).
+
+    Unlike save_edited, this persists every pair — the user confirmed them by
+    sending the form or answering the recruiter question, so they are all
+    source-of-truth. Never raises; returns how many were saved.
+    """
+    saved = 0
+    for a in pairs:
+        question = (a.get("question") or "").strip()
+        answer = (a.get("answer") or "").strip()
+        if not question or not answer:
+            continue
+        try:
+            await upsert(user_id, question, answer, source=source, vacancy_id=vacancy_id)
             saved += 1
         except Exception:
             logger.warning("qa_memory: upsert failed for %s", question[:60], exc_info=True)
