@@ -108,7 +108,9 @@ jobs:
 
           bash -n install.sh
           bash -n install-update.sh
+          python3 infra/bootstrap.py --openai-key ci-placeholder
           docker compose -f docker-compose.yml -f docker-compose.prebuilt.yml config >/dev/null
+          rm -f .env
           git diff --check
 
           git add install.sh install-update.sh .env.example docker-compose.yml \
