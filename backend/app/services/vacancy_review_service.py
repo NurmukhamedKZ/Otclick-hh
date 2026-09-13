@@ -1,8 +1,8 @@
 """Read/review operations for the persistent vacancy funnel.
 
-This module is intentionally separate from the legacy applications history and
-from the send path. User review only changes vacancy_pipeline lifecycle state;
-it never calls HH submit endpoints.
+User review only changes vacancy_pipeline lifecycle state; it never calls HH
+submit endpoints. Explicit archive is intentionally non-learning: it requires no
+reason and does not create rule evidence.
 """
 
 from __future__ import annotations
@@ -20,8 +20,10 @@ from app.services import candidate_context_service, context_fingerprints, vacanc
 _VACANCY_COLUMNS = (
     "id,resume_id,hh_vacancy_id,vacancy_url,title,employer_id,employer_name,"
     "area_name,salary,published_at,discovered_at,last_seen_at,description,status,"
-    "score,score_details,score_explanation,hard_filter_reason,user_decision_reason,"
-    "cover_letter_draft,cover_letter_meta,approved_letter_hash,approved_at,created_at,updated_at"
+    "score,score_details,score_explanation,hard_filter_reason,auto_reject_details,"
+    "user_decision_reason,cover_letter_draft,cover_letter_meta,approved_letter_hash,"
+    "approved_at,score_attempts,next_score_at,last_score_error,score_claimed_at,"
+    "score_lease_expires_at,score_lease_failures,created_at,updated_at"
 )
 
 _DECISION_TARGET = {
@@ -29,12 +31,16 @@ _DECISION_TARGET = {
     "reject": "rejected_by_user",
     "hold": "hold",
     "review": "review",
+    "archive": "archived",
 }
 
-# Terminal/in-flight states must not be silently moved by a review click.
+# User actions may deliberately pre-empt in-flight scoring. The scorer's claim
+# token makes that race safe: once this transition wins, the old scorer cannot
+# write a terminal result. Send/approval states remain protected.
 _REVIEWABLE_STATUSES = frozenset(
     {
         "discovered",
+        "scoring",
         "scored",
         "review",
         "selected",
@@ -44,6 +50,7 @@ _REVIEWABLE_STATUSES = frozenset(
         "score_error",
     }
 )
+_ARCHIVABLE_STATUSES = frozenset({"discovered", "scoring", "scored", "review", "score_error"})
 
 
 def _get_owned(user_id: str, pipeline_id: str) -> dict:
@@ -63,7 +70,6 @@ def _get_owned(user_id: str, pipeline_id: str) -> dict:
 def _source_map(user_id: str, vacancy_ids: list[str]) -> dict[str, list[dict]]:
     if not vacancy_ids:
         return {}
-
     links_res = (
         service_client.table("vacancy_pipeline_sources")
         .select("vacancy_id,source_id")
@@ -71,12 +77,9 @@ def _source_map(user_id: str, vacancy_ids: list[str]) -> dict[str, list[dict]]:
         .execute()
     )
     links = links_res.data or []
-    source_ids = list(
-        dict.fromkeys(str(row["source_id"]) for row in links if row.get("source_id"))
-    )
+    source_ids = list(dict.fromkeys(str(row["source_id"]) for row in links if row.get("source_id")))
     if not source_ids:
         return {}
-
     sources_res = (
         service_client.table("vacancy_search_sources")
         .select("id,name,source_type")
@@ -101,9 +104,10 @@ def _attach_sources(user_id: str, rows: list[dict]) -> list[dict]:
 def _active_rules_for_stale(user_id: str) -> list[dict]:
     res = (
         service_client.table("vacancy_selection_rules")
-        .select("id,version,name,action,match,instruction,active")
+        .select("id,version,name,action,match,instruction,active,deleted_at")
         .eq("user_id", user_id)
         .eq("active", True)
+        .is_("deleted_at", "null")
         .order("version")
         .execute()
     )
@@ -111,9 +115,7 @@ def _active_rules_for_stale(user_id: str) -> list[dict]:
 
 
 def _resume_map(user_id: str, rows: list[dict]) -> dict[str, dict]:
-    resume_ids = list(
-        dict.fromkeys(str(row["resume_id"]) for row in rows if row.get("resume_id"))
-    )
+    resume_ids = list(dict.fromkeys(str(row["resume_id"]) for row in rows if row.get("resume_id")))
     if not resume_ids:
         return {}
     res = (
@@ -126,18 +128,11 @@ def _resume_map(user_id: str, rows: list[dict]) -> dict[str, dict]:
     return {str(row["id"]): row for row in (res.data or [])}
 
 
-def _stale_flags(
-    row: dict,
-    *,
-    context: dict,
-    rules: list[dict],
-    resumes: dict[str, dict],
-) -> dict:
+def _stale_flags(row: dict, *, context: dict, rules: list[dict], resumes: dict[str, dict]) -> dict:
     score_stale: bool | None = False
     cover_stale: bool | None = False
-
     score_details = row.get("score_details") or {}
-    if row.get("score") is not None or row.get("status") in {"scored", "review"}:
+    if row.get("score") is not None or row.get("status") in {"scored", "review", "rejected_by_rule"}:
         stored = score_details.get("context_hash")
         if not stored:
             score_stale = True
@@ -164,15 +159,12 @@ def _stale_flags(
                 model=settings.OPENAI_MODEL,
             )["context_hash"]
             cover_stale = str(stored) != current
-
     return {**row, "score_stale": score_stale, "cover_stale": cover_stale}
 
 
 async def _attach_stale_state(user_id: str, rows: list[dict]) -> list[dict]:
     if not rows:
         return rows
-    # Stale state is advisory. A missing candidate context must not make the
-    # vacancy backlog unavailable; report unknown instead of pretending fresh.
     try:
         context, rules, resumes = await asyncio.gather(
             candidate_context_service.load_candidate_context(user_id),
@@ -181,10 +173,7 @@ async def _attach_stale_state(user_id: str, rows: list[dict]) -> list[dict]:
         )
     except Exception:
         return [{**row, "score_stale": None, "cover_stale": None} for row in rows]
-    return [
-        _stale_flags(row, context=context, rules=rules, resumes=resumes)
-        for row in rows
-    ]
+    return [_stale_flags(row, context=context, rules=rules, resumes=resumes) for row in rows]
 
 
 async def list_vacancies(
@@ -197,17 +186,10 @@ async def list_vacancies(
 ) -> list[dict]:
     unknown = [s for s in (statuses or []) if s not in vacancy_pipeline.PIPELINE_STATUSES]
     if unknown:
-        raise HTTPException(
-            status_code=400,
-            detail=f"unknown vacancy status(es): {', '.join(unknown)}",
-        )
+        raise HTTPException(status_code=400, detail=f"unknown vacancy status(es): {', '.join(unknown)}")
 
     def _query():
-        q = (
-            service_client.table("vacancy_pipeline")
-            .select(_VACANCY_COLUMNS)
-            .eq("user_id", user_id)
-        )
+        q = service_client.table("vacancy_pipeline").select(_VACANCY_COLUMNS).eq("user_id", user_id)
         if statuses:
             q = q.in_("status", list(dict.fromkeys(statuses)))
         return q.order("discovered_at", desc=True).range(offset, offset + limit - 1).execute()
@@ -235,23 +217,26 @@ async def decide(
     if action not in _DECISION_TARGET:
         raise HTTPException(status_code=400, detail="unknown vacancy decision")
     if action == "reject" and not reason:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="rejection reason is required",
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="rejection reason is required")
 
     current = await asyncio.to_thread(_get_owned, user_id, pipeline_id)
     current_status = current["status"]
-    if current_status not in _REVIEWABLE_STATUSES:
+    allowed = _ARCHIVABLE_STATUSES if action == "archive" else _REVIEWABLE_STATUSES
+    if current_status not in allowed:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"vacancy cannot be reviewed from status {current_status}",
+            detail=f"vacancy cannot be {action}ed from status {current_status}",
         )
 
     target = _DECISION_TARGET[action]
     changes = {
         "user_decision_reason": reason if action in {"reject", "hold"} else None,
     }
+    if action == "archive":
+        # Archive is a deliberate non-learning action. Keep score for reference,
+        # but clear any transient scorer error/claim via transition().
+        changes["last_score_error"] = None
+        changes["next_score_at"] = None
     changed = await asyncio.to_thread(
         vacancy_pipeline.transition,
         user_id=user_id,
@@ -268,36 +253,36 @@ async def decide(
     return await get_vacancy(user_id, pipeline_id)
 
 
-async def enrich(user_id: str, pipeline_id: str) -> tuple[dict, dict]:
-    """Fetch the current HH vacancy page and persist the full text snapshot.
-
-    This is read-only against HH. A removed/closed vacancy is moved to archived;
-    a missing description is treated as a contract failure and is never allowed
-    to look like a successfully enriched vacancy for the scorer.
-    """
+async def enrich(
+    user_id: str,
+    pipeline_id: str,
+    *,
+    expected_score_claim_token: str | None = None,
+) -> tuple[dict, dict]:
+    """Fetch HH snapshot; archive a gone vacancy without overriding user races."""
     current = await asyncio.to_thread(_get_owned, user_id, pipeline_id)
-    try:
-        full = await vacancy_page.get_full_vacancy(user_id, current["hh_vacancy_id"])
-    except web.VacancyGone:
-        if current["status"] != "sent":
-            await asyncio.to_thread(
-                vacancy_pipeline.transition,
-                user_id=user_id,
-                pipeline_id=pipeline_id,
-                from_statuses=[current["status"]],
-                to_status="archived",
-            )
-        row = await get_vacancy(user_id, pipeline_id, include_stale=False)
-        return row, {"archived": True, "already_responded": False}
 
-    if full.get("archived") and current["status"] != "sent":
-        await asyncio.to_thread(
-            vacancy_pipeline.transition,
+    def _archive_current() -> bool:
+        return vacancy_pipeline.transition(
             user_id=user_id,
             pipeline_id=pipeline_id,
             from_statuses=[current["status"]],
             to_status="archived",
+            expected_claim_token=(
+                expected_score_claim_token if current["status"] == "scoring" else None
+            ),
         )
+
+    try:
+        full = await vacancy_page.get_full_vacancy(user_id, current["hh_vacancy_id"])
+    except web.VacancyGone:
+        if current["status"] != "sent":
+            await asyncio.to_thread(_archive_current)
+        row = await get_vacancy(user_id, pipeline_id, include_stale=False)
+        return row, {"archived": row.get("status") == "archived", "already_responded": False}
+
+    if full.get("archived") and current["status"] != "sent":
+        await asyncio.to_thread(_archive_current)
 
     description = str(full.get("description") or "").strip()
     if not description:
@@ -315,6 +300,6 @@ async def enrich(user_id: str, pipeline_id: str) -> tuple[dict, dict]:
     )
     row = await get_vacancy(user_id, pipeline_id, include_stale=False)
     return row, {
-        "archived": bool(full.get("archived")),
+        "archived": row.get("status") == "archived",
         "already_responded": bool(full.get("already_responded")),
     }
