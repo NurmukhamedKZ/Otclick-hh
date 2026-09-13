@@ -159,6 +159,84 @@ compose() {
   docker compose -f docker-compose.yml -f docker-compose.prebuilt.yml "$@"
 }
 
+env_get() {
+  local key="$1"
+  [[ -f .env ]] || return 0
+  sed -n "s/^${key}=//p" .env | tail -n 1
+}
+
+env_set() {
+  local key="$1" value="$2"
+  python3 - .env "$key" "$value" <<'PYENV'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+key, value = sys.argv[2], sys.argv[3]
+lines = path.read_text(encoding="utf-8").splitlines()
+prefix = key + "="
+out = []
+replaced = False
+for line in lines:
+    if line.startswith(prefix):
+        if not replaced:
+            out.append(prefix + value)
+            replaced = True
+        continue
+    out.append(line)
+if not replaced:
+    out.append(prefix + value)
+path.write_text("\n".join(out) + "\n", encoding="utf-8")
+PYENV
+  chmod 600 .env
+}
+
+foreign_public_proxy() {
+  docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null \
+    | grep -Ev '^aiautoclicker-caddy[[:space:]]' \
+    | grep -Eq '(^|,|[[:space:]])(0\.0\.0\.0:|\[::\]:)?(80|443)->'
+}
+
+configure_proxy_mode() {
+  local explicit_mode mode
+  explicit_mode="${OTCLICK_PROXY_MODE:-}"
+  mode="${explicit_mode:-$(env_get OTCLICK_PROXY_MODE)}"
+
+  if [[ -z "$mode" || "$mode" == "auto" ]]; then
+    if foreign_public_proxy; then
+      mode="external"
+    else
+      mode="direct"
+    fi
+  fi
+
+  case "$mode" in
+    direct)
+      env_set OTCLICK_PROXY_MODE direct
+      env_set CADDY_HTTP_BIND "80"
+      env_set CADDY_HTTPS_BIND "443"
+      log "      proxy mode: direct Caddy on host 80/443"
+      ;;
+    external)
+      env_set OTCLICK_PROXY_MODE external
+      env_set CADDY_HTTP_BIND "127.0.0.1:${OTCLICK_INTERNAL_HTTP_PORT:-18080}"
+      env_set CADDY_HTTPS_BIND "127.0.0.1:${OTCLICK_INTERNAL_HTTPS_PORT:-18443}"
+      env_set CADDY_SITE_ADDRESS ":80"
+      log "      proxy mode: external reverse proxy; Caddy on loopback ${OTCLICK_INTERNAL_HTTP_PORT:-18080}/${OTCLICK_INTERNAL_HTTPS_PORT:-18443}"
+      ;;
+    *)
+      die "invalid OTCLICK_PROXY_MODE=$mode (expected auto/direct/external)"
+      ;;
+  esac
+}
+
+caddy_health_url() {
+  local bind port
+  bind="$(env_get CADDY_HTTP_BIND)"
+  bind="${bind:-80}"
+  port="${bind##*:}"
+  printf 'http://127.0.0.1:%s/health' "$port"
+}
+
 wait_migrate() {
   local id state exit_code attempt
   for attempt in $(seq 1 90); do
@@ -180,10 +258,12 @@ wait_migrate() {
   die "Database migrations did not finish"
 }
 
+configure_proxy_mode
+
 load_prebuilt_images
 
 log "Pulling third-party infrastructure images"
-compose pull db migrate auth rest realtime storage storage-init kong
+compose pull db migrate auth rest realtime storage storage-init kong caddy
 
 log "Starting infrastructure and applying migrations (no local build)"
 compose up -d --no-build --pull never db migrate auth rest realtime storage storage-init kong
@@ -191,6 +271,9 @@ wait_migrate
 
 log "Starting application from prebuilt images (no local build)"
 compose up -d --no-build --pull never --force-recreate api frontend worker
+
+log "Starting Caddy routing layer"
+compose up -d --no-build --pull never --force-recreate --no-deps caddy
 
 log "Stack status"
 compose ps -a

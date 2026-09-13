@@ -1,0 +1,21 @@
+{$CADDY_SITE_ADDRESS} {
+  encode zstd gzip
+
+  # FastAPI lives under /api/*; expose /health for installer/runtime checks.
+  @backend path /api/* /health
+  handle @backend {
+    reverse_proxy api:8000
+  }
+
+  # Supabase browser endpoints share the same public origin. Caddy preserves
+  # websocket upgrades for Realtime automatically.
+  @supabase path /auth/* /rest/* /realtime/* /storage/*
+  handle @supabase {
+    reverse_proxy kong:8000
+  }
+
+  # Everything else is the Next.js application.
+  handle {
+    reverse_proxy frontend:3000
+  }
+}

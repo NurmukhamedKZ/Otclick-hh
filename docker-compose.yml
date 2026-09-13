@@ -185,7 +185,7 @@ services:
     # the real key value, breaking the sed search pattern.
     entrypoint: ["sh", "-c", "sed 's|$$ANON_KEY|'\"${ANON_KEY}\"'|g; s|$$SERVICE_ROLE_KEY|'\"${SERVICE_ROLE_KEY}\"'|g' /kong.yml.tpl > /tmp/kong.yml; exec /docker-entrypoint.sh kong docker-start"]
     ports:
-      - "54321:8000"
+      - "127.0.0.1:54321:8000"
     healthcheck:
       test: ["CMD", "kong", "health"]
       interval: 10s
@@ -203,7 +203,7 @@ services:
     env_file:
       - .env
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     # /api/hh/connect поднимает headless Chromium прямо здесь — те же 64 МБ
     # /dev/shm по умолчанию роняют его на середине OAuth.
     shm_size: "1gb"
@@ -257,10 +257,36 @@ services:
       # docker network instead; the browser keeps using the public URL.
       SUPABASE_URL: http://kong:8000
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       - api
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: aiautoclicker-caddy
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      kong:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    environment:
+      CADDY_SITE_ADDRESS: "${CADDY_SITE_ADDRESS:-:80}"
+    ports:
+      # Direct mode uses host 80/443. When another reverse proxy already owns
+      # those ports, the installer switches Caddy to loopback 18080/18443.
+      - "${CADDY_HTTP_BIND:-80}:80"
+      - "${CADDY_HTTPS_BIND:-443}:443"
+      - "${CADDY_HTTPS_BIND:-443}:443/udp"
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
 
 volumes:
   supabase-db-data:
   supabase-storage-data:
+  caddy-data:
+  caddy-config:

@@ -147,3 +147,46 @@ def test_backend_health_checks_use_health_endpoint():
     assert "require_http http://127.0.0.1:8000/health backend api 90" in updater
     assert "wait_http http://127.0.0.1:8000 backend 45" not in updater
     assert "require_http http://127.0.0.1:8000 backend api 90" not in updater
+
+
+
+def test_production_proxy_contract_uses_loopback_service_ports_and_caddy():
+    compose = _read("docker-compose.yml")
+    caddy = _read("infra/Caddyfile")
+    env_example = _read(".env.example")
+
+    assert '"127.0.0.1:3000:3000"' in compose
+    assert '"127.0.0.1:8000:8000"' in compose
+    assert '"127.0.0.1:54321:8000"' in compose
+    assert 'container_name: aiautoclicker-caddy' in compose
+    assert './infra/Caddyfile:/etc/caddy/Caddyfile:ro' in compose
+    assert 'reverse_proxy frontend:3000' in caddy
+    assert 'reverse_proxy api:8000' in caddy
+    assert 'reverse_proxy kong:8000' in caddy
+    assert 'OTCLICK_PROXY_MODE=auto' in env_example
+    assert 'CADDY_HTTP_BIND=80' in env_example
+    assert 'CADDY_HTTPS_BIND=443' in env_example
+
+
+def test_installers_restore_and_reconcile_caddy_without_local_app_builds():
+    fresh = _read("install.sh")
+    updater = _read("install-update.sh")
+
+    for script in (fresh, updater):
+        assert 'configure_proxy_mode()' in script
+        assert 'foreign_public_proxy()' in script
+        assert 'caddy_health_url()' in script
+
+    assert 'compose pull db migrate auth rest realtime storage storage-init kong caddy' in fresh
+    assert '--force-recreate --no-deps caddy' in fresh
+    assert 'repaired stale empty infra/Caddyfile directory' in updater
+    assert 'compose pull db migrate auth rest realtime storage storage-init kong caddy' in updater
+    assert 'require_http "$CADDY_HEALTH_URL" internal-Caddy caddy 60' in updater
+    assert 'docker compose build' not in updater
+
+
+def test_repeat_update_repairs_missing_caddy_image():
+    updater = _read("install-update.sh")
+    assert "docker image inspect caddy:2-alpine" in updater
+    assert "compose pull caddy" in updater
+    assert "compose unchanged but Caddy image is missing; pulling Caddy only" in updater

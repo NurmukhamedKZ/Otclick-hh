@@ -115,11 +115,18 @@ def test_compose_api_url_default_points_at_backend():
     assert match.group(1).strip().endswith(f":{BACKEND_PORT}")
 
 
-def test_compose_publishes_both_ports():
+def test_compose_publishes_service_ports_on_loopback():
     compose = _read("docker-compose.yml")
 
-    assert f'"{KONG_PORT}:8000"' in compose, "Kong must be published on 54321"
-    assert f'"{BACKEND_PORT}:8000"' in compose, "backend must be published on 8000"
+    assert f'"127.0.0.1:{KONG_PORT}:8000"' in compose, (
+        "Kong must be published on loopback 54321"
+    )
+    assert f'"127.0.0.1:{BACKEND_PORT}:8000"' in compose, (
+        "backend must be published on loopback 8000"
+    )
+    assert '"127.0.0.1:3000:3000"' in compose, (
+        "frontend must be published on loopback 3000"
+    )
 
 
 # --- backend env template ----------------------------------------------------------

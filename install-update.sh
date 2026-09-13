@@ -97,6 +97,84 @@ compose() {
   docker compose -f docker-compose.yml -f docker-compose.prebuilt.yml "$@"
 }
 
+env_get() {
+  local key="$1"
+  [[ -f .env ]] || return 0
+  sed -n "s/^${key}=//p" .env | tail -n 1
+}
+
+env_set() {
+  local key="$1" value="$2"
+  python3 - .env "$key" "$value" <<'PYENV'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+key, value = sys.argv[2], sys.argv[3]
+lines = path.read_text(encoding="utf-8").splitlines()
+prefix = key + "="
+out = []
+replaced = False
+for line in lines:
+    if line.startswith(prefix):
+        if not replaced:
+            out.append(prefix + value)
+            replaced = True
+        continue
+    out.append(line)
+if not replaced:
+    out.append(prefix + value)
+path.write_text("\n".join(out) + "\n", encoding="utf-8")
+PYENV
+  chmod 600 .env
+}
+
+foreign_public_proxy() {
+  docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null \
+    | grep -Ev '^aiautoclicker-caddy[[:space:]]' \
+    | grep -Eq '(^|,|[[:space:]])(0\.0\.0\.0:|\[::\]:)?(80|443)->'
+}
+
+configure_proxy_mode() {
+  local explicit_mode mode
+  explicit_mode="${OTCLICK_PROXY_MODE:-}"
+  mode="${explicit_mode:-$(env_get OTCLICK_PROXY_MODE)}"
+
+  if [[ -z "$mode" || "$mode" == "auto" ]]; then
+    if foreign_public_proxy; then
+      mode="external"
+    else
+      mode="direct"
+    fi
+  fi
+
+  case "$mode" in
+    direct)
+      env_set OTCLICK_PROXY_MODE direct
+      env_set CADDY_HTTP_BIND "80"
+      env_set CADDY_HTTPS_BIND "443"
+      log "      proxy mode: direct Caddy on host 80/443"
+      ;;
+    external)
+      env_set OTCLICK_PROXY_MODE external
+      env_set CADDY_HTTP_BIND "127.0.0.1:${OTCLICK_INTERNAL_HTTP_PORT:-18080}"
+      env_set CADDY_HTTPS_BIND "127.0.0.1:${OTCLICK_INTERNAL_HTTPS_PORT:-18443}"
+      env_set CADDY_SITE_ADDRESS ":80"
+      log "      proxy mode: external reverse proxy; Caddy on loopback ${OTCLICK_INTERNAL_HTTP_PORT:-18080}/${OTCLICK_INTERNAL_HTTPS_PORT:-18443}"
+      ;;
+    *)
+      die "invalid OTCLICK_PROXY_MODE=$mode (expected auto/direct/external)"
+      ;;
+  esac
+}
+
+caddy_health_url() {
+  local bind port
+  bind="$(env_get CADDY_HTTP_BIND)"
+  bind="${bind:-80}"
+  port="${bind##*:}"
+  printf 'http://127.0.0.1:%s/health' "$port"
+}
+
 component_hash() {
   local component="$1"
   python3 - "$component" <<'PY'
@@ -479,15 +557,30 @@ else
 fi
 
 log "[5/7] fast-forwarding repository"
+# A broken previous deployment can leave infra/Caddyfile as an empty directory
+# after the tracked file disappeared from main. Remove only that exact empty
+# directory so Git can restore the tracked Caddyfile; never delete its contents.
+if [[ -d infra/Caddyfile ]]; then
+  if rmdir infra/Caddyfile 2>/dev/null; then
+    log "      repaired stale empty infra/Caddyfile directory"
+  else
+    die "infra/Caddyfile is a non-empty directory; move it aside manually before updating"
+  fi
+fi
 git checkout "$REF" >>"$LOG_FILE" 2>&1
 git merge --ff-only "origin/$REF" >>"$LOG_FILE" 2>&1
 [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]] || die "repository did not reach target revision"
 [[ -f docker-compose.prebuilt.yml ]] || die "docker-compose.prebuilt.yml is missing after update"
 [[ -f infra/frontend-runtime-env.sh ]] || die "frontend runtime env injector is missing after update"
+[[ -f infra/Caddyfile ]] || die "infra/Caddyfile is missing after update"
+configure_proxy_mode
 
 if [[ "$COMPOSE_CHANGED" == "1" ]]; then
   log "      compose changed; refreshing pinned third-party images"
-  compose pull db migrate auth rest realtime storage storage-init kong >>"$LOG_FILE" 2>&1
+  compose pull db migrate auth rest realtime storage storage-init kong caddy >>"$LOG_FILE" 2>&1
+elif ! docker image inspect caddy:2-alpine >/dev/null 2>&1; then
+  log "      compose unchanged but Caddy image is missing; pulling Caddy only"
+  compose pull caddy >>"$LOG_FILE" 2>&1
 else
   log "      compose unchanged; third-party image pull skipped"
 fi
@@ -525,6 +618,14 @@ if ! wait_http http://127.0.0.1:3000 frontend 45; then
   require_http http://127.0.0.1:3000 frontend frontend 90
 fi
 
+CADDY_HEALTH_URL="$(caddy_health_url)"
+if [[ "$COMPOSE_CHANGED" == "1" || "$INFRA_CHANGED" == "1" ]]; then
+  compose up -d --no-build --pull never --force-recreate --no-deps caddy >>"$LOG_FILE" 2>&1
+else
+  compose up -d --no-build --pull never --no-deps caddy >>"$LOG_FILE" 2>&1
+fi
+require_http "$CADDY_HEALTH_URL" internal-Caddy caddy 60
+
 python3 - "$STATE_DIR/install-state.json" "$TARGET_SHA" "$TARGET_BACKEND_HASH" "$TARGET_FRONTEND_HASH" "$TARGET_COMPOSE_HASH" "$TARGET_INFRA_HASH" "$TARGET_MIGRATIONS_HASH" <<'PY'
 import json
 from pathlib import Path
@@ -554,4 +655,5 @@ if [[ -n "$BACKUP_FILE" ]]; then
 fi
 log "      frontend: http://127.0.0.1:3000 healthy"
 log "      backend: http://127.0.0.1:8000/health healthy"
+log "      caddy: $CADDY_HEALTH_URL healthy"
 log "      log: $LOG_FILE"
