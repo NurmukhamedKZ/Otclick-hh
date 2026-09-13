@@ -179,7 +179,7 @@ def test_installers_restore_and_reconcile_caddy_without_normal_local_app_builds(
         assert 'configure_proxy_mode()' in script
         assert 'foreign_public_proxy()' in script
 
-    assert 'OTCLICK_ALLOW_LOCAL_BUILD' in fresh  # explicit emergency override only
+    assert 'OTCLICK_ALLOW_LOCAL_BUILD' in fresh
     assert 'load_prebuilt_app_images' in fresh
     assert 'docker compose pull db migrate auth rest realtime storage storage-init kong caddy' in fresh
     assert 'wait_http "http://127.0.0.1:${OTCLICK_INTERNAL_HTTP_PORT:-18080}/health" internal-Caddy 60' in fresh
@@ -205,3 +205,11 @@ def test_unified_product_surface_keeps_vacancy_funnel_and_removes_billing():
     assert (ROOT / "frontend/src/app/(app)/vacancies/rules/page.tsx").is_file()
     assert (ROOT / "frontend/src/app/(app)/vacancies/cover-letter-editor.tsx").is_file()
     assert not (ROOT / "frontend/src/app/(app)/billing/page.tsx").exists()
+
+
+def test_cover_letter_prompt_migration_follows_product_pipeline_migrations():
+    migrations = ROOT / "infra/supabase/migrations"
+    for number in range(34, 42):
+        assert list(migrations.glob(f"{number:03d}_*.sql")), f"missing product migration {number:03d}"
+    assert not (migrations / "034_cover_letter_prompt_version.sql").exists()
+    assert (migrations / "042_cover_letter_prompt_version.sql").is_file()
