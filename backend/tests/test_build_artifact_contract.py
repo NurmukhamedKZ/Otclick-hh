@@ -32,12 +32,12 @@ def test_linux_artifact_has_per_component_fallbacks_for_incremental_updates():
     assert "Fallback already exists" in workflow
 
 
-def test_legacy_combined_bundle_is_retained_only_for_fresh_install_compatibility():
+def test_combined_bundle_is_retained_only_for_fresh_install_compatibility():
     workflow = _workflow()
 
     assert "Package fresh-install compatibility bundle" in workflow
     assert "fresh-install/otclick-images-linux-amd64.tar.zst" in workflow
-    assert "incremental updater never downloads it" in workflow
+    assert "incremental updater does not download this" in workflow
     assert '"fresh_install_bundle": "otclick-images-linux-amd64.tar.zst"' in workflow
 
 
@@ -51,6 +51,8 @@ def test_exact_commit_release_contains_v2_manifest_and_metadata():
     assert "artifacts/manifest.json" in workflow
     assert "artifacts/SHA256SUMS" in workflow
     assert "artifacts/install-update.sh" in workflow
+    assert "artifacts/docker-compose.prebuilt.yml" in workflow
+    assert "Verify published exact-SHA metadata" in workflow
     assert 'https://github.com/${GITHUB_REPOSITORY}/releases/tag/install-${GITHUB_SHA}' in workflow
 
 
@@ -67,7 +69,7 @@ def test_linux_artifact_uses_short_retention_metadata_upload():
 def test_linux_artifact_never_publishes_runtime_secrets():
     workflow = _workflow()
 
-    assert "cp install.sh install-one.sh install-update.sh docker-compose.yml artifacts/" in workflow
+    assert "cp install.sh install-one.sh install-update.sh docker-compose.yml docker-compose.prebuilt.yml artifacts/" in workflow
     assert "cp .env" not in workflow
     assert "OPENAI_API_KEY" not in workflow
     assert "SERVICE_ROLE_KEY" not in workflow
