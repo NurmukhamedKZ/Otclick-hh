@@ -127,45 +127,49 @@ def test_one_command_shim_uses_incremental_updater_for_existing_install():
     assert 'replace_once(' not in shim
 
 
-def test_incremental_updater_downloads_only_changed_components():
+def test_incremental_updater_downloads_only_changed_or_missing_exact_components():
     updater = _updater()
 
     assert 'OLD_BACKEND_HASH="$(component_hash backend)"' in updater
     assert 'OLD_FRONTEND_HASH="$(component_hash frontend)"' in updater
-    assert 'backend unchanged; 0 bytes downloaded' in updater
-    assert 'frontend unchanged; 0 bytes downloaded' in updater
+    assert 'backend exact image already present; 0 application bytes downloaded' in updater
+    assert 'frontend exact image already present; 0 application bytes downloaded' in updater
+    assert 'image_matches_target "$TARGET_BACKEND_IMAGE" aiautoclicker-backend:latest || BACKEND_CHANGED=1' in updater
+    assert 'image_matches_target "$TARGET_FRONTEND_IMAGE" aiautoclicker-frontend:latest || FRONTEND_CHANGED=1' in updater
     assert 'if [[ "$BACKEND_CHANGED" == "1" ]]' in updater
     assert 'if [[ "$FRONTEND_CHANGED" == "1" ]]' in updater
 
 
-def test_incremental_updater_prefers_registry_layers_with_component_fallback():
+def test_incremental_updater_prefers_immutable_ghcr_layers_with_component_fallback():
     updater = _updater()
 
     assert 'docker pull "$image_ref"' in updater
-    assert 'registry pull complete (cached layers reused)' in updater
-    assert 'registry pull unavailable; using component fallback' in updater
+    assert 'GHCR pull complete (cached layers reused)' in updater
+    assert 'anonymous GHCR pull unavailable; using component Release fallback' in updater
     assert 'releases/download/${fallback_tag}' in updater
     assert 'zstd -d -c "$fallback_file" | docker load' in updater
     assert 'sha256sum "$fallback_file"' in updater
 
 
-def test_incremental_updater_skips_unneeded_db_and_third_party_work():
+def test_incremental_updater_skips_unneeded_backup_and_third_party_pull_but_repairs_runtime():
     updater = _updater()
 
-    assert 'schema unchanged; DB backup/migration cycle skipped' in updater
+    assert 'schema unchanged; DB backup skipped' in updater
     assert 'compose unchanged; third-party image pull skipped' in updater
     assert 'if [[ "$MIGRATIONS_CHANGED" == "1" ]]' in updater
     assert 'if [[ "$COMPOSE_CHANGED" == "1" ]]' in updater
     assert 'creating DB backup before schema migration' in updater
+    assert '[6/7] reconciling/repairing stack without local builds' in updater
+    assert 'compose up -d --no-build --pull never db migrate' in updater
 
 
-def test_incremental_updater_recreates_only_changed_app_services():
+def test_incremental_updater_recreates_changed_app_services_and_keeps_caddy_separate():
     updater = _updater()
 
-    assert '--force-recreate --no-deps api' in updater
-    assert '--force-recreate --no-deps worker' in updater
-    assert '--force-recreate --no-deps frontend' in updater
-    assert 'docker compose up -d --no-build --pull never --no-deps caddy' in updater
+    assert 'compose up -d --no-build --pull never --force-recreate api worker' in updater
+    assert 'compose up -d --no-build --pull never --force-recreate frontend' in updater
+    assert 'compose up -d --no-build --pull never --force-recreate --no-deps caddy' in updater
+    assert 'compose up -d --no-build --pull never --no-deps caddy' in updater
     assert 'ALLOW_REAL_APPLY=true' not in updater
 
 
