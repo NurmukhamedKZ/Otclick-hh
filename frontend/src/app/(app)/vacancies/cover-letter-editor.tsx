@@ -20,13 +20,7 @@ type Props = {
   onUpdated: (row: CoverLetterRow) => void;
 };
 
-export default function CoverLetterEditor({
-  vacancyId,
-  status,
-  initialDraft,
-  meta,
-  onUpdated,
-}: Props) {
+export default function CoverLetterEditor({ vacancyId, status, initialDraft, meta, onUpdated }: Props) {
   const [text, setText] = useState(initialDraft ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,9 +46,7 @@ export default function CoverLetterEditor({
     setBusy(true);
     setError(null);
     try {
-      const row = await apiFetch<CoverLetterRow>(`/api/vacancies/${vacancyId}/cover-letter/generate`, {
-        method: "POST",
-      });
+      const row = await apiFetch<CoverLetterRow>(`/api/vacancies/${vacancyId}/cover-letter/generate`, { method: "POST" });
       setText(row.cover_letter_draft ?? "");
       setSavedText(row.cover_letter_draft ?? "");
       onUpdated(row);
@@ -90,9 +82,7 @@ export default function CoverLetterEditor({
     setBusy(true);
     setError(null);
     try {
-      const row = await apiFetch<CoverLetterRow>(`/api/vacancies/${vacancyId}/cover-letter/approve`, {
-        method: "POST",
-      });
+      const row = await apiFetch<CoverLetterRow>(`/api/vacancies/${vacancyId}/cover-letter/approve`, { method: "POST" });
       setText(row.cover_letter_draft ?? "");
       setSavedText(row.cover_letter_draft ?? "");
       onUpdated(row);
@@ -133,15 +123,17 @@ export default function CoverLetterEditor({
     ? meta.fact_keys.filter((value): value is string => typeof value === "string")
     : [];
   const changed = text.trim() !== savedText.trim();
-  const inTargetLength = text.length >= 500 && text.length <= 750;
+  const inTargetLength = text.length >= 1400 && text.length <= 3500;
+  const isRich = meta.structure === "rich-v2";
 
   if (status === "selected") {
     return (
       <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--line-2)" }}>
         <div style={{ fontSize: 12, fontWeight: 750, marginBottom: 8 }}>Сопроводительное письмо</div>
-        <Btn kind="yellow" size="sm" loading={busy} onClick={generate}>
-          сформировать черновик
-        </Btn>
+        <Btn kind="yellow" size="sm" loading={busy} onClick={generate}>сформировать полный черновик</Btn>
+        <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 7 }}>
+          Генератор формирует полный текст с профилем, 4–6 релевантными результатами и CTA.
+        </div>
         {error && <div style={{ color: "var(--err)", fontSize: 12, marginTop: 8 }}>{error}</div>}
       </div>
     );
@@ -154,34 +146,23 @@ export default function CoverLetterEditor({
           <div style={{ fontSize: 12, fontWeight: 750 }}>Сопроводительное письмо</div>
           <Tag tone="yellow">в очереди</Tag>
         </div>
-        <div style={{ marginTop: 8, padding: 12, borderRadius: 14, background: "var(--bg-deep)", fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
-          {text}
-        </div>
-        <div style={{ marginTop: 10 }}>
-          <Btn kind="ghost" size="sm" loading={busy} onClick={cancelQueue}>
-            отменить очередь
-          </Btn>
-        </div>
-        <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 7 }}>
-          Реальная отправка пока не подключена: очередь только сохраняется в БД.
-        </div>
+        <div style={{ marginTop: 8, padding: 12, borderRadius: 14, background: "var(--bg-deep)", fontSize: 13, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{text}</div>
+        <div style={{ marginTop: 10 }}><Btn kind="ghost" size="sm" loading={busy} onClick={cancelQueue}>отменить очередь</Btn></div>
         {error && <div style={{ color: "var(--err)", fontSize: 12, marginTop: 8 }}>{error}</div>}
       </div>
     );
   }
 
   if (status !== "letter_draft" && status !== "approved") return null;
-
   const editable = status === "letter_draft" || editingApproved;
 
   return (
     <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--line-2)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
         <div style={{ fontSize: 12, fontWeight: 750 }}>Сопроводительное письмо</div>
-        <Tag tone={status === "approved" ? "ok" : "yellow"}>
-          {status === "approved" ? "одобрено" : "черновик"}
-        </Tag>
+        <Tag tone={status === "approved" ? "ok" : "yellow"}>{status === "approved" ? "одобрено" : "черновик"}</Tag>
         <Tag tone={inTargetLength ? "ok" : "warn"}>{text.length} знаков</Tag>
+        {isRich && <Tag tone="neutral">rich-v2</Tag>}
       </div>
 
       <textarea
@@ -191,7 +172,7 @@ export default function CoverLetterEditor({
         aria-label="Черновик сопроводительного письма"
         style={{
           width: "100%",
-          minHeight: 190,
+          minHeight: 320,
           resize: "vertical",
           border: "1px solid var(--line)",
           borderRadius: 14,
@@ -214,53 +195,27 @@ export default function CoverLetterEditor({
 
       {status === "letter_draft" && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-          <Btn kind="primary" size="sm" loading={busy} disabled={!changed || !text.trim()} onClick={save}>
-            сохранить
-          </Btn>
-          <Btn kind="yellow" size="sm" disabled={busy || changed || !text.trim()} onClick={approve}>
-            одобрить текст
-          </Btn>
-          <Btn kind="ghost" size="sm" disabled={busy || changed} onClick={generate}>
-            перегенерировать
-          </Btn>
+          <Btn kind="primary" size="sm" loading={busy} disabled={!changed || !text.trim()} onClick={save}>сохранить</Btn>
+          <Btn kind="yellow" size="sm" disabled={busy || changed || !text.trim()} onClick={approve}>одобрить текст</Btn>
+          <Btn kind="ghost" size="sm" disabled={busy || changed} onClick={generate}>перегенерировать</Btn>
         </div>
       )}
 
       {status === "approved" && !editingApproved && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-          <Btn kind="primary" size="sm" loading={busy} onClick={queue}>
-            поставить в очередь
-          </Btn>
-          <Btn kind="ghost" size="sm" disabled={busy} onClick={() => setEditingApproved(true)}>
-            изменить письмо
-          </Btn>
+          <Btn kind="primary" size="sm" loading={busy} onClick={queue}>поставить в очередь</Btn>
+          <Btn kind="ghost" size="sm" disabled={busy} onClick={() => setEditingApproved(true)}>изменить письмо</Btn>
         </div>
       )}
 
       {status === "approved" && editingApproved && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-          <Btn kind="primary" size="sm" loading={busy} disabled={!changed || !text.trim()} onClick={save}>
-            сохранить и сбросить approval
-          </Btn>
-          <Btn
-            kind="ghost"
-            size="sm"
-            disabled={busy}
-            onClick={() => {
-              setText(savedText);
-              setEditingApproved(false);
-            }}
-          >
-            отмена
-          </Btn>
+          <Btn kind="primary" size="sm" loading={busy} disabled={!changed || !text.trim()} onClick={save}>сохранить и сбросить approval</Btn>
+          <Btn kind="ghost" size="sm" disabled={busy} onClick={() => { setText(savedText); setEditingApproved(false); }}>отмена</Btn>
         </div>
       )}
 
-      {changed && (
-        <div style={{ color: "var(--warn)", fontSize: 11, marginTop: 7 }}>
-          Есть несохранённые изменения. Одобрение привязывается только к сохранённому точному тексту.
-        </div>
-      )}
+      {changed && <div style={{ color: "var(--warn)", fontSize: 11, marginTop: 7 }}>Есть несохранённые изменения. Одобрение привязывается только к сохранённому точному тексту.</div>}
       {error && <div style={{ color: "var(--err)", fontSize: 12, marginTop: 8 }}>{error}</div>}
     </div>
   );
