@@ -21,6 +21,20 @@ if [[ "${EUID}" -ne 0 ]]; then
   exit 1
 fi
 
+# Existing installations delegate immediately to the hardened exact-SHA updater.
+# Fresh installs continue through the product-specific single-user/LLM/profile flow below.
+if [[ -d "$INSTALL_DIR/.git" && "${OTCLICK_FULL_INSTALL:-0}" != "1" ]]; then
+  command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 1; }
+  tmp_update="$(mktemp /tmp/otclick-update.XXXXXX.sh)"
+  trap 'rm -f "$tmp_update"' EXIT
+  update_url="https://raw.githubusercontent.com/gest0r1/Otclick-hh/${REF}/install-update.sh"
+  echo "[otclick] existing installation detected in $INSTALL_DIR; using incremental updater"
+  curl -fsSL "$update_url" -o "$tmp_update"
+  chmod 700 "$tmp_update"
+  exec env OTCLICK_REF="$REF" OTCLICK_DIR="$INSTALL_DIR" OTCLICK_REPO_SLUG="gest0r1/Otclick-hh" \
+    bash "$tmp_update" </dev/null
+fi
+
 mkdir -p "$LOG_DIR"
 touch "$LOG_FILE"
 chmod 700 "$LOG_DIR"

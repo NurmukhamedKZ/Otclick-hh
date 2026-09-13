@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# Incremental updater for an existing single-user Otclick installation.
-# Fresh installations still use install.sh. This updater downloads a tiny
-# exact-SHA manifest, pulls only changed application components, and relies on
-# Docker layer reuse. If anonymous GHCR pull is unavailable it falls back to a
-# per-component GitHub Release archive instead of the old combined ~1 GiB file.
+# Incremental production updater for an existing Otclick installation.
+# It downloads only a tiny exact-SHA manifest, then pulls changed application
+# components from GHCR so Docker can reuse cached layers. GitHub Release
+# component archives are a fallback only; the combined fresh-install bundle is
+# never downloaded by this script.
+#
+# Important: an already-up-to-date checkout still runs the runtime reconciliation
+# path. This makes the same one-command installer usable as a repair command after
+# an interrupted deployment or a stopped/crashed application container.
 
 REPO_SLUG="${OTCLICK_REPO_SLUG:-gest0r1/Otclick-hh}"
-REF="${OTCLICK_REF:-feature/persistent-vacancy-funnel}"
+REF="${OTCLICK_REF:-main}"
 INSTALL_DIR="${OTCLICK_DIR:-/opt/otclick-hh}"
 LOG_DIR="${OTCLICK_LOG_DIR:-/var/log/otclick-hh}"
 STATE_DIR="${OTCLICK_STATE_DIR:-/var/lib/otclick-hh}"
@@ -23,10 +27,25 @@ if [[ "${EUID}" -ne 0 ]]; then
   exit 1
 fi
 
+# The updater is deliberately non-interactive. When install.sh itself is run as
+# `curl ... | bash`, stdin may still contain unread bytes from install.sh after
+# the exec handoff. Disconnect stdin before any child process can consume and
+# echo that source text into the terminal.
+exec </dev/null
+
 mkdir -p "$LOG_DIR" "$STATE_DIR"
 chmod 700 "$LOG_DIR" "$STATE_DIR"
 touch "$LOG_FILE"
 chmod 600 "$LOG_FILE"
+
+# Preserve the caller's real terminal before stdout/stderr are redirected to tee.
+# Docker sees a TTY on fd 3 and therefore renders its native layer progress
+# in-place instead of emitting one new line for every progress update.
+INTERACTIVE_TERMINAL=0
+exec 3>&1
+if [[ -t 3 ]]; then
+  INTERACTIVE_TERMINAL=1
+fi
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 log() { printf '[otclick] %s\n' "$*"; }
@@ -37,23 +56,34 @@ on_error() {
   trap - ERR
   echo
   echo "[otclick] incremental update failed (exit $code)."
-  [[ -n "$BACKUP_FILE" ]] && echo "Database backup: $BACKUP_FILE"
+  if [[ -n "$BACKUP_FILE" ]]; then
+    echo "Database backup: $BACKUP_FILE"
+  fi
   echo "Log: $LOG_FILE"
   exit "$code"
 }
 trap on_error ERR
 
+# EXIT traps must always return 0. The previous form used `[[ ... ]] && rm ...`;
+# with empty temp-file variables the last test returned 1 and incorrectly fired
+# the ERR trap even after a successful `exit 0` on an up-to-date checkout.
 cleanup() {
-  [[ -n "$MANIFEST_FILE" ]] && rm -f "$MANIFEST_FILE"
-  [[ -n "$SUMS_FILE" ]] && rm -f "$SUMS_FILE"
+  if [[ -n "$MANIFEST_FILE" ]]; then
+    rm -f "$MANIFEST_FILE" || true
+  fi
+  if [[ -n "$SUMS_FILE" ]]; then
+    rm -f "$SUMS_FILE" || true
+  fi
+  return 0
 }
 trap cleanup EXIT
 
-for tool in git curl python3 zstd docker; do
+for tool in git curl python3 sha256sum docker; do
   command -v "$tool" >/dev/null 2>&1 || die "required tool is missing: $tool"
 done
 docker compose version >/dev/null 2>&1 || die "docker compose v2 is required"
 [[ -d "$INSTALL_DIR/.git" ]] || die "existing installation not found at $INSTALL_DIR; use install.sh for a fresh install"
+[[ -f "$INSTALL_DIR/.env" ]] || die "$INSTALL_DIR/.env is missing; restore the original .env before updating"
 
 cd "$INSTALL_DIR"
 
@@ -62,6 +92,88 @@ if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
   git status --short --untracked-files=no | sed 's/^/[otclick]   /'
   die "commit/stash tracked changes before update"
 fi
+
+compose() {
+  docker compose -f docker-compose.yml -f docker-compose.prebuilt.yml "$@"
+}
+
+env_get() {
+  local key="$1"
+  [[ -f .env ]] || return 0
+  sed -n "s/^${key}=//p" .env | tail -n 1
+}
+
+env_set() {
+  local key="$1" value="$2"
+  python3 - .env "$key" "$value" <<'PYENV'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+key, value = sys.argv[2], sys.argv[3]
+lines = path.read_text(encoding="utf-8").splitlines()
+prefix = key + "="
+out = []
+replaced = False
+for line in lines:
+    if line.startswith(prefix):
+        if not replaced:
+            out.append(prefix + value)
+            replaced = True
+        continue
+    out.append(line)
+if not replaced:
+    out.append(prefix + value)
+path.write_text("\n".join(out) + "\n", encoding="utf-8")
+PYENV
+  chmod 600 .env
+}
+
+foreign_public_proxy() {
+  docker ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null \
+    | grep -Ev '^aiautoclicker-caddy[[:space:]]' \
+    | grep -Eq '(^|,|[[:space:]])(0\.0\.0\.0:|\[::\]:)?(80|443)->'
+}
+
+configure_proxy_mode() {
+  local explicit_mode mode
+  explicit_mode="${OTCLICK_PROXY_MODE:-}"
+  mode="${explicit_mode:-$(env_get OTCLICK_PROXY_MODE)}"
+
+  if [[ -z "$mode" || "$mode" == "auto" ]]; then
+    if foreign_public_proxy; then
+      mode="external"
+    else
+      mode="direct"
+    fi
+  fi
+
+  case "$mode" in
+    direct)
+      env_set OTCLICK_PROXY_MODE direct
+      env_set CADDY_HTTP_BIND "80"
+      env_set CADDY_HTTPS_BIND "443"
+      log "      proxy mode: direct Caddy on host 80/443"
+      ;;
+    external)
+      env_set OTCLICK_PROXY_MODE external
+      env_set CADDY_HTTP_BIND "127.0.0.1:${OTCLICK_INTERNAL_HTTP_PORT:-18080}"
+      env_set CADDY_HTTPS_BIND "127.0.0.1:${OTCLICK_INTERNAL_HTTPS_PORT:-18443}"
+      env_set CADDY_SITE_ADDRESS ":80"
+      log "      proxy mode: external reverse proxy; Caddy on loopback ${OTCLICK_INTERNAL_HTTP_PORT:-18080}/${OTCLICK_INTERNAL_HTTPS_PORT:-18443}"
+      ;;
+    *)
+      die "invalid OTCLICK_PROXY_MODE=$mode (expected auto/direct/external)"
+      ;;
+  esac
+}
+
+caddy_health_url() {
+  local bind port
+  bind="$(env_get CADDY_HTTP_BIND)"
+  bind="${bind:-80}"
+  port="${bind##*:}"
+  printf 'http://127.0.0.1:%s/health' "$port"
+}
 
 component_hash() {
   local component="$1"
@@ -86,15 +198,13 @@ pathspecs = {
         "uv.lock",
     ],
     "frontend": ["frontend"],
-    "compose": ["docker-compose.yml"],
+    "compose": ["docker-compose.yml", "docker-compose.prebuilt.yml"],
     "infra": ["infra"],
     "migrations": ["infra/supabase/migrations"],
 }
 if component not in pathspecs:
     raise SystemExit(f"unknown component: {component}")
-
-cmd = ["git", "ls-files", "-z", "--", *pathspecs[component]]
-raw = subprocess.check_output(cmd)
+raw = subprocess.check_output(["git", "ls-files", "-z", "--", *pathspecs[component]])
 files = sorted({p.decode("utf-8") for p in raw.split(b"\0") if p})
 h = hashlib.sha256()
 for rel in files:
@@ -118,24 +228,46 @@ wait_http() {
     fi
     sleep 1
   done
+  return 1
+}
+
+runtime_diagnostics() {
+  local service="$1"
+  echo >&2
+  echo "[otclick] runtime diagnostics for $service:" >&2
+  compose ps -a >&2 || true
+  echo >&2
+  compose logs --no-color --tail=200 "$service" >&2 || true
+}
+
+require_http() {
+  local url="$1" label="$2" service="$3" timeout="${4:-90}"
+  if wait_http "$url" "$label" "$timeout"; then
+    return 0
+  fi
+  runtime_diagnostics "$service"
   die "$label did not become healthy: $url"
 }
 
 wait_migrate() {
   local id state exit_code i
   for ((i=1; i<=90; i++)); do
-    id="$(docker compose ps -aq migrate 2>/dev/null | head -n1)"
+    id="$(compose ps -aq migrate 2>/dev/null | head -n1)"
     if [[ -n "$id" ]]; then
       state="$(docker inspect -f '{{.State.Status}}' "$id" 2>/dev/null || true)"
       if [[ "$state" == "exited" ]]; then
         exit_code="$(docker inspect -f '{{.State.ExitCode}}' "$id" 2>/dev/null || true)"
-        [[ "$exit_code" == "0" ]] || die "database migrations failed (exit ${exit_code:-unknown})"
-        log "      migrations complete"
-        return 0
+        if [[ "$exit_code" == "0" ]]; then
+          log "      migrations complete"
+          return 0
+        fi
+        runtime_diagnostics migrate
+        die "database migrations failed (exit ${exit_code:-unknown})"
       fi
     fi
     sleep 2
   done
+  runtime_diagnostics migrate
   die "database migrations did not finish"
 }
 
@@ -143,12 +275,12 @@ backup_database() {
   mkdir -p backups
   chmod 700 backups
   local db_id db_health i tmp
-  db_id="$(docker compose ps -q db 2>/dev/null || true)"
+  db_id="$(compose ps -q db 2>/dev/null || true)"
   if [[ -z "$db_id" || "$(docker inspect -f '{{.State.Running}}' "$db_id" 2>/dev/null || true)" != "true" ]]; then
     log "      starting DB for migration backup"
-    docker compose up -d db >>"$LOG_FILE" 2>&1
+    compose up -d --no-build --pull never db >>"$LOG_FILE" 2>&1
     for ((i=1; i<=60; i++)); do
-      db_id="$(docker compose ps -q db 2>/dev/null || true)"
+      db_id="$(compose ps -q db 2>/dev/null || true)"
       db_health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$db_id" 2>/dev/null || true)"
       [[ "$db_health" == "healthy" || "$db_health" == "running" ]] && break
       sleep 2
@@ -159,9 +291,112 @@ backup_database() {
   tmp="$BACKUP_FILE.tmp"
   log "      creating DB backup before schema migration"
   rm -f "$tmp"
-  docker compose exec -T db pg_dump -U postgres -d postgres -Fc >"$tmp"
+  compose exec -T db pg_dump -U postgres -d postgres -Fc >"$tmp"
   chmod 600 "$tmp"
   mv "$tmp" "$BACKUP_FILE"
+}
+
+ensure_zstd() {
+  command -v zstd >/dev/null 2>&1 && return 0
+  if command -v apt-get >/dev/null 2>&1; then
+    log "      installing zstd for Release fallback"
+    apt-get update -qq >>"$LOG_FILE" 2>&1
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq zstd >>"$LOG_FILE" 2>&1
+  fi
+  command -v zstd >/dev/null 2>&1 || die "zstd is required only for the GitHub Release fallback, but could not be installed"
+}
+
+image_matches_target() {
+  local target_ref="$1" local_tag="$2" target_id local_id
+  # A locally built/stale :latest image is not proof that it matches the exact
+  # content-addressed artifact. The exact digest itself must exist locally and
+  # resolve to the same image ID as the runtime tag.
+  docker image inspect "$target_ref" >/dev/null 2>&1 || return 1
+  docker image inspect "$local_tag" >/dev/null 2>&1 || return 1
+  target_id="$(docker image inspect "$target_ref" --format '{{.Id}}')"
+  local_id="$(docker image inspect "$local_tag" --format '{{.Id}}')"
+  [[ -n "$target_id" && "$target_id" == "$local_id" ]]
+}
+
+
+image_transfer_size() {
+  local image_ref="$1"
+  docker manifest inspect "$image_ref" 2>/dev/null | python3 -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    raise SystemExit(1)
+total = sum(int(layer.get("size") or 0) for layer in data.get("layers", []))
+if total <= 0:
+    raise SystemExit(1)
+n = float(total)
+units = ("B", "KiB", "MiB", "GiB", "TiB")
+for unit in units:
+    if n < 1024 or unit == units[-1]:
+        print(f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}")
+        break
+    n /= 1024
+'
+}
+
+append_pull_transcript() {
+  local transcript="$1"
+  [[ -s "$transcript" ]] || return 0
+  python3 - "$transcript" "$LOG_FILE" <<'PYLOG'
+from pathlib import Path
+import re
+import sys
+
+src = Path(sys.argv[1])
+dst = Path(sys.argv[2])
+ansi = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+text = src.read_bytes().decode("utf-8", "replace")
+text = ansi.sub("", text).replace("\r", "\n")
+with dst.open("a", encoding="utf-8") as out:
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("Script started on ") or line.startswith("Script done on "):
+            continue
+        out.write(line + "\n")
+PYLOG
+}
+
+docker_pull_visible() {
+  local name="$1" image_ref="$2" transcript rc
+
+  if [[ "$INTERACTIVE_TERMINAL" != "1" ]]; then
+    docker pull "$image_ref" </dev/null >>"$LOG_FILE" 2>&1
+    return $?
+  fi
+
+  printf '[otclick]       %s: Docker layer progress shows downloaded / total and updates in place\n' "$name" >&3
+
+  if command -v script >/dev/null 2>&1; then
+    transcript="$(mktemp /tmp/otclick-docker-pull.XXXXXX.log)"
+    rc=0
+    OTCLICK_PULL_IMAGE="$image_ref" script -qefc 'docker pull "$OTCLICK_PULL_IMAGE"' "$transcript" </dev/null >&3 2>&3 || rc=$?
+    append_pull_transcript "$transcript" || true
+    rm -f "$transcript"
+    return "$rc"
+  fi
+
+  # util-linux `script` is expected on supported Ubuntu hosts. If it is absent,
+  # still send Docker directly to the original terminal so native progress stays
+  # visible, at the cost of not mirroring the detailed pull transcript to the log.
+  docker pull "$image_ref" </dev/null >&3 2>&3
+}
+
+curl_download_visible() {
+  local label="$1" url="$2" output="$3"
+  if [[ "$INTERACTIVE_TERMINAL" == "1" ]]; then
+    printf '[otclick]       %s: downloading (curl shows total, received, speed and ETA)\n' "$label" >&3
+    curl -fL --retry 3 --retry-delay 2 --retry-all-errors --show-error \
+      "$url" -o "$output" 2>&3
+  else
+    curl -fL --retry 3 --retry-delay 2 --retry-all-errors \
+      "$url" -o "$output" >>"$LOG_FILE" 2>&1
+  fi
 }
 
 OLD_SHA="$(git rev-parse HEAD)"
@@ -175,24 +410,24 @@ log "[1/7] checking repository head"
 git fetch --prune origin "$REF" >>"$LOG_FILE" 2>&1
 TARGET_SHA="$(git rev-parse "origin/$REF")"
 if [[ "$TARGET_SHA" == "$OLD_SHA" && "${OTCLICK_FORCE_UPDATE:-0}" != "1" ]]; then
-  log "already up to date: $TARGET_SHA"
-  exit 0
+  log "      code already up to date: $TARGET_SHA; continuing with artifact/runtime verification"
 fi
 
-log "[2/7] fetching exact-SHA update manifest"
+log "[2/7] fetching exact-SHA incremental manifest"
 release_tag="install-${TARGET_SHA}"
 release_base="https://github.com/${REPO_SLUG}/releases/download/${release_tag}"
 MANIFEST_FILE="$(mktemp /tmp/otclick-manifest.XXXXXX.json)"
 SUMS_FILE="$(mktemp /tmp/otclick-sums.XXXXXX)"
 
 ready=0
-for attempt in $(seq 1 24); do
+for attempt in $(seq 1 36); do
   if curl -fsSL --retry 2 --retry-delay 1 "${release_base}/manifest.json" -o "$MANIFEST_FILE" \
      && curl -fsSL --retry 2 --retry-delay 1 "${release_base}/SHA256SUMS" -o "$SUMS_FILE"; then
     ready=1
     break
   fi
-  [[ "$attempt" -eq 24 ]] && break
+  [[ "$attempt" -eq 36 ]] && break
+  [[ $((attempt % 6)) -eq 0 ]] && log "      artifact is still being built in GitHub Actions..."
   sleep 10
 done
 [[ "$ready" == "1" ]] || die "prebuilt manifest is not ready for ${TARGET_SHA}"
@@ -204,7 +439,6 @@ actual_manifest="$(sha256sum "$MANIFEST_FILE" | awk '{print $1}')"
 
 mapfile -t META < <(python3 - "$MANIFEST_FILE" "$TARGET_SHA" <<'PY'
 import json
-import platform
 import sys
 
 path, target_sha = sys.argv[1:]
@@ -260,31 +494,41 @@ MIGRATIONS_CHANGED=0
 [[ "$OLD_INFRA_HASH" != "$TARGET_INFRA_HASH" ]] && INFRA_CHANGED=1
 [[ "$OLD_MIGRATIONS_HASH" != "$TARGET_MIGRATIONS_HASH" ]] && MIGRATIONS_CHANGED=1
 
-log "      changed: backend=$BACKEND_CHANGED frontend=$FRONTEND_CHANGED compose=$COMPOSE_CHANGED infra=$INFRA_CHANGED migrations=$MIGRATIONS_CHANGED"
+# Do not trust a pre-existing :latest tag merely because the source hash did not
+# change. The interrupted migration from the old installer can leave an older
+# locally-built image under the same tag. Require the exact target digest.
+image_matches_target "$TARGET_BACKEND_IMAGE" aiautoclicker-backend:latest || BACKEND_CHANGED=1
+image_matches_target "$TARGET_FRONTEND_IMAGE" aiautoclicker-frontend:latest || FRONTEND_CHANGED=1
+
+log "      changed/required: backend=$BACKEND_CHANGED frontend=$FRONTEND_CHANGED compose=$COMPOSE_CHANGED infra=$INFRA_CHANGED migrations=$MIGRATIONS_CHANGED"
 
 pull_component() {
   local name="$1" image_ref="$2" fallback_tag="$3" fallback_asset="$4" local_tag="$5"
-  local fallback_base fallback_sums fallback_file expected actual
+  local fallback_base fallback_sums fallback_file expected actual transfer_size
 
-  log "      $name: trying incremental registry pull"
-  if docker pull "$image_ref" >>"$LOG_FILE" 2>&1; then
+  transfer_size="$(image_transfer_size "$image_ref" || true)"
+  if [[ -n "$transfer_size" ]]; then
+    log "      $name: pulling immutable image from GHCR (compressed image up to $transfer_size; cached layers are reused)"
+  else
+    log "      $name: pulling immutable image from GHCR"
+  fi
+  if docker_pull_visible "$name" "$image_ref"; then
     docker tag "$image_ref" "$local_tag"
-    log "      $name: registry pull complete (cached layers reused)"
+    log "      $name: GHCR pull complete (cached layers reused)"
     return 0
   fi
 
-  log "      $name: registry pull unavailable; using component fallback"
+  log "      $name: anonymous GHCR pull unavailable; using component Release fallback"
+  ensure_zstd
   fallback_base="https://github.com/${REPO_SLUG}/releases/download/${fallback_tag}"
   fallback_sums="$(mktemp /tmp/otclick-component-sums.XXXXXX)"
   fallback_file="$(mktemp /tmp/otclick-component.XXXXXX.tar.zst)"
-  if ! curl -fsSL --retry 3 --retry-delay 2 "${fallback_base}/SHA256SUMS" -o "$fallback_sums"; then
-    rm -f "$fallback_sums" "$fallback_file"
-    return 21
-  fi
+  curl -fsSL --retry 3 --retry-delay 2 "${fallback_base}/SHA256SUMS" -o "$fallback_sums" \
+    || { rm -f "$fallback_sums" "$fallback_file"; return 21; }
   expected="$(awk -v asset="$fallback_asset" '$2 == asset || $2 == "./" asset {print $1; exit}' "$fallback_sums")"
   [[ -n "$expected" ]] || { rm -f "$fallback_sums" "$fallback_file"; return 22; }
-  curl -fL --retry 3 --retry-delay 2 --retry-all-errors \
-    "${fallback_base}/${fallback_asset}" -o "$fallback_file" >>"$LOG_FILE" 2>&1
+  curl_download_visible "$name Release fallback" \
+    "${fallback_base}/${fallback_asset}" "$fallback_file"
   actual="$(sha256sum "$fallback_file" | awk '{print $1}')"
   [[ "$actual" == "$expected" ]] || { rm -f "$fallback_sums" "$fallback_file"; return 23; }
   zstd -d -c "$fallback_file" | docker load >>"$LOG_FILE" 2>&1
@@ -297,71 +541,90 @@ log "[3/7] updating changed application components"
 if [[ "$BACKEND_CHANGED" == "1" ]]; then
   pull_component backend "$TARGET_BACKEND_IMAGE" "$TARGET_BACKEND_FALLBACK_TAG" "$TARGET_BACKEND_FALLBACK_ASSET" "aiautoclicker-backend:latest"
 else
-  log "      backend unchanged; 0 bytes downloaded"
+  log "      backend exact image already present; 0 application bytes downloaded"
 fi
 if [[ "$FRONTEND_CHANGED" == "1" ]]; then
   pull_component frontend "$TARGET_FRONTEND_IMAGE" "$TARGET_FRONTEND_FALLBACK_TAG" "$TARGET_FRONTEND_FALLBACK_ASSET" "aiautoclicker-frontend:latest"
 else
-  log "      frontend unchanged; 0 bytes downloaded"
+  log "      frontend exact image already present; 0 application bytes downloaded"
 fi
 
 if [[ "$MIGRATIONS_CHANGED" == "1" ]]; then
   log "[4/7] schema changed; backing up PostgreSQL"
   backup_database
 else
-  log "[4/7] schema unchanged; DB backup/migration cycle skipped"
+  log "[4/7] schema unchanged; DB backup skipped"
 fi
 
 log "[5/7] fast-forwarding repository"
-if git show-ref --verify --quiet "refs/heads/$REF"; then
-  git checkout "$REF" >>"$LOG_FILE" 2>&1
-else
-  git checkout -b "$REF" --track "origin/$REF" >>"$LOG_FILE" 2>&1
+# A broken previous deployment can leave infra/Caddyfile as an empty directory
+# after the tracked file disappeared from main. Remove only that exact empty
+# directory so Git can restore the tracked Caddyfile; never delete its contents.
+if [[ -d infra/Caddyfile ]]; then
+  if rmdir infra/Caddyfile 2>/dev/null; then
+    log "      repaired stale empty infra/Caddyfile directory"
+  else
+    die "infra/Caddyfile is a non-empty directory; move it aside manually before updating"
+  fi
 fi
+git checkout "$REF" >>"$LOG_FILE" 2>&1
 git merge --ff-only "origin/$REF" >>"$LOG_FILE" 2>&1
 [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]] || die "repository did not reach target revision"
+[[ -f docker-compose.prebuilt.yml ]] || die "docker-compose.prebuilt.yml is missing after update"
+[[ -f infra/frontend-runtime-env.sh ]] || die "frontend runtime env injector is missing after update"
+[[ -f infra/Caddyfile ]] || die "infra/Caddyfile is missing after update"
+configure_proxy_mode
 
 if [[ "$COMPOSE_CHANGED" == "1" ]]; then
   log "      compose changed; refreshing pinned third-party images"
-  docker compose pull db migrate auth rest realtime storage storage-init kong caddy >>"$LOG_FILE" 2>&1
+  compose pull db migrate auth rest realtime storage storage-init kong caddy >>"$LOG_FILE" 2>&1
+elif ! docker image inspect caddy:2-alpine >/dev/null 2>&1; then
+  log "      compose unchanged but Caddy image is missing; pulling Caddy only"
+  compose pull caddy >>"$LOG_FILE" 2>&1
 else
   log "      compose unchanged; third-party image pull skipped"
 fi
 
-log "[6/7] reconciling only affected services"
-if [[ "$MIGRATIONS_CHANGED" == "1" ]]; then
-  docker compose up -d --no-build --pull never db migrate >>"$LOG_FILE" 2>&1
-  wait_migrate
-fi
+log "[6/7] reconciling/repairing stack without local builds"
+# Always run the idempotent migration job and reconcile every runtime service.
+# This is deliberate even when git is already current: a repeated installer run
+# doubles as a safe repair after an interrupted deployment.
+compose up -d --no-build --pull never db migrate >>"$LOG_FILE" 2>&1
+wait_migrate
+compose up -d --no-build --pull never db auth rest realtime storage storage-init kong >>"$LOG_FILE" 2>&1
+require_http http://127.0.0.1:54321/auth/v1/health Supabase-auth auth 90
 
-if [[ "$COMPOSE_CHANGED" == "1" || "$INFRA_CHANGED" == "1" ]]; then
-  docker compose up -d --no-build --pull never db auth rest realtime storage storage-init kong >>"$LOG_FILE" 2>&1
-  wait_http http://127.0.0.1:54321/auth/v1/health Supabase-auth 90
-fi
-
-if [[ "$BACKEND_CHANGED" == "1" ]]; then
-  docker compose up -d --no-build --pull never --force-recreate --no-deps api >>"$LOG_FILE" 2>&1
-  wait_http http://127.0.0.1:8000/health backend 90
-  docker compose up -d --no-build --pull never --force-recreate --no-deps worker >>"$LOG_FILE" 2>&1
+if [[ "$BACKEND_CHANGED" == "1" || "$COMPOSE_CHANGED" == "1" || "$INFRA_CHANGED" == "1" ]]; then
+  compose up -d --no-build --pull never --force-recreate api worker >>"$LOG_FILE" 2>&1
 else
-  if [[ "$COMPOSE_CHANGED" == "1" || "$INFRA_CHANGED" == "1" ]]; then
-    docker compose up -d --no-build --pull never api worker >>"$LOG_FILE" 2>&1
-  fi
-  wait_http http://127.0.0.1:8000/health backend 90
+  compose up -d --no-build --pull never api worker >>"$LOG_FILE" 2>&1
+fi
+if ! wait_http http://127.0.0.1:8000/health backend 45; then
+  log "      backend health failed; force-recreating api/worker once"
+  runtime_diagnostics api
+  compose up -d --no-build --pull never --force-recreate api worker >>"$LOG_FILE" 2>&1
+  require_http http://127.0.0.1:8000/health backend api 90
 fi
 
-if [[ "$FRONTEND_CHANGED" == "1" ]]; then
-  docker compose up -d --no-build --pull never --force-recreate --no-deps frontend >>"$LOG_FILE" 2>&1
+if [[ "$FRONTEND_CHANGED" == "1" || "$COMPOSE_CHANGED" == "1" || "$INFRA_CHANGED" == "1" ]]; then
+  compose up -d --no-build --pull never --force-recreate frontend >>"$LOG_FILE" 2>&1
 else
-  if [[ "$COMPOSE_CHANGED" == "1" || "$INFRA_CHANGED" == "1" ]]; then
-    docker compose up -d --no-build --pull never frontend >>"$LOG_FILE" 2>&1
-  fi
+  compose up -d --no-build --pull never frontend >>"$LOG_FILE" 2>&1
 fi
-wait_http http://127.0.0.1:3000 frontend 90
+if ! wait_http http://127.0.0.1:3000 frontend 45; then
+  log "      frontend health failed; force-recreating frontend once"
+  runtime_diagnostics frontend
+  compose up -d --no-build --pull never --force-recreate frontend >>"$LOG_FILE" 2>&1
+  require_http http://127.0.0.1:3000 frontend frontend 90
+fi
 
+CADDY_HEALTH_URL="$(caddy_health_url)"
 if [[ "$COMPOSE_CHANGED" == "1" || "$INFRA_CHANGED" == "1" ]]; then
-  docker compose up -d --no-build --pull never --no-deps caddy >>"$LOG_FILE" 2>&1
+  compose up -d --no-build --pull never --force-recreate --no-deps caddy >>"$LOG_FILE" 2>&1
+else
+  compose up -d --no-build --pull never --no-deps caddy >>"$LOG_FILE" 2>&1
 fi
+require_http "$CADDY_HEALTH_URL" internal-Caddy caddy 60
 
 python3 - "$STATE_DIR/install-state.json" "$TARGET_SHA" "$TARGET_BACKEND_HASH" "$TARGET_FRONTEND_HASH" "$TARGET_COMPOSE_HASH" "$TARGET_INFRA_HASH" "$TARGET_MIGRATIONS_HASH" <<'PY'
 import json
@@ -384,8 +647,13 @@ path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
 path.chmod(0o600)
 PY
 
-log "[7/7] update complete"
+log "[7/7] update/repair complete"
 log "      revision: $TARGET_SHA"
-log "      downloaded components: backend=$BACKEND_CHANGED frontend=$FRONTEND_CHANGED"
-[[ -n "$BACKUP_FILE" ]] && log "      DB backup: $BACKUP_FILE"
+log "      application components pulled: backend=$BACKEND_CHANGED frontend=$FRONTEND_CHANGED"
+if [[ -n "$BACKUP_FILE" ]]; then
+  log "      DB backup: $BACKUP_FILE"
+fi
+log "      frontend: http://127.0.0.1:3000 healthy"
+log "      backend: http://127.0.0.1:8000/health healthy"
+log "      caddy: $CADDY_HEALTH_URL healthy"
 log "      log: $LOG_FILE"
