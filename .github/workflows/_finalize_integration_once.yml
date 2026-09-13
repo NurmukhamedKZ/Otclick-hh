@@ -24,40 +24,32 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main
 
-          # Existing installs use the hardened updater from main. This carries
-          # stdin isolation, exact-image verification, runtime repair, diagnostics,
-          # Caddy repair/health and GHCR/fallback progress handling.
           git show origin/main:install-update.sh > install-update.sh
           chmod +x install-update.sh
 
           python3 - <<'PY'
           from pathlib import Path
 
-          # Keep the product fresh installer, but make the public install.sh
-          # delegate existing installations immediately to the hardened updater.
           p = Path('install.sh')
           t = p.read_text(encoding='utf-8')
           marker = '''if [[ "${EUID}" -ne 0 ]]; then\n  echo "Run as root: sudo bash install.sh" >&2\n  exit 1\nfi\n\n'''
-          delegation = marker + '''# Existing installations must never run the heavy fresh-install path. Delegate\n# immediately to the exact-SHA incremental updater while preserving the product\n# fresh-install flow below for first installation only.\nif [[ -d "$INSTALL_DIR/.git" && "${OTCLICK_FULL_INSTALL:-0}" != "1" ]]; then\n  command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 1; }\n  tmp_update="$(mktemp /tmp/otclick-update.XXXXXX.sh)"\n  trap 'rm -f "$tmp_update"' EXIT\n  update_url="https://raw.githubusercontent.com/gest0r1/Otclick-hh/${REF}/install-update.sh"\n  echo "[otclick] existing installation detected in $INSTALL_DIR; using incremental updater"\n  curl -fsSL "$update_url" -o "$tmp_update"\n  chmod 700 "$tmp_update"\n  exec env OTCLICK_REF="$REF" OTCLICK_DIR="$INSTALL_DIR" OTCLICK_REPO_SLUG="gest0r1/Otclick-hh" \\\n    bash "$tmp_update" </dev/null\nfi\n\n'''
+          delegation = marker + '''# Existing installations delegate immediately to the hardened exact-SHA updater.\n# Fresh installs continue through the product-specific single-user/LLM/profile flow below.\nif [[ -d "$INSTALL_DIR/.git" && "${OTCLICK_FULL_INSTALL:-0}" != "1" ]]; then\n  command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 1; }\n  tmp_update="$(mktemp /tmp/otclick-update.XXXXXX.sh)"\n  trap 'rm -f "$tmp_update"' EXIT\n  update_url="https://raw.githubusercontent.com/gest0r1/Otclick-hh/${REF}/install-update.sh"\n  echo "[otclick] existing installation detected in $INSTALL_DIR; using incremental updater"\n  curl -fsSL "$update_url" -o "$tmp_update"\n  chmod 700 "$tmp_update"\n  exec env OTCLICK_REF="$REF" OTCLICK_DIR="$INSTALL_DIR" OTCLICK_REPO_SLUG="gest0r1/Otclick-hh" \\\n    bash "$tmp_update" </dev/null\nfi\n\n'''
           if 'existing installation detected in $INSTALL_DIR; using incremental updater' not in t:
               if marker not in t:
                   raise SystemExit('install.sh root marker not found')
               t = t.replace(marker, delegation, 1)
           p.write_text(t, encoding='utf-8')
 
-          # Add explicit proxy defaults without removing product-specific env keys.
           p = Path('.env.example')
           t = p.read_text(encoding='utf-8')
           if 'OTCLICK_PROXY_MODE=' not in t:
-              old = '''CADDY_SITE_ADDRESS=:80\n'''
-              new = '''OTCLICK_PROXY_MODE=auto\nCADDY_SITE_ADDRESS=:80\nCADDY_HTTP_BIND=80\nCADDY_HTTPS_BIND=443\n'''
+              old = 'CADDY_SITE_ADDRESS=:80\n'
+              new = 'OTCLICK_PROXY_MODE=auto\nCADDY_SITE_ADDRESS=:80\nCADDY_HTTP_BIND=80\nCADDY_HTTPS_BIND=443\n'
               if old not in t:
                   raise SystemExit('.env Caddy marker not found')
               t = t.replace(old, new, 1)
           p.write_text(t, encoding='utf-8')
 
-          # The merge brought in main's Caddy block next to the already-existing
-          # product Caddy block. Keep exactly the first product block.
           p = Path('docker-compose.yml')
           t = p.read_text(encoding='utf-8')
           token = '\n  caddy:\n'
@@ -71,39 +63,6 @@ jobs:
           if t.count(token) != 1:
               raise SystemExit(f'expected one Caddy service, found {t.count(token)}')
           p.write_text(t, encoding='utf-8')
-
-          # Integration branch needs CI/artifacts before merge. Keep main and
-          # feature triggers as well; this is harmless after promotion to main.
-          for rel in ('.github/workflows/ci.yml', '.github/workflows/build-artifact.yml'):
-              p = Path(rel)
-              t = p.read_text(encoding='utf-8')
-              if '      - "integration/**"\n' not in t:
-                  anchor = '      - "feature/**"\n'
-                  if anchor not in t:
-                      raise SystemExit(f'{rel}: feature trigger marker not found')
-                  t = t.replace(anchor, anchor + '      - "integration/**"\n', 1)
-              p.write_text(t, encoding='utf-8')
-
-          # The hardened updater hashes the prebuilt override as part of Compose;
-          # artifact generation must compute the same hash.
-          p = Path('.github/workflows/build-artifact.yml')
-          t = p.read_text(encoding='utf-8')
-          t = t.replace('"COMPOSE_HASH": ["docker-compose.yml"],',
-                        '"COMPOSE_HASH": ["docker-compose.yml", "docker-compose.prebuilt.yml"],')
-          if '"docker-compose.prebuilt.yml"' not in t.split('paths:',1)[1].split('permissions:',1)[0]:
-              t = t.replace('      - "docker-compose.yml"\n',
-                            '      - "docker-compose.yml"\n      - "docker-compose.prebuilt.yml"\n', 1)
-          # Validate the actual production merged Compose contract, not only base compose.
-          t = t.replace('docker compose config >/dev/null',
-                        'docker compose -f docker-compose.yml -f docker-compose.prebuilt.yml config >/dev/null', 1)
-          p.write_text(t, encoding='utf-8')
-
-          # Same validation in normal CI.
-          p = Path('.github/workflows/ci.yml')
-          t = p.read_text(encoding='utf-8')
-          t = t.replace('docker compose config >/dev/null',
-                        'docker compose -f docker-compose.yml -f docker-compose.prebuilt.yml config >/dev/null', 1)
-          p.write_text(t, encoding='utf-8')
           PY
 
           bash -n install.sh
@@ -113,7 +72,6 @@ jobs:
           rm -f .env
           git diff --check
 
-          git add install.sh install-update.sh .env.example docker-compose.yml \
-            .github/workflows/ci.yml .github/workflows/build-artifact.yml
+          git add install.sh install-update.sh .env.example docker-compose.yml
           git commit -m "fix: combine product installer with hardened production updater"
           git push origin HEAD:integration/product-features-plus-main
