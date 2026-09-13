@@ -24,7 +24,6 @@
   --background: var(--bg);
   --foreground: var(--ink);
 
-  /* spacing */
   --s-1: 6px;
   --s-2: 10px;
   --s-3: 14px;
@@ -32,32 +31,26 @@
   --s-5: 22px;
   --s-6: 28px;
 
-  /* radii */
   --r-sm: 10px;
   --r-md: 16px;
   --r-lg: 22px;
   --r-pill: 999px;
 
-  /* elevation */
   --sh-1: 0 1px 0 var(--line-2);
   --sh-2: 0 8px 24px -12px rgba(26, 27, 31, 0.28);
 
-  /* motion */
   --dur: 140ms;
   --ease: cubic-bezier(.2, .8, .2, 1);
 
-  /* focus */
   --focus-ring: 2px solid var(--ink);
   --focus-offset: 2px;
 
-  /* layers */
   --z-drawer: 40;
   --z-nav: 50;
   --z-modal: 60;
   --z-toast: 70;
 }
 
-/* every interactive element gets one consistent, visible focus ring */
 :where(a, button, input, select, textarea, [tabindex]):focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-offset);
@@ -110,7 +103,6 @@ body::before {
 @keyframes oc-slidein { from { transform: translateX(40px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 @keyframes oc-pop { 0% { transform: scale(.3); } 60% { transform: scale(1.1); } 100% { transform: scale(1); } }
 
-/* landing marquee */
 @keyframes oc-marquee { from { transform: translateX(0); } to { transform: translateX(-50%); } }
 .oc-marquee-track { display: flex; gap: 12px; width: max-content; animation: oc-marquee 32s linear infinite; }
 .oc-marquee:hover .oc-marquee-track { animation-play-state: paused; }
@@ -127,7 +119,6 @@ html { scroll-behavior: smooth; }
   }
 }
 
-/* ============ components ============ */
 .oc-btn {
   display: inline-flex;
   align-items: center;
@@ -217,7 +208,6 @@ html { scroll-behavior: smooth; }
 .oc-icon-btn--onDark:hover:not([disabled]) { background: #ffffff22; }
 .oc-icon-btn[disabled] { opacity: .5; cursor: not-allowed; }
 
-/* CSS-only tooltip: no dependency, no JS, no portal */
 .oc-tip { position: relative; display: inline-flex; }
 .oc-tip::after {
   content: attr(data-tip);
@@ -492,15 +482,12 @@ html { scroll-behavior: smooth; }
 .oc-palette__hint { margin-left: auto; font-size: 11px; color: var(--muted); }
 .oc-palette__empty { padding: var(--s-5); text-align: center; color: var(--muted); font-size: 13px; }
 
-/* ============ responsive (mobile) ============ */
 .oc-mobile-only { display: none; }
 
 @media (max-width: 720px) {
-  /* app shell makes room for the fixed bottom tab bar */
   .oc-app-shell { padding: 10px 10px 92px !important; }
   .oc-app-main { padding: 4px 2px 24px !important; }
 
-  /* sidebar -> fixed bottom tab bar */
   .oc-sidebar,
   .oc-sidebar--collapsed {
     position: fixed !important;
@@ -532,6 +519,8 @@ html { scroll-behavior: smooth; }
     gap: 2px !important;
   }
 
+  .oc-nav-item--desktop-secondary { display: none !important; }
+
   .oc-sidebar--collapsed .oc-nav-item { justify-content: center; padding: 6px 4px; }
   .oc-sidebar--collapsed .oc-nav-item__label { display: block; }
   .oc-nav-item {
@@ -555,14 +544,11 @@ html { scroll-behavior: smooth; }
   }
   .oc-nav-item { position: relative; }
 
-  /* landing top nav: drop center anchor links */
   .oc-landing-links { display: none !important; }
 
-  /* wide px-grid tables -> horizontal scroll */
   .oc-scroll-x { overflow-x: auto !important; -webkit-overflow-scrolling: touch; }
   .oc-scroll-x > * { min-width: 720px; }
 
-  /* chats: stack list over conversation */
   .oc-chat-card { flex-direction: column !important; height: auto !important; min-height: 0 !important; }
   .oc-chat-aside {
     width: 100% !important;
@@ -571,7 +557,6 @@ html { scroll-behavior: smooth; }
     border-bottom: 1px solid var(--line);
   }
 
-  /* auth split -> form only */
   .oc-auth-grid { grid-template-columns: 1fr !important; }
   .oc-auth-hero { display: none !important; }
 

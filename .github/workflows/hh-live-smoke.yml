@@ -1,0 +1,107 @@
+name: Temporary HH live login smoke
+
+on:
+  push:
+    branches:
+      - feature/persistent-vacancy-funnel
+    paths:
+      - .github/workflows/hh-live-smoke.yml
+      - backend/app/hh/authorize.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hh-login-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --dev
+      - run: uv run playwright install --with-deps chromium
+      - name: Verify HH password and email-code flows
+        working-directory: backend
+        env:
+          PYTHONPATH: .
+        run: |
+          uv run python - <<'PY'
+          import asyncio
+          import uuid
+
+          from app.hh.authorize import (
+              get_auth_code,
+              get_auth_code_via_email_code,
+          )
+          from playwright.async_api import async_playwright
+
+
+          class CodePageReached(Exception):
+              pass
+
+
+          async def inspect_account_type_screen():
+              async with async_playwright() as pw:
+                  browser = await pw.chromium.launch(headless=True)
+                  try:
+                      context = await browser.new_context(**pw.devices["Galaxy A55"])
+                      page = await context.new_page()
+                      await page.goto("https://hh.ru/account/login", wait_until="domcontentloaded")
+                      await page.wait_for_timeout(1000)
+                      print("landing inputs:", await page.locator("input:visible").evaluate_all(
+                          "elements => elements.map(e => ({type:e.type, qa:e.getAttribute('data-qa'), checked:e.checked}))"
+                      ))
+                      print("landing buttons:", await page.locator("button:visible").evaluate_all(
+                          "elements => elements.map(e => ({qa:e.getAttribute('data-qa'), text:(e.innerText||'').trim()}))"
+                      ))
+                      print("landing links:", await page.locator("a:visible").evaluate_all(
+                          "elements => elements.map(e => ({qa:e.getAttribute('data-qa'), text:(e.innerText||'').trim()}))"
+                      ))
+                  finally:
+                      await browser.close()
+
+
+          async def main():
+              await inspect_account_type_screen()
+              email = f"otclick-smoke-{uuid.uuid4().hex[:12]}@example.invalid"
+
+              try:
+                  await get_auth_code(email, "Not-a-real-password-987!", headless=True)
+              except RuntimeError as exc:
+                  message = str(exc)
+                  print(f"password flow result: {message}")
+                  forbidden = (
+                      "form did not become ready",
+                      "password field missing",
+                      "anti-bot protection",
+                  )
+                  assert not any(text in message for text in forbidden), message
+              else:
+                  raise AssertionError("an unknown test account unexpectedly authenticated")
+
+              code_page_reached = False
+
+              async def on_code_required():
+                  nonlocal code_page_reached
+                  code_page_reached = True
+                  raise CodePageReached()
+
+              try:
+                  await get_auth_code_via_email_code(
+                      email,
+                      on_code_required=on_code_required,
+                      headless=True,
+                  )
+              except CodePageReached:
+                  pass
+              except RuntimeError as exc:
+                  raise AssertionError(
+                      f"email-code flow did not reach code input: {exc}"
+                  ) from exc
+
+              assert code_page_reached, "HH did not request an email code"
+              print("HH live login smoke passed")
+
+          asyncio.run(main())
+          PY

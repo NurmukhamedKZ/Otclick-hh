@@ -7,15 +7,19 @@ actually needs as "GET the page → decode the inline state → pull the block w
 need". Call sites keep their old service-function signatures.
 
 All requests go through `_get` — the single choke point that enforces the
-inter-request delay, checks `session_looks_dead` and raises `WebSessionExpired`.
-Web traffic is more fingerprintable than API traffic, so the per-user delay is
-at least as large as client.DEFAULT_DELAY.
+inter-request delay, retries transient transport/server failures, checks
+`session_looks_dead` and raises `WebSessionExpired`. Web traffic is more
+fingerprintable than API traffic, so the per-user delay is at least as large as
+client.DEFAULT_DELAY.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import time
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from urllib.parse import urlencode
 
 import requests
@@ -36,31 +40,93 @@ SEARCH_URL = f"{WEB_BASE}/search/vacancy"
 class VacancyGone(Exception):
     """hh no longer serves this vacancy page (404/410) — archived or deleted."""
 
+
+class HHTransientError(RuntimeError):
+    """HH could not be reached after bounded retries or stayed temporarily busy."""
+
+
 # client.DEFAULT_DELAY is the API's inter-request minimum; web traffic is not
 # less fingerprintable, so we keep at least the same cadence, per user.
 _MIN_DELAY_S = 0.345
+_CONNECT_TIMEOUT_S = 7
+_READ_TIMEOUT_S = 25
+_MAX_ATTEMPTS = 3
+_RETRYABLE_STATUSES = frozenset({429, 502, 503, 504})
 _last_request_at: dict[str, float] = {}
 
 
-def _get(session: requests.Session, user_id: str, url: str, **kw) -> requests.Response:
-    """Single choke point: delay → request → dead-session guard.
-
-    Raises WebSessionExpired on a login wall (401/403 or /account/login
-    redirect) so a logged-out session surfaces as the existing
-    `web_session_expired` notification, never as a silent empty result.
-    """
+def _throttle(user_id: str) -> None:
     now = time.monotonic()
     wait = _last_request_at.get(user_id, 0.0) + _MIN_DELAY_S - now
     if wait > 0:
         time.sleep(wait)
-    resp = session.get(url, timeout=20, **kw)
-    _last_request_at[user_id] = time.monotonic()
-    if session_looks_dead(resp):
-        raise WebSessionExpired(f"hh rejected the web session ({resp.status_code})")
-    if resp.status_code in (404, 410):
-        raise VacancyGone(f"{resp.status_code} for {url}")
-    resp.raise_for_status()
-    return resp
+
+
+def _retry_delay(attempt: int, response: requests.Response | None = None) -> float:
+    """Return bounded Retry-After/backoff delay with a small jitter."""
+    if response is not None:
+        raw = (response.headers.get("Retry-After") or "").strip()
+        if raw:
+            try:
+                return min(max(float(raw), 0.0), 60.0)
+            except ValueError:
+                try:
+                    retry_at = parsedate_to_datetime(raw)
+                    if retry_at.tzinfo is None:
+                        retry_at = retry_at.replace(tzinfo=UTC)
+                    return min(
+                        max((retry_at - datetime.now(UTC)).total_seconds(), 0.0),
+                        60.0,
+                    )
+                except (TypeError, ValueError, OverflowError):
+                    pass
+    return (2 ** attempt) + random.uniform(0.0, 0.25)
+
+
+def _get(session: requests.Session, user_id: str, url: str, **kw) -> requests.Response:
+    """Single choke point: throttle → bounded retry → session/status guards.
+
+    Transport failures and 429/502/503/504 are retried up to three total attempts.
+    A persistent transient failure raises HHTransientError so scoring can defer the
+    vacancy instead of converting a temporary outage into a terminal score_error.
+
+    401/403/login redirects still raise WebSessionExpired immediately. 404/410
+    still raise VacancyGone immediately. Ordinary 4xx are never retried.
+    """
+    timeout = kw.pop("timeout", (_CONNECT_TIMEOUT_S, _READ_TIMEOUT_S))
+    last_error: Exception | None = None
+
+    for attempt in range(_MAX_ATTEMPTS):
+        _throttle(user_id)
+        try:
+            resp = session.get(url, timeout=timeout, **kw)
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as ex:
+            last_error = ex
+            _last_request_at[user_id] = time.monotonic()
+            if attempt + 1 >= _MAX_ATTEMPTS:
+                raise HHTransientError(
+                    f"HH request failed after {_MAX_ATTEMPTS} attempts: {ex}"
+                ) from ex
+            time.sleep(_retry_delay(attempt))
+            continue
+
+        _last_request_at[user_id] = time.monotonic()
+        if session_looks_dead(resp):
+            raise WebSessionExpired(f"hh rejected the web session ({resp.status_code})")
+        if resp.status_code in (404, 410):
+            raise VacancyGone(f"{resp.status_code} for {url}")
+        if resp.status_code in _RETRYABLE_STATUSES:
+            last_error = RuntimeError(f"HH returned HTTP {resp.status_code} for {url}")
+            if attempt + 1 >= _MAX_ATTEMPTS:
+                raise HHTransientError(str(last_error)) from last_error
+            time.sleep(_retry_delay(attempt, resp))
+            continue
+
+        resp.raise_for_status()
+        return resp
+
+    # Defensive fallback; all loop exits above either return or raise.
+    raise HHTransientError(str(last_error or f"HH request failed for {url}"))
 
 
 def _normalise_vacancy(v: dict) -> dict:
@@ -117,7 +183,8 @@ async def get_vacancy(user_id: str, vacancy_id: str) -> dict:
     `negotiations.topicList` means this user already responded. That last one
     replaces guessing "already applied" from hh's rejection wording.
 
-    Raises VacancyGone (404/410) and WebSessionExpired (login wall).
+    Raises VacancyGone (404/410), WebSessionExpired (login wall), or
+    HHTransientError after bounded retries.
     """
     loop = asyncio.get_running_loop()
     session = await load_web_session(user_id)

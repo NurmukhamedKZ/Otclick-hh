@@ -1,8 +1,8 @@
 """Central AI interface for hh automation.
 
-One HHAgent per worker runner (per user). Wraps a single langchain ChatOpenAI
-(self.llm) shared by every AI path — form-test answers, cover letters, and the
-recruiter chat agent. No per-call LLM construction.
+One HHAgent per worker runner (per user). Wraps a single OpenAI-compatible chat
+model (self.llm) shared by every AI path — form-test answers, cover letters,
+and the recruiter chat agent. No per-call LLM construction.
 """
 
 from __future__ import annotations
@@ -13,9 +13,9 @@ import logging
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.rate_limiters import InMemoryRateLimiter
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
+from app.ai.openai_compat import CompatibleChatOpenAI, provider_headers
 from app.ai.prompts import (
     build_chat_prompt,
     build_fill_prompt,
@@ -64,12 +64,14 @@ class HHAgent:
 
     def __init__(self, user_id: str) -> None:
         self.user_id = user_id
-        # ChatOpenAI raises without an api key; empty key → fallback paths use None.
+        # CompatibleChatOpenAI accepts OpenAI-hosted or compatible base URLs.
+        # Empty key keeps the existing explicit no-LLM/fallback behavior.
         self.llm = (
-            ChatOpenAI(
+            CompatibleChatOpenAI(
                 api_key=settings.OPENAI_API_KEY,
                 base_url=settings.OPENAI_BASE_URL,
                 model=settings.OPENAI_MODEL,
+                default_headers=provider_headers(user_id),
                 rate_limiter=InMemoryRateLimiter(
                     requests_per_second=settings.OPENAI_RATE_LIMIT / 60.0
                 ),

@@ -1,0 +1,181 @@
+{
+  "schema_version": 1,
+  "source": "02_RFL_банк_достижений_и_фактов(1).md",
+  "facts": [
+    {
+      "key": "role_level",
+      "category": "leadership",
+      "title": "Уровень роли",
+      "statement": "Директор по IT и цифровизации; подчинение CEO; член совета директоров; участие в обсуждении стратегии бизнеса.",
+      "tags": ["CEO", "board", "strategy"]
+    },
+    {
+      "key": "business_revenue_growth_2023_2025",
+      "category": "business_scale",
+      "title": "Рост бизнеса",
+      "statement": "Выручка группы выросла с 1,631 млрд руб. в 2023 году до 3,194 млрд руб. в 2024 и 5,856 млрд руб. в 2025; рост 2023–2025 примерно в 3,6 раза.",
+      "metrics": {"2023_rub_billion": 1.631, "2024_rub_billion": 3.194, "2025_rub_billion": 5.856, "growth_x": 3.6},
+      "tags": ["growth", "revenue", "scale"]
+    },
+    {
+      "key": "operating_scale",
+      "category": "business_scale",
+      "title": "Масштаб операционного бизнеса",
+      "statement": "Около 300 тыс. м² складских площадей, 20+ складских комплексов, около 1000 сотрудников, около 450 пользователей компьютеров, около 250 ТСД и около 100 внешних клиентов.",
+      "metrics": {"warehouse_area_m2_approx": 300000, "warehouse_complexes_min": 20, "employees_approx": 1000, "pc_users_approx": 450, "handhelds_approx": 250, "external_clients_approx": 100},
+      "tags": ["3PL", "warehouses", "users", "clients"]
+    },
+    {
+      "key": "it_function_scale",
+      "category": "leadership",
+      "title": "Масштаб и перестройка IT-функции",
+      "statement": "IT-функция выросла примерно с 10 до 41 штатной единицы; 7 прямых подчинённых; более 25 сотрудников лично нанято или заменено; общий IT-бюджет около 200 млн руб.",
+      "metrics": {"team_before_approx": 10, "team_after": 41, "direct_reports": 7, "hired_or_replaced_min": 25, "it_budget_rub_approx": 200000000},
+      "tags": ["team", "hiring", "budget", "transformation"]
+    },
+    {
+      "key": "new_capabilities",
+      "category": "leadership",
+      "title": "Новые и усиленные компетенции",
+      "statement": "Сформированы или существенно усилены архитектура, сетевые технологии, первая линия поддержки, PM/проектное управление, BI-аналитика, технологи, собственная экспертиза 1С WMS, engineering practices и AI-assisted development.",
+      "tags": ["organization", "architecture", "BI", "WMS", "AI"]
+    },
+    {
+      "key": "warehouse_client_launches",
+      "category": "delivery",
+      "title": "Запуски складов и клиентов",
+      "statement": "За период запущено 7 новых складов; 1С WMS внедрена на 12 складах; более 50 новых клиентов запущены в эксплуатацию; обработано более 200 запросов на посадку или изменение клиентов. 7 новых складов и 12 внедрений 1С WMS — разные показатели.",
+      "metrics": {"new_warehouses": 7, "wms_implementations": 12, "new_clients_min": 50, "client_onboarding_change_requests_min": 200},
+      "tags": ["WMS", "launch", "clients", "warehouses"]
+    },
+    {
+      "key": "complex_client_launch_speed",
+      "category": "transformation",
+      "title": "Ускорение запуска сложного клиента",
+      "statement": "Сложный клиентский запуск сокращён примерно с 6 месяцев до 1 месяца за счёт API, стандартизации интеграций, экспертизы по Честному знаку, процесса тестирования с клиентом, файлового сценария и стандартизации запуска.",
+      "metrics": {"before_months_approx": 6, "after_months_approx": 1, "speedup_x_approx": 6},
+      "tags": ["time-to-launch", "API", "integration", "Честный знак"]
+    },
+    {
+      "key": "technology_in_presale",
+      "category": "commercial",
+      "title": "Технологичность как фактор продаж",
+      "statement": "Есть личное участие в presale и обсуждении сложных контрактов; в ряде контрактов технологические возможности были условием победы. Работа с маркированным товаром и Честным знаком открыла новый тип бизнеса.",
+      "tags": ["presale", "commercial", "Честный знак", "3PL"]
+    },
+    {
+      "key": "shipping_productivity",
+      "category": "operations",
+      "title": "Рост производительности отгрузки",
+      "statement": "После декомпозиции и нормализации процесса, сопровождения шагов в ТСД и изменения технологической логики производительность выросла примерно с 300 до 1500 строк отгрузки за смену; в дальнейшем склад по этому клиенту достигал 4500 строк в сутки.",
+      "metrics": {"before_lines_per_shift_approx": 300, "after_lines_per_shift_approx": 1500, "growth_x": 5, "later_lines_per_day": 4500},
+      "tags": ["productivity", "warehouse", "TSD", "operations"]
+    },
+    {
+      "key": "personnel_cost_reduction_project",
+      "category": "economics",
+      "title": "Снижение затрат на персонал отдельного процесса",
+      "statement": "Совместно с технологами на одном из проектов затраты на персонал были снижены более чем в 3 раза.",
+      "metrics": {"personnel_cost_reduction_x_min": 3},
+      "tags": ["FOT", "operations", "efficiency"]
+    },
+    {
+      "key": "wms_business_transformation",
+      "category": "transformation",
+      "title": "WMS как бизнес-трансформация",
+      "statement": "WMS использовалась как инструмент роста производительности, снижения ФОТ и потерь, снижения риска штрафов, повышения прозрачности процессов и освоения операций с маркированным товаром; сформирована собственная экспертиза по 1С WMS.",
+      "tags": ["WMS", "operations", "in-house"]
+    },
+    {
+      "key": "wms_engineering_pipeline",
+      "category": "engineering",
+      "title": "Собственный конвейер разработки WMS",
+      "statement": "Примерно за 1,5 года создана собственная экспертиза: несколько разработчиков, репозитории, code review, multi-team development и AI в разработке, что снизило зависимость от подрядчика.",
+      "metrics": {"capability_build_years_approx": 1.5},
+      "tags": ["WMS", "engineering", "code-review", "AI"]
+    },
+    {
+      "key": "service_desk",
+      "category": "operations",
+      "title": "Service Desk и управляемость поддержки",
+      "statement": "Вместо заявок в чатах внедрены Service Desk, SLA, TTO, TTR и прозрачный backlog; обрабатывается более 1000 обращений в месяц; число эскалаций и микроменеджмента по мелким вопросам снизилось в десятки раз. Подход распространился также на безопасность, юристов и часть закупок.",
+      "metrics": {"tickets_per_month_min": 1000},
+      "tags": ["Service Desk", "SLA", "TTO", "TTR", "support"]
+    },
+    {
+      "key": "support_24x7",
+      "category": "operations",
+      "title": "Поддержка 24×7",
+      "statement": "Создана первая линия 24×7 для внутренних и внешних клиентов; типовые WMS-вопросы закрываются без второй линии; время реакции снижено примерно до 20 минут; число эскалаций снизилось более чем в 10 раз; вторая линия перестала регулярно подключаться ночью.",
+      "metrics": {"reaction_minutes_approx": 20, "escalation_reduction_x_min": 10},
+      "tags": ["24x7", "support", "WMS"]
+    },
+    {
+      "key": "integration_architecture",
+      "category": "architecture",
+      "title": "Единая интеграционная архитектура",
+      "statement": "Сформированы единое ESB-решение, единый версионируемый API, клиентская документация и универсальная модель доставки данных до нужной внутренней системы в зависимости от контракта; внешний клиентский контракт отвязывается от конкретной WMS/TMS.",
+      "tags": ["ESB", "API", "architecture", "integration"]
+    },
+    {
+      "key": "integration_scenarios",
+      "category": "architecture",
+      "title": "Масштаб интеграционных сценариев",
+      "statement": "Есть 4 уникальных интеграционных сценария и 3 типовых сценария, используемых клиентами; клиентов, полностью работающих вручную, нет — каждый использует вариант автоматизированного обмена.",
+      "metrics": {"unique_scenarios": 4, "standard_scenarios": 3},
+      "tags": ["integration", "automation", "clients"]
+    },
+    {
+      "key": "contract_workflow",
+      "category": "risk",
+      "title": "Контролируемый документооборот",
+      "statement": "100% договоров проходят согласование; количество контрагентов, не прошедших должную осмотрительность, снижено до 0.",
+      "metrics": {"contracts_approval_percent": 100, "unvetted_counterparties": 0},
+      "tags": ["contracts", "risk", "workflow"]
+    },
+    {
+      "key": "tms_implemented",
+      "category": "transformation",
+      "title": "Внедрение TMS",
+      "statement": "Внедрена транспортная система для работы с ЭТРН и повышения прозрачности транспортных процессов и себестоимости.",
+      "tags": ["TMS", "ЭТРН", "transport"]
+    },
+    {
+      "key": "bi_inhouse",
+      "category": "data_ai",
+      "title": "Внутренняя BI-экспертиза",
+      "statement": "Сформирована внутренняя BI-экспертиза, собственные BI-дашборды и проект BI; разработка ускорялась новыми подходами, включая AI-first разработку отдельных дашбордов.",
+      "tags": ["BI", "AI", "data"]
+    },
+    {
+      "key": "infrastructure_resilience",
+      "category": "infrastructure",
+      "title": "Стандартизация и отказоустойчивость инфраструктуры",
+      "statement": "Стандартизировано сетевое оборудование складов и инфраструктура новых площадок, унифицирована сеть, реализован отказоустойчивый кластер и переезд между ЦОДами.",
+      "tags": ["infrastructure", "resilience", "datacenter", "network"]
+    },
+    {
+      "key": "engineering_practices",
+      "category": "engineering",
+      "title": "Product / Engineering practices",
+      "statement": "Реализованы продуктовый подход в 1С WMS, мультикомандная разработка, GitLab, review до merge, версионирование, собственная экспертиза, AI-assisted development и клиентская документация API.",
+      "tags": ["product", "engineering", "GitLab", "AI", "API"]
+    },
+    {
+      "key": "build_buy_decisions",
+      "category": "strategy",
+      "title": "Build / Buy / Hybrid решения",
+      "statement": "Подтверждены управленческие решения: старт проекта смены WMS; единый API как база будущей логистической платформы; остановка запуска неэффективного узкоспециализированного продукта; формирование собственной экспертизы вместо полной зависимости от подрядчика; развитие BI in-house.",
+      "tags": ["build-buy", "WMS", "API", "BI", "strategy"]
+    }
+  ],
+  "guardrails": [
+    "Не заявлять точную дату начала роли, пока не унифицировано март или апрель 2024.",
+    "Не заявлять прямой рост выручки именно на 5 месяцев раньше или конкретный time-to-revenue от ускорения запуска клиента без дополнительного подтверждения.",
+    "Не связывать снижение затрат на персонал более чем в 3 раза с automotive-кейсом без подтверждения; не указывать точную экономию и численность до/после.",
+    "По TMS не заявлять объём транспортного бизнеса, экономический эффект, процент автоматизации или влияние на штрафы/скорость закрытия рейса без подтверждения.",
+    "По BI не заявлять количество дашбордов, пользователей, устранённых ручных отчётов или конкретное ускорение решений без подтверждения.",
+    "По инфраструктуре не заявлять процент снижения downtime или конкретные SLA без подтверждения.",
+    "Не превращать WMS/TMS/ESB/BI/Service Desk/кластер/API в центральную историю: это доказательства способности бизнеса быстрее запускать проекты и масштабироваться без пропорционального роста операционных рисков."
+  ]
+}

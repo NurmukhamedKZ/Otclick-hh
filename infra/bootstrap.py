@@ -66,8 +66,8 @@ def ask_openai_key() -> str:
     """The one value we cannot generate. Skipped on a non-interactive stdin."""
     if not sys.stdin.isatty():
         return ""
-    print("OpenAI key — powers cover letters, test answers and the recruiter agent.")
-    print("Enter to skip (template fallbacks), or an OpenAI-compatible key.")
+    print("OpenAI/OpenAI-compatible key — powers vacancy scoring and candidate-facing AI text.")
+    print("Enter to skip; discovery/review still work and AI failures stay explicit.")
     return input("OPENAI_API_KEY: ").strip()
 
 
@@ -88,11 +88,11 @@ def main() -> None:
 
     target.write_text(render((ROOT / ".env.example").read_text(), values))
     target.chmod(0o600)
-    print(f"\nWrote {target}. Next: docker compose up -d --build → http://localhost:3000")
+    print(f"\nWrote {target}.")
     if not openai_key:
-        print("No OpenAI key: cover letters fall back to templates, vacancy tests and the")
-        print("recruiter agent stay off. Add OPENAI_API_KEY to .env any time — or point")
-        print("OPENAI_BASE_URL at a local model (see README, AI features).")
+        print("No AI key: search/discovery/manual review can run, but LLM scoring and")
+        print("new-funnel cover-letter generation will report an explicit unavailable/error state.")
+        print("Add OPENAI_API_KEY later or point OPENAI_BASE_URL at a compatible model.")
 
 
 if __name__ == "__main__":

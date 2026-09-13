@@ -1,12 +1,36 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+const ANON_KEY_COOKIE = "otclick-supabase-anon-key";
+const GOOGLE_AUTH_COOKIE = "otclick-google-auth-enabled";
+
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
+  const anonKey = process.env.SUPABASE_ANON_KEY;
+  if (!anonKey) {
+    throw new Error("SUPABASE_ANON_KEY runtime environment variable is required");
+  }
+
+  function withRuntimeConfig(nextResponse: NextResponse) {
+    // The Supabase anon key is intentionally public. Exposing it through a
+    // first-party cookie lets one prebuilt Next.js image work with per-install
+    // JWT/anon keys instead of baking CI values into browser bundles.
+    nextResponse.cookies.set(ANON_KEY_COOKIE, anonKey!, {
+      httpOnly: false,
+      sameSite: "lax",
+      path: "/",
+    });
+    nextResponse.cookies.set(
+      GOOGLE_AUTH_COOKIE,
+      process.env.GOOGLE_AUTH_ENABLED === "true" ? "true" : "false",
+      { httpOnly: false, sameSite: "lax", path: "/" },
+    );
+    return nextResponse;
+  }
 
   const supabase = createServerClient(
-    process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    process.env.SUPABASE_URL ?? "http://kong:8000",
+    anonKey,
     {
       cookieOptions: { name: "sb-otclick-auth-token" },
       cookies: {
@@ -40,20 +64,20 @@ export async function updateSession(request: NextRequest) {
   if (path === "/login" || path === "/signup" || path === "/filters") {
     const url = request.nextUrl.clone();
     url.pathname = path === "/filters" ? "/dashboard" : "/auth";
-    return NextResponse.redirect(url);
+    return withRuntimeConfig(NextResponse.redirect(url));
   }
 
   if (!user && isProtected) {
     const url = request.nextUrl.clone();
     url.pathname = "/auth";
-    return NextResponse.redirect(url);
+    return withRuntimeConfig(NextResponse.redirect(url));
   }
 
   if (user && isAuthPage) {
     const url = request.nextUrl.clone();
     url.pathname = "/dashboard";
-    return NextResponse.redirect(url);
+    return withRuntimeConfig(NextResponse.redirect(url));
   }
 
-  return response;
+  return withRuntimeConfig(response);
 }
