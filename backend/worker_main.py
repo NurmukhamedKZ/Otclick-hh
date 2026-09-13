@@ -1,14 +1,8 @@
 """Standalone worker entrypoint for systemd / docker.
 
-`profiles.worker_enabled` controls persistent vacancy discovery + scoring, not
-immediate apply. Discovery writes into `vacancy_pipeline`; scoring enriches the
-vacancy over the authenticated HH web session and persists a structured score.
-Real sending is a separate future worker fed exclusively by approved send jobs.
-
-Manual `run-now` requests are durable `search_runs` jobs. They are processed by
-this worker even when scheduled discovery is disabled for the user.
-
-The recruiter agent is an independent autonomous loop available to every user.
+Manual `run-now` requests are durable `search_runs` jobs. Vacancy scoring itself
+uses leased claims; every reconcile pass recovers expired claims before taking
+new work so a killed worker cannot strand a vacancy forever.
 """
 
 from __future__ import annotations
@@ -23,7 +17,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from app.services import search_run_service
-from app.services.pipeline_scoring import score_user
+from app.services.pipeline_scoring import reap_stale_scoring, score_user
 from app.services.source_discovery import discover_user
 from app.services.worker_control import active_user_flags
 from app.worker.runner import get_registry
@@ -37,9 +31,6 @@ logger = logging.getLogger("worker_main")
 POLL_INTERVAL_S = 15
 DISCOVERY_INTERVAL_S = 5 * 60
 _next_discovery_at: dict[str, float] = {}
-# Keep a private clock reference rather than patching the stdlib `time` module in
-# tests. Patching `time.monotonic` globally also changes asyncio's event-loop
-# clock and can break fixture teardown in Python 3.13.
 _monotonic = time.monotonic
 
 
@@ -50,8 +41,6 @@ async def _run_discovery_if_due(user_id: str, enabled: bool) -> None:
     now = _monotonic()
     if now < _next_discovery_at.get(user_id, 0.0):
         return
-    # Set the next slot before starting. If this run fails, we still avoid a
-    # 15-second retry storm against HH; the source stores its own last_error.
     _next_discovery_at[user_id] = now + DISCOVERY_INTERVAL_S
     try:
         discovery_summary = await discover_user(user_id)
@@ -60,8 +49,6 @@ async def _run_discovery_if_due(user_id: str, enabled: bool) -> None:
         return
     logger.info("discovery complete user=%s summary=%s", user_id, discovery_summary)
 
-    # Scoring is sequential and capped per run. It has no send side effects and
-    # is fail-closed: terminal enrichment/LLM errors become score_error.
     try:
         scoring_summary = await score_user(user_id)
     except Exception:
@@ -71,11 +58,6 @@ async def _run_discovery_if_due(user_id: str, enabled: bool) -> None:
 
 
 async def _run_manual_search_job() -> str | None:
-    """Claim and execute one durable manual search job.
-
-    One job per reconcile keeps HH traffic serialized. The API returns 202 before
-    this starts, so the run duration is no longer coupled to proxy/browser timeouts.
-    """
     job = await search_run_service.claim_next()
     if not job:
         return None
@@ -96,8 +78,6 @@ async def _run_manual_search_job() -> str | None:
             discovery=discovery_summary,
             scoring=scoring_summary,
         )
-        # A manual run just refreshed this user's search sources; do not repeat
-        # scheduled discovery immediately in the same reconcile pass.
         _next_discovery_at[user_id] = _monotonic() + DISCOVERY_INTERVAL_S
         logger.info(
             "manual search run complete run=%s user=%s discovery=%s scoring=%s",
@@ -113,24 +93,25 @@ async def _run_manual_search_job() -> str | None:
 
 
 async def _reconcile(registry) -> None:
-    # Manual jobs are independent of profiles.worker_enabled and therefore must
-    # be claimed before reconciling scheduled discovery flags.
+    try:
+        recovered = await reap_stale_scoring()
+        if recovered:
+            logger.warning("recovered %s expired vacancy scoring lease(s)", recovered)
+    except Exception:
+        # Recovery failure must be visible but must not take the whole worker down.
+        logger.exception("vacancy scoring lease recovery failed")
+
     manual_user = await _run_manual_search_job()
 
     loop = asyncio.get_running_loop()
     flags = await loop.run_in_executor(None, active_user_flags)
 
-    # Existing flag tuple is (worker_enabled, agent_enabled). During migration
-    # worker_enabled is reinterpreted as discovery/scoring enabled. The legacy
-    # apply runner is NEVER started from worker_main; sending gets its own queue.
     desired_agent: dict[str, bool] = {}
     for uid, (discovery_on, agent_on) in flags.items():
         desired_agent[uid] = agent_on
         if uid != manual_user:
             await _run_discovery_if_due(uid, discovery_on)
 
-    # A recruiter loop can outlive the flag row between reconciles; stop it if
-    # the user is no longer desired. Apply is always false here by construction.
     for uid in registry.active_user_ids():
         desired_agent.setdefault(uid, False)
 
