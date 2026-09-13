@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 from app.db.supabase import service_client
 
@@ -20,12 +21,15 @@ PIPELINE_STATUSES = frozenset(
         "sending",
         "sent",
         "rejected_by_user",
+        "rejected_by_rule",
         "hold",
         "archived",
         "score_error",
         "send_error",
     }
 )
+
+SCORE_LEASE_SECONDS = 10 * 60
 
 
 def _now() -> str:
@@ -63,12 +67,7 @@ def persist_discovered(
     vacancy: dict,
     source_id: str | None = None,
 ) -> dict:
-    """Insert a new vacancy or refresh its snapshot without resetting lifecycle.
-
-    Dedup is per user + HH vacancy id. Seeing an already reviewed/selected item in
-    another search only updates last_seen/source attribution; it never moves the
-    item back to discovered.
-    """
+    """Insert a new vacancy or refresh its snapshot without resetting lifecycle."""
     hh_vacancy_id = str(vacancy.get("id") or "").strip()
     if not hh_vacancy_id:
         raise ValueError("vacancy has no HH id")
@@ -87,7 +86,6 @@ def persist_discovered(
 
     if current:
         update = {**snapshot, "last_seen_at": now, "updated_at": now}
-        # Do not erase a previously chosen resume when a source is generic.
         if resume_id and not current.get("resume_id"):
             update["resume_id"] = resume_id
         res = (
@@ -137,11 +135,12 @@ def transition(
     from_statuses: Iterable[str],
     to_status: str,
     changes: dict | None = None,
+    expected_claim_token: str | None = None,
 ) -> bool:
     """Optimistic atomic lifecycle transition.
 
-    PostgreSQL performs the conditional UPDATE atomically. False means another
-    actor already moved the row or the caller supplied a stale state.
+    When ``expected_claim_token`` is supplied, an old scorer cannot write after
+    its lease was reaped and another scorer acquired the row.
     """
     allowed_from = list(dict.fromkeys(from_statuses))
     if not allowed_from:
@@ -153,12 +152,80 @@ def transition(
         raise ValueError(f"unknown source status(es): {', '.join(unknown)}")
 
     payload = {"status": to_status, "updated_at": _now(), **(changes or {})}
-    res = (
+    if to_status != "scoring":
+        payload.setdefault("score_claim_token", None)
+        payload.setdefault("score_claimed_at", None)
+        payload.setdefault("score_lease_expires_at", None)
+
+    q = (
         service_client.table("vacancy_pipeline")
         .update(payload)
         .eq("id", pipeline_id)
         .eq("user_id", user_id)
         .in_("status", allowed_from)
-        .execute()
     )
+    if expected_claim_token is not None:
+        q = q.eq("score_claim_token", expected_claim_token)
+    res = q.execute()
     return bool(res.data)
+
+
+def claim_for_scoring(
+    *,
+    user_id: str,
+    pipeline_id: str,
+    lease_seconds: int = SCORE_LEASE_SECONDS,
+) -> str | None:
+    """Atomically claim a discovered vacancy and return this attempt's token."""
+    token = str(uuid4())
+    now = datetime.now(UTC)
+    claimed = transition(
+        user_id=user_id,
+        pipeline_id=pipeline_id,
+        from_statuses=["discovered"],
+        to_status="scoring",
+        changes={
+            "score_claim_token": token,
+            "score_claimed_at": now.isoformat(),
+            "score_lease_expires_at": (now + timedelta(seconds=lease_seconds)).isoformat(),
+        },
+    )
+    return token if claimed else None
+
+
+def release_scoring_claim(
+    *,
+    user_id: str,
+    pipeline_id: str,
+    claim_token: str,
+    reason: str,
+) -> bool:
+    """Best-effort cancellation recovery for a scorer that still owns its claim."""
+    return transition(
+        user_id=user_id,
+        pipeline_id=pipeline_id,
+        from_statuses=["scoring"],
+        to_status="discovered",
+        expected_claim_token=claim_token,
+        changes={
+            "next_score_at": _now(),
+            "last_score_error": reason[:2000],
+        },
+    )
+
+
+def reap_expired_scoring() -> int:
+    """Recover orphaned scoring leases, including legacy rows with no lease."""
+    res = service_client.rpc("reap_expired_vacancy_scoring", {}).execute()
+    value = res.data
+    if isinstance(value, int):
+        return value
+    if isinstance(value, list) and value:
+        first = value[0]
+        if isinstance(first, int):
+            return first
+        if isinstance(first, dict):
+            for key in ("reap_expired_vacancy_scoring", "count"):
+                if key in first:
+                    return int(first[key])
+    return 0

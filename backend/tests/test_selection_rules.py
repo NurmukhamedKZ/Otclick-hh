@@ -17,6 +17,29 @@ def test_rule_match_is_deterministic_case_insensitive_or_scope():
     assert vacancy_matches({"title": "CDTO", "employer_name": "Другой", "description": "Трансформация"}, match) is False
 
 
+def test_rule_match_evidence_keeps_every_triggered_field_and_term():
+    from app.services.selection_rules import match_evidence
+
+    evidence = match_evidence(
+        {
+            "title": "Руководитель инфраструктуры",
+            "employer_name": "ACME Group",
+            "description": "Нужны ночные дежурства и эксплуатация.",
+        },
+        {
+            "title_any": ["инфраструктур"],
+            "employer_any": ["acme"],
+            "description_any": ["дежурств", "эксплуатац"],
+        },
+    )
+    assert evidence == [
+        {"field": "title", "term": "инфраструктур"},
+        {"field": "employer", "term": "acme"},
+        {"field": "description", "term": "дежурств"},
+        {"field": "description", "term": "эксплуатац"},
+    ]
+
+
 def test_approved_hard_rule_can_override_strategic_title_escape():
     from app.services.pipeline_scoring import hard_filter_reason
 
@@ -57,6 +80,7 @@ async def test_score_one_passes_only_matching_scoring_preferences_to_llm():
 
     vacancy = {
         "id": "p1",
+        "status": "scoring",
         "hh_vacancy_id": "123",
         "title": "CIO",
         "employer_name": "Industrial Co",
@@ -96,9 +120,10 @@ async def test_score_one_passes_only_matching_scoring_preferences_to_llm():
             "explanation": "fit",
         }
     )
-    transitions = [True, True]
     with (
-        patch.object(svc.vacancy_pipeline, "transition", side_effect=lambda **_: transitions.pop(0)) as transition,
+        patch.object(svc.vacancy_pipeline, "claim_for_scoring", return_value="claim-rules"),
+        patch.object(svc.vacancy_pipeline, "release_scoring_claim", return_value=False),
+        patch.object(svc.vacancy_pipeline, "transition", return_value=True) as transition,
         patch.object(
             svc.vacancy_review_service,
             "enrich",
@@ -116,6 +141,8 @@ async def test_score_one_passes_only_matching_scoring_preferences_to_llm():
 
     assert outcome == "scored"
     assert llm_score.await_args.args[3] == [matching]
-    details = transition.call_args_list[-1].kwargs["changes"]["score_details"]
+    final = transition.call_args.kwargs
+    assert final["expected_claim_token"] == "claim-rules"
+    details = final["changes"]["score_details"]
     assert details["applied_rule_versions"] == [2]
     assert details["applied_rule_ids"] == ["r1"]

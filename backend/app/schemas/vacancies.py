@@ -31,19 +31,26 @@ class VacancyPipelineResponse(BaseModel):
     score_explanation: str | None = None
     score_stale: bool | None = None
     hard_filter_reason: str | None = None
+    auto_reject_details: list[dict[str, Any]] | None = None
     user_decision_reason: str | None = None
     cover_letter_draft: str | None = None
     cover_letter_meta: dict[str, Any] = Field(default_factory=dict)
     cover_stale: bool | None = None
     approved_letter_hash: str | None = None
     approved_at: str | None = None
+    score_attempts: int = 0
+    next_score_at: str | None = None
+    last_score_error: str | None = None
+    score_claimed_at: str | None = None
+    score_lease_expires_at: str | None = None
+    score_lease_failures: int = 0
     created_at: str
     updated_at: str
     sources: list[VacancySourceRef] = Field(default_factory=list)
 
 
 class VacancyDecisionRequest(BaseModel):
-    action: Literal["select", "reject", "hold", "review"]
+    action: Literal["select", "reject", "hold", "review", "archive"]
     reason: str | None = Field(default=None, max_length=2000)
 
     @field_validator("reason")
@@ -55,8 +62,18 @@ class VacancyDecisionRequest(BaseModel):
         return value or None
 
 
+class BulkArchiveRequest(BaseModel):
+    pipeline_ids: list[str] = Field(min_length=1, max_length=200)
+
+
+class BulkArchiveResponse(BaseModel):
+    requested: int
+    archived: int
+    skipped: int
+
+
 class CoverLetterDraftUpdate(BaseModel):
-    text: str = Field(min_length=1, max_length=4000)
+    text: str = Field(min_length=1, max_length=6000)
 
     @field_validator("text")
     @classmethod
@@ -75,6 +92,7 @@ class VacancyEnrichmentResponse(BaseModel):
 
 class PipelineMaintenanceStatus(BaseModel):
     stale_scores: int = 0
+    incomplete_scores: int = 0
     stale_covers_safe_to_regenerate: int = 0
     score_limit: int
     cover_limit: int
@@ -87,11 +105,20 @@ class ScoringRunSummary(BaseModel):
     hard_filtered: int = 0
     archived: int = 0
     errors: int = 0
+    retryable_errors: int = 0
     skipped: int = 0
+    circuit_breaker: int = 0
 
 
 class StaleRescoreResponse(BaseModel):
     matched_stale: int
+    requeued: int
+    scoring: ScoringRunSummary
+
+
+class RetryIncompleteResponse(BaseModel):
+    recovered_stuck: int
+    matched_incomplete: int
     requeued: int
     scoring: ScoringRunSummary
 

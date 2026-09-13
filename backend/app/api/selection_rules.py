@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query
 from app.api.deps import get_current_user
 from app.schemas.selection_rules import (
     RuleActiveUpdate,
+    RuleArchiveImpactResponse,
     RuleProposalResolutionResponse,
     RuleProposalResolve,
     RuleProposalResponse,
@@ -50,6 +51,15 @@ async def resolve_proposal(
     )
 
 
+@router.post("/{rule_id}/regenerate", response_model=RuleProposalResponse)
+async def regenerate_rule(
+    rule_id: str,
+    user_id: str = Depends(get_current_user),
+):
+    row = await selection_rules.regenerate_rule(user_id, rule_id)
+    return RuleProposalResponse(**row)
+
+
 @router.post("/{rule_id}/rescore-impact", response_model=RuleRescoreResponse)
 async def rescore_impact(
     rule_id: str,
@@ -60,6 +70,16 @@ async def rescore_impact(
     )
 
 
+@router.post("/{rule_id}/archive-impact", response_model=RuleArchiveImpactResponse)
+async def archive_impact(
+    rule_id: str,
+    user_id: str = Depends(get_current_user),
+):
+    return RuleArchiveImpactResponse(
+        **(await selection_rule_actions.archive_impact(user_id, rule_id))
+    )
+
+
 @router.patch("/{rule_id}", response_model=SelectionRuleResponse)
 async def set_rule_active(
     rule_id: str,
@@ -67,6 +87,15 @@ async def set_rule_active(
     user_id: str = Depends(get_current_user),
 ):
     row = await selection_rule_actions.set_active(user_id, rule_id, body.active)
+    return SelectionRuleResponse(**row)
+
+
+@router.delete("/{rule_id}", response_model=SelectionRuleResponse)
+async def delete_rule(
+    rule_id: str,
+    user_id: str = Depends(get_current_user),
+):
+    row = await selection_rule_actions.soft_delete(user_id, rule_id)
     return SelectionRuleResponse(**row)
 
 

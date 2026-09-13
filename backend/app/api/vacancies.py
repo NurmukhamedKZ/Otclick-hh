@@ -7,8 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.api.deps import get_current_user
 from app.schemas.calibration import CalibrationReport
 from app.schemas.vacancies import (
+    BulkArchiveRequest,
+    BulkArchiveResponse,
     CoverLetterDraftUpdate,
     PipelineMaintenanceStatus,
+    RetryIncompleteResponse,
     StaleCoverRegenerateResponse,
     StaleRescoreResponse,
     VacancyDecisionRequest,
@@ -67,6 +70,12 @@ async def rescore_stale(user_id: str = Depends(get_current_user)):
     return StaleRescoreResponse(**result)
 
 
+@router.post("/maintenance/retry-incomplete", response_model=RetryIncompleteResponse)
+async def retry_incomplete(user_id: str = Depends(get_current_user)):
+    result = await _run_maintenance_locked(user_id, pipeline_maintenance.retry_incomplete)
+    return RetryIncompleteResponse(**result)
+
+
 @router.post("/maintenance/regenerate-stale-covers", response_model=StaleCoverRegenerateResponse)
 async def regenerate_stale_covers(user_id: str = Depends(get_current_user)):
     result = await _run_maintenance_locked(
@@ -74,6 +83,16 @@ async def regenerate_stale_covers(user_id: str = Depends(get_current_user)):
         pipeline_maintenance.regenerate_stale_covers,
     )
     return StaleCoverRegenerateResponse(**result)
+
+
+@router.post("/bulk/archive", response_model=BulkArchiveResponse)
+async def bulk_archive(
+    body: BulkArchiveRequest,
+    user_id: str = Depends(get_current_user),
+):
+    return BulkArchiveResponse(
+        **(await pipeline_maintenance.archive_many(user_id, body.pipeline_ids))
+    )
 
 
 @router.get("/{pipeline_id}", response_model=VacancyPipelineResponse)
