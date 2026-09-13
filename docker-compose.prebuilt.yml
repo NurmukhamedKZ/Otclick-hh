@@ -1,0 +1,13 @@
+services:
+  frontend:
+    # Production images are built once in GitHub Actions with neutral
+    # NEXT_PUBLIC_* placeholders. Inject this installation's public values when
+    # the container starts, so the server never has to rebuild Next.js locally.
+    environment:
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      NEXT_PUBLIC_GOOGLE_AUTH_ENABLED: ${NEXT_PUBLIC_GOOGLE_AUTH_ENABLED:-false}
+    volumes:
+      - ./infra/frontend-runtime-env.sh:/opt/otclick/frontend-runtime-env.sh:ro
+    entrypoint: ["sh", "/opt/otclick/frontend-runtime-env.sh"]

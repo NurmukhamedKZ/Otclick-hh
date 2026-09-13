@@ -266,6 +266,30 @@ services:
       - caddy-data:/data
       - caddy-config:/config
 
+  caddy:
+    image: caddy:2-alpine
+    container_name: aiautoclicker-caddy
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      kong:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    environment:
+      CADDY_SITE_ADDRESS: "${CADDY_SITE_ADDRESS:-:80}"
+    ports:
+      # Direct mode uses host 80/443. When another reverse proxy already owns
+      # those ports, the installer switches Caddy to loopback 18080/18443.
+      - "${CADDY_HTTP_BIND:-80}:80"
+      - "${CADDY_HTTPS_BIND:-443}:443"
+      - "${CADDY_HTTPS_BIND:-443}:443/udp"
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
 volumes:
   supabase-db-data:
   supabase-storage-data:
