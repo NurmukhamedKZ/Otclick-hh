@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - "feature/**"
+      - "integration/**"
   pull_request:
 
 jobs:
@@ -20,7 +21,7 @@ jobs:
           bash -n install-update.sh
           python3 -m py_compile infra/bootstrap.py backend/scripts/load_candidate_data.py
           python3 infra/bootstrap.py --openai-key ci-placeholder
-          docker compose config >/dev/null
+          docker compose -f docker-compose.yml -f docker-compose.prebuilt.yml config >/dev/null
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
