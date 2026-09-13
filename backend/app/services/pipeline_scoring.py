@@ -1,9 +1,7 @@
 """Hard filter + structured LLM scoring for persistent vacancy_pipeline rows.
 
-The scorer is deliberately fail-closed: a terminal LLM/config/parse failure
-moves the vacancy to score_error. Transient HH transport failures are different:
-they are deferred with bounded attempts and never become a false negative merely
-because hh.ru was temporarily unreachable.
+Scoring uses leased claim tokens: every terminal write must still own the same
+claim, so a reaped/old scorer cannot overwrite a newer attempt or a user action.
 Only ACTIVE user-approved rules participate; proposals are invisible here.
 """
 
@@ -32,7 +30,7 @@ from app.services import (
 logger = logging.getLogger(__name__)
 
 MAX_SCORE_PER_RUN = 15
-SCORER_PROMPT_VERSION = 1
+SCORER_PROMPT_VERSION = 2
 MAX_TRANSIENT_SCORE_ATTEMPTS = 3
 HH_CIRCUIT_BREAKER_THRESHOLD = 2
 _TRANSIENT_RETRY_DELAYS_S = (60, 300)
@@ -85,13 +83,14 @@ def _matching_rules(vacancy: dict, rules: list[dict] | None) -> list[dict]:
         rule
         for rule in (rules or [])
         if rule.get("active", True)
+        and not rule.get("deleted_at")
         and isinstance(rule.get("match"), dict)
         and selection_rules.vacancy_matches(vacancy, rule["match"])
     ]
 
 
 def hard_filter_reason(vacancy: dict, rules: list[dict] | None = None) -> str | None:
-    """Reject explicit built-in mismatches and approved hard-reject rules only."""
+    """Compatibility summary for the first hard-reject reason."""
     for rule in _matching_rules(vacancy, rules):
         if rule.get("action") == "hard_reject":
             return f"approved_rule:{rule.get('id')}:{rule.get('name') or 'hard_reject'}"
@@ -105,6 +104,45 @@ def hard_filter_reason(vacancy: dict, rules: list[dict] | None = None) -> str | 
         if any(pattern in title for pattern in patterns):
             return reason
     return None
+
+
+def hard_filter_details(vacancy: dict, rules: list[dict] | None = None) -> list[dict]:
+    """Return explainable snapshots for every automatic hard-reject condition."""
+    details: list[dict] = []
+    for rule in _matching_rules(vacancy, rules):
+        if rule.get("action") != "hard_reject":
+            continue
+        details.append(
+            {
+                "type": "rule",
+                "rule_id": str(rule.get("id") or ""),
+                "version": rule.get("version"),
+                "name": rule.get("name") or "hard_reject",
+                "instruction": rule.get("instruction") or "",
+                "matches": selection_rules.match_evidence(vacancy, rule.get("match") or {}),
+            }
+        )
+
+    title = str(vacancy.get("title") or vacancy.get("name") or "").strip().lower()
+    strategic = bool(
+        title
+        and (_STRATEGIC_ACRONYM.search(title) or any(signal in title for signal in _STRATEGIC_TITLE_SIGNALS))
+    )
+    if title and not strategic:
+        for patterns, reason in _HARD_TITLE_MISMATCHES:
+            matched = [pattern for pattern in patterns if pattern in title]
+            if matched:
+                details.append(
+                    {
+                        "type": "system",
+                        "reason": reason,
+                        "name": "Системный фильтр роли",
+                        "instruction": reason,
+                        "matches": [{"field": "title", "term": term} for term in matched],
+                    }
+                )
+                break
+    return details
 
 
 def _load_discovered(user_id: str, limit: int) -> list[dict]:
@@ -227,17 +265,19 @@ async def _score_with_llm(
 async def _mark_error(
     user_id: str,
     pipeline_id: str,
+    claim_token: str,
     error: Exception | str,
     *,
     extra_changes: dict | None = None,
-) -> None:
+) -> bool:
     message = str(error)[:2000] or "unknown_scoring_error"
-    await asyncio.to_thread(
+    return await asyncio.to_thread(
         vacancy_pipeline.transition,
         user_id=user_id,
         pipeline_id=pipeline_id,
         from_statuses=["scoring"],
         to_status="score_error",
+        expected_claim_token=claim_token,
         changes={
             "score": None,
             "score_details": {"error": message},
@@ -252,6 +292,7 @@ async def _mark_error(
 async def _mark_transient_hh_error(
     user_id: str,
     row: dict,
+    claim_token: str,
     error: Exception | str,
 ) -> str:
     pipeline_id = str(row["id"])
@@ -259,9 +300,10 @@ async def _mark_transient_hh_error(
     attempt = int(row.get("score_attempts") or 0) + 1
 
     if attempt >= MAX_TRANSIENT_SCORE_ATTEMPTS:
-        await _mark_error(
+        changed = await _mark_error(
             user_id,
             pipeline_id,
+            claim_token,
             error,
             extra_changes={
                 "score_attempts": attempt,
@@ -273,7 +315,7 @@ async def _mark_transient_hh_error(
                 },
             },
         )
-        return "transient_error"
+        return "transient_error" if changed else "skipped"
 
     delay_s = _TRANSIENT_RETRY_DELAYS_S[min(attempt - 1, len(_TRANSIENT_RETRY_DELAYS_S) - 1)]
     next_score_at = (datetime.now(UTC) + timedelta(seconds=delay_s)).isoformat()
@@ -283,6 +325,7 @@ async def _mark_transient_hh_error(
         pipeline_id=pipeline_id,
         from_statuses=["scoring"],
         to_status="discovered",
+        expected_claim_token=claim_token,
         changes={
             "score": None,
             "score_attempts": attempt,
@@ -309,20 +352,24 @@ async def score_one(
     rules: list[dict] | None = None,
 ) -> str:
     pipeline_id = str(row["id"])
-    claimed = await asyncio.to_thread(
-        vacancy_pipeline.transition,
+    claim_token = await asyncio.to_thread(
+        vacancy_pipeline.claim_for_scoring,
         user_id=user_id,
         pipeline_id=pipeline_id,
-        from_statuses=["discovered"],
-        to_status="scoring",
     )
-    if not claimed:
+    if not claim_token:
         return "skipped"
 
     try:
-        vacancy, enrichment_state = await vacancy_review_service.enrich(user_id, pipeline_id)
+        vacancy, enrichment_state = await vacancy_review_service.enrich(
+            user_id,
+            pipeline_id,
+            expected_score_claim_token=claim_token,
+        )
         if enrichment_state["archived"]:
             return "archived"
+        if vacancy.get("status") != "scoring":
+            return "skipped"
 
         score_fp = context_fingerprints.score_context(
             context=context,
@@ -332,35 +379,43 @@ async def score_one(
             prompt_version=SCORER_PROMPT_VERSION,
         )
         matched_rules = _matching_rules(vacancy, rules)
-        reason = hard_filter_reason(vacancy, matched_rules)
+        reject_details = hard_filter_details(vacancy, matched_rules)
         applied_versions = [
             int(rule["version"])
             for rule in matched_rules
             if rule.get("version") is not None
         ]
-        if reason:
-            await asyncio.to_thread(
+        if reject_details:
+            reason = hard_filter_reason(vacancy, matched_rules) or str(reject_details[0].get("reason") or "hard_reject")
+            changed = await asyncio.to_thread(
                 vacancy_pipeline.transition,
                 user_id=user_id,
                 pipeline_id=pipeline_id,
                 from_statuses=["scoring"],
-                to_status="scored",
+                to_status="rejected_by_rule",
+                expected_claim_token=claim_token,
                 changes={
                     "score": 0,
                     "hard_filter_reason": reason,
+                    "auto_reject_details": reject_details,
                     "score_details": {
                         "hard_filter": True,
                         "profile_version": context.get("version"),
                         "applied_rule_versions": applied_versions,
+                        "applied_rule_ids": [str(rule.get("id")) for rule in matched_rules if rule.get("id")],
+                        "auto_rejects": reject_details,
                         **score_fp,
                     },
-                    "score_explanation": f"Hard filter: {reason}",
+                    "score_explanation": "Автоматически отклонена: " + "; ".join(
+                        str(item.get("name") or item.get("reason") or "hard reject") for item in reject_details
+                    ),
                     "score_attempts": 0,
                     "next_score_at": None,
                     "last_score_error": None,
+                    "score_lease_failures": 0,
                 },
             )
-            return "hard_filtered"
+            return "hard_filtered" if changed else "skipped"
 
         result = await _score_with_llm(llm, context, vacancy, matched_rules)
         details = {
@@ -381,17 +436,29 @@ async def score_one(
             pipeline_id=pipeline_id,
             from_statuses=["scoring"],
             to_status="scored",
+            expected_claim_token=claim_token,
             changes={
                 "score": result.total,
                 "score_details": details,
                 "score_explanation": result.explanation,
                 "hard_filter_reason": None,
+                "auto_reject_details": None,
                 "score_attempts": 0,
                 "next_score_at": None,
                 "last_score_error": None,
+                "score_lease_failures": 0,
             },
         )
         return "scored" if changed else "skipped"
+    except asyncio.CancelledError:
+        await asyncio.to_thread(
+            vacancy_pipeline.release_scoring_claim,
+            user_id=user_id,
+            pipeline_id=pipeline_id,
+            claim_token=claim_token,
+            reason="scoring cancelled",
+        )
+        raise
     except web.HHTransientError as ex:
         logger.warning(
             "transient HH scoring failure user=%s vacancy=%s error=%s",
@@ -399,11 +466,28 @@ async def score_one(
             pipeline_id,
             ex,
         )
-        return await _mark_transient_hh_error(user_id, row, ex)
+        return await _mark_transient_hh_error(user_id, row, claim_token, ex)
     except Exception as ex:
         logger.warning("scoring failed user=%s vacancy=%s", user_id, pipeline_id, exc_info=True)
-        await _mark_error(user_id, pipeline_id, ex)
-        return "error"
+        changed = await _mark_error(user_id, pipeline_id, claim_token, ex)
+        return "error" if changed else "skipped"
+    finally:
+        # Harmless after a successful terminal transition; essential if a code
+        # path returned while this exact claim was still left in `scoring`.
+        try:
+            await asyncio.to_thread(
+                vacancy_pipeline.release_scoring_claim,
+                user_id=user_id,
+                pipeline_id=pipeline_id,
+                claim_token=claim_token,
+                reason="scoring ended without terminal transition",
+            )
+        except Exception:
+            logger.exception("failed to release scoring claim user=%s vacancy=%s", user_id, pipeline_id)
+
+
+async def reap_stale_scoring() -> int:
+    return await asyncio.to_thread(vacancy_pipeline.reap_expired_scoring)
 
 
 async def score_user(user_id: str, limit: int = MAX_SCORE_PER_RUN) -> dict[str, int]:
@@ -430,16 +514,16 @@ async def score_user(user_id: str, limit: int = MAX_SCORE_PER_RUN) -> dict[str, 
         logger.warning("candidate context/rules unavailable user=%s", user_id, exc_info=True)
         for row in rows:
             pipeline_id = str(row["id"])
-            claimed = await asyncio.to_thread(
-                vacancy_pipeline.transition,
+            token = await asyncio.to_thread(
+                vacancy_pipeline.claim_for_scoring,
                 user_id=user_id,
                 pipeline_id=pipeline_id,
-                from_statuses=["discovered"],
-                to_status="scoring",
             )
-            if claimed:
-                await _mark_error(user_id, pipeline_id, ex)
-                summary["errors"] += 1
+            if token:
+                if await _mark_error(user_id, pipeline_id, token, ex):
+                    summary["errors"] += 1
+                else:
+                    summary["skipped"] += 1
             else:
                 summary["skipped"] += 1
         return summary
