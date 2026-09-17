@@ -2,9 +2,10 @@
 set -Eeuo pipefail
 
 # Incremental production updater for an existing Otclick installation.
-# It downloads only a tiny exact-SHA manifest, then pulls changed application
-# components from GHCR so Docker can reuse cached layers. GitHub Release
-# component archives are a fallback only; the combined fresh-install bundle is
+# It downloads only a tiny exact-SHA manifest, then downloads only changed
+# application components. GitHub Release component archives are the production
+# default because some hosting networks route GHCR blob traffic very slowly; GHCR
+# remains an immutable fallback/override. The combined fresh-install bundle is
 # never downloaded by this script.
 #
 # Important: an already-up-to-date checkout still runs the runtime reconciliation
@@ -299,22 +300,42 @@ backup_database() {
 ensure_zstd() {
   command -v zstd >/dev/null 2>&1 && return 0
   if command -v apt-get >/dev/null 2>&1; then
-    log "      installing zstd for Release fallback"
+    log "      installing zstd for component Release transport"
     apt-get update -qq >>"$LOG_FILE" 2>&1
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq zstd >>"$LOG_FILE" 2>&1
   fi
-  command -v zstd >/dev/null 2>&1 || die "zstd is required only for the GitHub Release fallback, but could not be installed"
+  command -v zstd >/dev/null 2>&1 || die "zstd is required for the GitHub Release component transport, but could not be installed"
 }
 
 image_matches_target() {
-  local target_ref="$1" local_tag="$2" target_id local_id
-  # A locally built/stale :latest image is not proof that it matches the exact
-  # content-addressed artifact. The exact digest itself must exist locally and
-  # resolve to the same image ID as the runtime tag.
-  docker image inspect "$target_ref" >/dev/null 2>&1 || return 1
+  local target_hash="$1" target_ref="$2" local_tag="$3" component="$4" local_id target_id
   docker image inspect "$local_tag" >/dev/null 2>&1 || return 1
-  target_id="$(docker image inspect "$target_ref" --format '{{.Id}}')"
   local_id="$(docker image inspect "$local_tag" --format '{{.Id}}')"
+
+  # Preferred v2 state: works for both Release-loaded and GHCR-pulled images.
+  if [[ -f "$STATE_DIR/install-state.json" ]] && python3 - "$STATE_DIR/install-state.json" "$component" "$target_hash" "$local_id" <<'PYSTATE'
+import json
+import sys
+
+path, component, target_hash, local_id = sys.argv[1:]
+try:
+    data = json.load(open(path, encoding="utf-8"))
+except Exception:
+    raise SystemExit(1)
+if data.get(f"{component}_hash") != target_hash:
+    raise SystemExit(1)
+if data.get(f"{component}_image_id") != local_id:
+    raise SystemExit(1)
+PYSTATE
+  then
+    return 0
+  fi
+
+  # One-time compatibility with schema-v1 state: if an earlier GHCR-first
+  # updater already pulled the exact digest, trust the content-addressed ref and
+  # avoid redownloading the component merely to upgrade install-state metadata.
+  docker image inspect "$target_ref" >/dev/null 2>&1 || return 1
+  target_id="$(docker image inspect "$target_ref" --format '{{.Id}}')"
   [[ -n "$target_id" && "$target_id" == "$local_id" ]]
 }
 
@@ -497,28 +518,15 @@ MIGRATIONS_CHANGED=0
 # Do not trust a pre-existing :latest tag merely because the source hash did not
 # change. The interrupted migration from the old installer can leave an older
 # locally-built image under the same tag. Require the exact target digest.
-image_matches_target "$TARGET_BACKEND_IMAGE" aiautoclicker-backend:latest || BACKEND_CHANGED=1
-image_matches_target "$TARGET_FRONTEND_IMAGE" aiautoclicker-frontend:latest || FRONTEND_CHANGED=1
+image_matches_target "$TARGET_BACKEND_HASH" "$TARGET_BACKEND_IMAGE" aiautoclicker-backend:latest backend || BACKEND_CHANGED=1
+image_matches_target "$TARGET_FRONTEND_HASH" "$TARGET_FRONTEND_IMAGE" aiautoclicker-frontend:latest frontend || FRONTEND_CHANGED=1
 
 log "      changed/required: backend=$BACKEND_CHANGED frontend=$FRONTEND_CHANGED compose=$COMPOSE_CHANGED infra=$INFRA_CHANGED migrations=$MIGRATIONS_CHANGED"
 
-pull_component() {
-  local name="$1" image_ref="$2" fallback_tag="$3" fallback_asset="$4" local_tag="$5"
-  local fallback_base fallback_sums fallback_file expected actual transfer_size
+pull_component_from_release() {
+  local name="$1" fallback_tag="$2" fallback_asset="$3" local_tag="$4"
+  local fallback_base fallback_sums fallback_file expected actual
 
-  transfer_size="$(image_transfer_size "$image_ref" || true)"
-  if [[ -n "$transfer_size" ]]; then
-    log "      $name: pulling immutable image from GHCR (compressed image up to $transfer_size; cached layers are reused)"
-  else
-    log "      $name: pulling immutable image from GHCR"
-  fi
-  if docker_pull_visible "$name" "$image_ref"; then
-    docker tag "$image_ref" "$local_tag"
-    log "      $name: GHCR pull complete (cached layers reused)"
-    return 0
-  fi
-
-  log "      $name: anonymous GHCR pull unavailable; using component Release fallback"
   ensure_zstd
   fallback_base="https://github.com/${REPO_SLUG}/releases/download/${fallback_tag}"
   fallback_sums="$(mktemp /tmp/otclick-component-sums.XXXXXX)"
@@ -527,14 +535,64 @@ pull_component() {
     || { rm -f "$fallback_sums" "$fallback_file"; return 21; }
   expected="$(awk -v asset="$fallback_asset" '$2 == asset || $2 == "./" asset {print $1; exit}' "$fallback_sums")"
   [[ -n "$expected" ]] || { rm -f "$fallback_sums" "$fallback_file"; return 22; }
-  curl_download_visible "$name Release fallback" \
-    "${fallback_base}/${fallback_asset}" "$fallback_file"
+  curl_download_visible "$name component Release" \
+    "${fallback_base}/${fallback_asset}" "$fallback_file" || { rm -f "$fallback_sums" "$fallback_file"; return 23; }
   actual="$(sha256sum "$fallback_file" | awk '{print $1}')"
-  [[ "$actual" == "$expected" ]] || { rm -f "$fallback_sums" "$fallback_file"; return 23; }
-  zstd -d -c "$fallback_file" | docker load >>"$LOG_FILE" 2>&1
+  [[ "$actual" == "$expected" ]] || { rm -f "$fallback_sums" "$fallback_file"; return 24; }
+  zstd -d -c "$fallback_file" | docker load >>"$LOG_FILE" 2>&1 || { rm -f "$fallback_sums" "$fallback_file"; return 25; }
   rm -f "$fallback_sums" "$fallback_file"
-  docker image inspect "$local_tag" >/dev/null 2>&1 || return 24
-  log "      $name: fallback image loaded"
+  docker image inspect "$local_tag" >/dev/null 2>&1 || return 26
+  log "      $name: component Release loaded"
+}
+
+pull_component_from_ghcr() {
+  local name="$1" image_ref="$2" local_tag="$3" transfer_size
+  transfer_size="$(image_transfer_size "$image_ref" || true)"
+  if [[ -n "$transfer_size" ]]; then
+    log "      $name: pulling immutable image from GHCR (compressed image up to $transfer_size; cached layers are reused)"
+  else
+    log "      $name: pulling immutable image from GHCR"
+  fi
+  docker_pull_visible "$name" "$image_ref" || return $?
+  docker tag "$image_ref" "$local_tag"
+  log "      $name: GHCR pull complete (cached layers reused)"
+}
+
+pull_component() {
+  local name="$1" image_ref="$2" fallback_tag="$3" fallback_asset="$4" local_tag="$5"
+  local requested transport
+  requested="${OTCLICK_IMAGE_TRANSPORT:-$(env_get OTCLICK_IMAGE_TRANSPORT)}"
+  requested="${requested:-release}"
+  case "$requested" in
+    auto)
+      # Release-first is intentionally the current auto policy. It preserves the
+      # fast GitHub Release CDN path observed on production hosting while GHCR
+      # remains a content-addressed fallback.
+      transport="release"
+      ;;
+    release|ghcr)
+      transport="$requested"
+      ;;
+    *)
+      die "invalid OTCLICK_IMAGE_TRANSPORT=$requested (expected auto/release/ghcr)"
+      ;;
+  esac
+
+  log "      $name: image transport=$requested (effective=$transport)"
+  if [[ "$transport" == "release" ]]; then
+    if pull_component_from_release "$name" "$fallback_tag" "$fallback_asset" "$local_tag"; then
+      return 0
+    fi
+    log "      $name: component Release unavailable; falling back to GHCR"
+    pull_component_from_ghcr "$name" "$image_ref" "$local_tag"
+    return $?
+  fi
+
+  if pull_component_from_ghcr "$name" "$image_ref" "$local_tag"; then
+    return 0
+  fi
+  log "      $name: GHCR unavailable; falling back to component Release"
+  pull_component_from_release "$name" "$fallback_tag" "$fallback_asset" "$local_tag"
 }
 
 log "[3/7] updating changed application components"
@@ -626,7 +684,9 @@ else
 fi
 require_http "$CADDY_HEALTH_URL" internal-Caddy caddy 60
 
-python3 - "$STATE_DIR/install-state.json" "$TARGET_SHA" "$TARGET_BACKEND_HASH" "$TARGET_FRONTEND_HASH" "$TARGET_COMPOSE_HASH" "$TARGET_INFRA_HASH" "$TARGET_MIGRATIONS_HASH" <<'PY'
+BACKEND_IMAGE_ID="$(docker image inspect aiautoclicker-backend:latest --format '{{.Id}}')"
+FRONTEND_IMAGE_ID="$(docker image inspect aiautoclicker-frontend:latest --format '{{.Id}}')"
+python3 - "$STATE_DIR/install-state.json" "$TARGET_SHA" "$TARGET_BACKEND_HASH" "$TARGET_FRONTEND_HASH" "$TARGET_COMPOSE_HASH" "$TARGET_INFRA_HASH" "$TARGET_MIGRATIONS_HASH" "$BACKEND_IMAGE_ID" "$FRONTEND_IMAGE_ID" <<'PY'
 import json
 from pathlib import Path
 import sys
@@ -634,13 +694,15 @@ from datetime import datetime, timezone
 
 path = Path(sys.argv[1])
 state = {
-    "schema_version": 1,
+    "schema_version": 2,
     "git_sha": sys.argv[2],
     "backend_hash": sys.argv[3],
     "frontend_hash": sys.argv[4],
     "compose_hash": sys.argv[5],
     "infra_hash": sys.argv[6],
     "migrations_hash": sys.argv[7],
+    "backend_image_id": sys.argv[8],
+    "frontend_image_id": sys.argv[9],
     "updated_at": datetime.now(timezone.utc).isoformat(),
 }
 path.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")

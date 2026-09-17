@@ -134,18 +134,19 @@ def test_incremental_updater_downloads_only_changed_or_missing_exact_components(
     assert 'OLD_FRONTEND_HASH="$(component_hash frontend)"' in updater
     assert 'backend exact image already present; 0 application bytes downloaded' in updater
     assert 'frontend exact image already present; 0 application bytes downloaded' in updater
-    assert 'image_matches_target "$TARGET_BACKEND_IMAGE" aiautoclicker-backend:latest || BACKEND_CHANGED=1' in updater
-    assert 'image_matches_target "$TARGET_FRONTEND_IMAGE" aiautoclicker-frontend:latest || FRONTEND_CHANGED=1' in updater
+    assert 'image_matches_target "$TARGET_BACKEND_HASH" "$TARGET_BACKEND_IMAGE" aiautoclicker-backend:latest backend || BACKEND_CHANGED=1' in updater
+    assert 'image_matches_target "$TARGET_FRONTEND_HASH" "$TARGET_FRONTEND_IMAGE" aiautoclicker-frontend:latest frontend || FRONTEND_CHANGED=1' in updater
     assert 'if [[ "$BACKEND_CHANGED" == "1" ]]' in updater
     assert 'if [[ "$FRONTEND_CHANGED" == "1" ]]' in updater
 
 
-def test_incremental_updater_prefers_immutable_ghcr_layers_with_component_fallback():
+def test_incremental_updater_is_release_first_with_ghcr_fallback():
     updater = _updater()
 
     assert 'docker pull "$image_ref"' in updater
     assert 'GHCR pull complete (cached layers reused)' in updater
-    assert 'anonymous GHCR pull unavailable; using component Release fallback' in updater
+    assert 'component Release unavailable; falling back to GHCR' in updater
+    assert 'GHCR unavailable; falling back to component Release' in updater
     assert 'releases/download/${fallback_tag}' in updater
     assert 'zstd -d -c "$fallback_file" | docker load' in updater
     assert 'sha256sum "$fallback_file"' in updater

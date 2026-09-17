@@ -1,3 +1,6 @@
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -54,15 +57,21 @@ def test_cleanup_is_successful_when_no_temp_files_exist():
     assert '[[ -n "$SUMS_FILE" ]] &&' not in cleanup
 
 
-def test_incremental_updater_requires_exact_target_digest_not_just_latest_tag():
+def test_incremental_updater_verifies_loaded_image_against_persisted_component_state():
     updater = _read("install-update.sh")
     assert 'image_matches_target()' in updater
+    assert 'install-state.json' in updater
+    assert 'backend_image_id' in updater
+    assert 'frontend_image_id' in updater
+    assert 'image_matches_target "$TARGET_BACKEND_HASH" "$TARGET_BACKEND_IMAGE" aiautoclicker-backend:latest backend || BACKEND_CHANGED=1' in updater
+    assert 'image_matches_target "$TARGET_FRONTEND_HASH" "$TARGET_FRONTEND_IMAGE" aiautoclicker-frontend:latest frontend || FRONTEND_CHANGED=1' in updater
+
+
+def test_incremental_updater_accepts_existing_exact_digest_during_state_v1_upgrade():
+    updater = _read("install-update.sh")
     assert 'docker image inspect "$target_ref"' in updater
-    assert 'docker image inspect "$local_tag"' in updater
-    assert 'target_id=' in updater
-    assert 'local_id=' in updater
-    assert 'image_matches_target "$TARGET_BACKEND_IMAGE" aiautoclicker-backend:latest || BACKEND_CHANGED=1' in updater
-    assert 'image_matches_target "$TARGET_FRONTEND_IMAGE" aiautoclicker-frontend:latest || FRONTEND_CHANGED=1' in updater
+    assert 'target_id="$(docker image inspect "$target_ref"' in updater
+    assert '[[ -n "$target_id" && "$target_id" == "$local_id" ]]' in updater
 
 
 def test_incremental_updater_preserves_env():
@@ -72,14 +81,16 @@ def test_incremental_updater_preserves_env():
     assert 'infra/bootstrap.py' not in updater
 
 
-def test_incremental_updater_uses_release_fallback_only_after_ghcr_failure():
+def test_incremental_updater_is_release_first_with_configurable_transport():
     updater = _read("install-update.sh")
-    ghcr = updater.index('docker pull "$image_ref"')
-    fallback = updater.index('using component Release fallback')
-    zstd = updater.index('ensure_zstd')
-    assert ghcr < fallback
-    assert zstd < fallback
-    assert 'command -v zstd' in updater
+    env_example = _read(".env.example")
+    assert 'OTCLICK_IMAGE_TRANSPORT:-$(env_get OTCLICK_IMAGE_TRANSPORT)' in updater
+    assert 'requested="${requested:-release}"' in updater
+    assert 'auto)' in updater
+    assert 'release|ghcr)' in updater
+    assert 'component Release unavailable; falling back to GHCR' in updater
+    assert 'GHCR unavailable; falling back to component Release' in updater
+    assert 'OTCLICK_IMAGE_TRANSPORT=release' in env_example
 
 
 def test_artifact_workflow_is_content_addressed_and_tests_public_ghcr():
@@ -213,3 +224,106 @@ def test_cover_letter_prompt_migration_follows_product_pipeline_migrations():
         assert list(migrations.glob(f"{number:03d}_*.sql")), f"missing product migration {number:03d}"
     assert not (migrations / "034_cover_letter_prompt_version.sql").exists()
     assert (migrations / "042_cover_letter_prompt_version.sql").is_file()
+
+
+def test_install_state_v2_writer_reader_round_trip(tmp_path):
+    """Prove the reader and writer heredocs extracted from install-update.sh
+    actually behave correctly.  No docker, no network, no shell execution."""
+    updater = _read("install-update.sh")
+
+    # --- extract the PYSTATE reader heredoc ---
+    pystate_start_marker = "<<'PYSTATE'"
+    if pystate_start_marker not in updater:
+        raise AssertionError("PYSTATE heredoc start marker not found in install-update.sh")
+    search_from = updater.index(pystate_start_marker) + len(pystate_start_marker)
+    pystate_end = updater.index("\nPYSTATE\n", search_from)
+    reader_code = updater[search_from:pystate_end].lstrip("\n")
+
+    # --- extract the last <<'PY' … PY heredoc (the state writer) ---
+    last_py_marker = "<<'PY'"
+    last_py_pos = updater.rfind(last_py_marker)
+    if last_py_pos == -1:
+        raise AssertionError("<<'PY'> heredoc marker not found in install-update.sh")
+    py_start = last_py_pos + len(last_py_marker)
+    # find the matching closing PY on its own line
+    py_end = updater.index("\nPY\n", py_start)
+    writer_code = updater[py_start:py_end].lstrip("\n")
+
+    reader_path = tmp_path / "reader.py"
+    writer_path = tmp_path / "writer.py"
+    reader_path.write_text(reader_code, encoding="utf-8")
+    writer_path.write_text(writer_code, encoding="utf-8")
+
+    state_file = tmp_path / "install-state.json"
+
+    # --- write a v2 state via the extracted writer ---
+    git_sha = "abc123"
+    backend_hash = "bh1"
+    frontend_hash = "fh1"
+    compose_hash = "ch1"
+    infra_hash = "ih1"
+    migrations_hash = "mh1"
+    backend_image_id = "sha256:aaaa"
+    frontend_image_id = "sha256:bbbb"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(writer_path),
+            str(state_file),
+            git_sha,
+            backend_hash,
+            frontend_hash,
+            compose_hash,
+            infra_hash,
+            migrations_hash,
+            backend_image_id,
+            frontend_image_id,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"writer failed: {result.stderr}"
+
+    # --- (d) writer output must be valid v2 JSON with all expected keys ---
+    assert state_file.exists()
+    mode = state_file.stat().st_mode & 0o777
+    assert mode == 0o600, f"expected mode 0o600, got {oct(mode)}"
+    data = json.loads(state_file.read_text(encoding="utf-8"))
+    assert data["schema_version"] == 2
+    assert data["backend_image_id"] == backend_image_id
+    assert data["frontend_image_id"] == frontend_image_id
+    assert data["backend_hash"] == backend_hash
+    assert data["frontend_hash"] == frontend_hash
+    assert data["compose_hash"] == compose_hash
+    assert data["infra_hash"] == infra_hash
+    assert data["migrations_hash"] == migrations_hash
+    assert data["git_sha"] == git_sha
+    assert "updated_at" in data
+
+    # --- (a) reader: matching hash + matching image_id → exit 0 ---
+    result = subprocess.run(
+        [sys.executable, str(reader_path),
+         str(state_file), "backend", backend_hash, backend_image_id],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"reader should succeed: {result.stderr}"
+
+    # --- (b) reader: hash mismatch → non-zero exit ---
+    result = subprocess.run(
+        [sys.executable, str(reader_path),
+         str(state_file), "backend", "WRONG_HASH", backend_image_id],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0, "reader should fail on hash mismatch"
+
+    # --- (c) reader: image_id mismatch → non-zero exit ---
+    result = subprocess.run(
+        [sys.executable, str(reader_path),
+         str(state_file), "backend", backend_hash, "sha256:WRONG"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0, "reader should fail on image_id mismatch"

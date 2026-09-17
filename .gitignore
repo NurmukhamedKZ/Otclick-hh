@@ -26,6 +26,8 @@ extension/
 
 .wordstat.env
 .gstack/
+# Local pipeline/planning state — not tracked.
+.tmp/
 
 # recon dumps (contain a logged-in hh page)
 backend/recon_oauth_out/

@@ -7,6 +7,7 @@ on:
       - main
       - "feature/**"
       - "integration/**"
+      - "perf/**"
     paths:
       - "backend/**"
       - "frontend/**"
@@ -28,7 +29,8 @@ permissions:
 # Normal updates are componentized:
 # - backend and frontend are immutable content-hash images in GHCR;
 # - exact-commit releases contain a tiny manifest used by install-update.sh;
-# - per-component fallback archives are created only once per changed component.
+# - per-component Release archives are the production-fast transfer path;
+# - GHCR remains an immutable fallback and layer-oriented transport option.
 # A combined .tar.zst bundle remains only for genuinely fresh product installs.
 concurrency:
   group: install-artifact-${{ github.ref }}
@@ -103,37 +105,66 @@ jobs:
           set -euo pipefail
           echo "${{ github.token }}" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
-      - name: Reuse or publish immutable component images
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Resolve component tags and reuse flags
+        id: components
         run: |
           set -euo pipefail
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           BACKEND_TAG="ghcr.io/${owner}/otclick-hh-backend:component-${BACKEND_HASH}"
           FRONTEND_TAG="ghcr.io/${owner}/otclick-hh-frontend:component-${FRONTEND_HASH}"
+          {
+            echo "BACKEND_TAG=$BACKEND_TAG"
+            echo "FRONTEND_TAG=$FRONTEND_TAG"
+          } >> "$GITHUB_ENV"
 
           if docker manifest inspect "$BACKEND_TAG" >/dev/null 2>&1; then
             echo "Reusing backend component ${BACKEND_HASH}"
+            echo "backend_exists=true" >> "$GITHUB_OUTPUT"
           else
-            echo "Building backend component ${BACKEND_HASH}"
-            docker build \
-              --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
-              -f backend/Dockerfile \
-              -t "$BACKEND_TAG" \
-              .
-            docker push "$BACKEND_TAG"
+            echo "backend_exists=false" >> "$GITHUB_OUTPUT"
           fi
 
           if docker manifest inspect "$FRONTEND_TAG" >/dev/null 2>&1; then
             echo "Reusing frontend component ${FRONTEND_HASH}"
+            echo "frontend_exists=true" >> "$GITHUB_OUTPUT"
           else
-            echo "Building frontend component ${FRONTEND_HASH}"
-            docker build \
-              --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
-              -f frontend/Dockerfile \
-              -t "$FRONTEND_TAG" \
-              frontend
-            docker push "$FRONTEND_TAG"
+            echo "frontend_exists=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Build and publish backend component
+        if: steps.components.outputs.backend_exists != 'true'
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ${{ env.BACKEND_TAG }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      - name: Build and publish frontend component
+        if: steps.components.outputs.frontend_exists != 'true'
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ${{ env.FRONTEND_TAG }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+      - name: Pull and resolve immutable component images
+        run: |
+          set -euo pipefail
           docker pull "$BACKEND_TAG"
           docker pull "$FRONTEND_TAG"
           docker tag "$BACKEND_TAG" aiautoclicker-backend:latest
@@ -145,8 +176,6 @@ jobs:
           [[ "$FRONTEND_IMAGE" == ghcr.io/*@sha256:* ]]
 
           {
-            echo "BACKEND_TAG=$BACKEND_TAG"
-            echo "FRONTEND_TAG=$FRONTEND_TAG"
             echo "BACKEND_IMAGE=$BACKEND_IMAGE"
             echo "FRONTEND_IMAGE=$FRONTEND_IMAGE"
             echo "BACKEND_FALLBACK_TAG=component-backend-${BACKEND_HASH}"

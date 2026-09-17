@@ -74,3 +74,14 @@ def test_linux_artifact_never_publishes_runtime_secrets():
     assert "OPENAI_API_KEY" not in workflow
     assert "SERVICE_ROLE_KEY" not in workflow
     assert "FERNET_KEY" not in workflow
+
+
+def test_component_builds_use_persistent_buildx_cache():
+    workflow = _workflow()
+    assert '"perf/**"' in workflow
+    assert "docker/setup-buildx-action@" in workflow
+    assert "docker/build-push-action@" in workflow
+    assert "cache-from: type=gha,scope=backend" in workflow
+    assert "cache-to: type=gha,mode=max,scope=backend" in workflow
+    assert "cache-from: type=gha,scope=frontend" in workflow
+    assert "cache-to: type=gha,mode=max,scope=frontend" in workflow
