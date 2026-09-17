@@ -607,14 +607,7 @@ else
   log "      frontend exact image already present; 0 application bytes downloaded"
 fi
 
-if [[ "$MIGRATIONS_CHANGED" == "1" ]]; then
-  log "[4/7] schema changed; backing up PostgreSQL"
-  backup_database
-else
-  log "[4/7] schema unchanged; DB backup skipped"
-fi
-
-log "[5/7] fast-forwarding repository"
+log "[4/7] fast-forwarding repository"
 # A broken previous deployment can leave infra/Caddyfile as an empty directory
 # after the tracked file disappeared from main. Remove only that exact empty
 # directory so Git can restore the tracked Caddyfile; never delete its contents.
@@ -632,6 +625,13 @@ git merge --ff-only "origin/$REF" >>"$LOG_FILE" 2>&1
 [[ -f infra/frontend-runtime-env.sh ]] || die "frontend runtime env injector is missing after update"
 [[ -f infra/Caddyfile ]] || die "infra/Caddyfile is missing after update"
 configure_proxy_mode
+
+if [[ "$MIGRATIONS_CHANGED" == "1" ]]; then
+  log "[5/7] schema changed; backing up PostgreSQL"
+  backup_database
+else
+  log "[5/7] schema unchanged; DB backup skipped"
+fi
 
 if [[ "$COMPOSE_CHANGED" == "1" ]]; then
   log "      compose changed; refreshing pinned third-party images"
