@@ -82,7 +82,7 @@ GitHub main
 
 The large combined release asset exists only for a fresh installation. An existing installation must never download it.
 
-If the exact manifest or required image is not available, the installer fails. It does **not** silently fall back to `docker compose build`.
+If the exact manifest or required image is not available, the installer fails (for example, before `build-artifact.yml` has finished for the newest commit on `main`). Wait for that workflow, or on a host with enough memory run `OTCLICK_ALLOW_LOCAL_BUILD=1 bash install.sh` once. It does **not** silently fall back to `docker compose build`.
 
 ```text
 Development machine: source -> local build/test -> GitHub
@@ -204,7 +204,7 @@ ALLOW_REAL_APPLY=false    # hard kill switch: nothing is sent to hh until this i
 The installer creates the first account (`OTCLICK_ADMIN_EMAIL`, password printed once) and seeds
 `backend/data/candidate` into it. That directory holds an **example** profile; edit the copy in
 `backend/data/candidate-local/` and reload it with `scripts/load_candidate_data.py`.
-Other accounts registered in the UI have no candidate profile until it is loaded for them.
+Accounts registered later in the UI get the same profile automatically on first use (the `candidate-local` copy if present, otherwise the bundled example).
 
 Without `OPENAI_API_KEY` the core stack can still start; AI-dependent functions remain unavailable or use their fallback behavior.
 
@@ -401,7 +401,7 @@ Otclick-hh/
 
 ## Security notes
 
-- Never commit `.env`.
+- Never commit `.env` or hh recon dumps (`backend/recon_out/` is git-ignored).
 - Keep `FERNET_KEY` backed up offline.
 - Never regenerate secrets automatically for an existing database.
 - Production updates must come from the exact Git commit and its matching verified artifact.

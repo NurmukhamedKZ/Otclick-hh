@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.api.deps import get_current_user
+from app.config import settings
 from app.services import form_drafts
 
 router = APIRouter(prefix="/api/forms", tags=["forms"])
@@ -33,6 +34,11 @@ async def approve_draft(
     body: ApproveRequest,
     user_id: str = Depends(get_current_user),
 ) -> OkResponse:
+    if not settings.ALLOW_REAL_APPLY:
+        raise HTTPException(
+            status_code=409,
+            detail="real_apply_disabled: set ALLOW_REAL_APPLY=true in .env to submit to hh",
+        )
     try:
         status, error = await form_drafts.approve(
             user_id, draft_id, answers=body.answers, letter=body.letter
