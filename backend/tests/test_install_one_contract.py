@@ -60,7 +60,7 @@ def test_full_installer_keeps_exact_sha_legacy_bundle_fallback():
 
     assert 'git_sha="$(git rev-parse HEAD)"' in installer
     assert 'release_tag="install-${git_sha}"' in installer
-    assert 'https://github.com/gest0r1/Otclick-hh/releases/download/${release_tag}' in installer
+    assert 'https://github.com/NurmukhamedKZ/Otclick-hh/releases/download/${release_tag}' in installer
     assert '"${release_base}/manifest.json"' in installer
     assert '"${release_base}/SHA256SUMS"' in installer
     assert 'manifest.get("git_sha", "")' in installer
@@ -119,7 +119,7 @@ def test_candidate_reload_uses_runtime_mount_without_building_images():
 def test_one_command_shim_uses_incremental_updater_for_existing_install():
     shim = _shim()
 
-    assert 'RAW_URL="https://raw.githubusercontent.com/gest0r1/Otclick-hh/${REF}/install.sh"' in shim
+    assert 'RAW_URL="https://raw.githubusercontent.com/NurmukhamedKZ/Otclick-hh/${REF}/install.sh"' in shim
     assert '[[ -d "$INSTALL_DIR/.git"' in shim
     assert 'install-update.sh' in shim
     assert 'OTCLICK_FULL_INSTALL:-0' in shim

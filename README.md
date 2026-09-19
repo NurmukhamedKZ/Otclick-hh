@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/gest0r1/Otclick-hh/main/docs/assets/banner.svg" alt="Otclick" width="100%"/>
+  <img src="https://raw.githubusercontent.com/NurmukhamedKZ/Otclick-hh/main/docs/assets/banner.svg" alt="Otclick" width="100%"/>
 </p>
 
 <h1 align="center">Otclick 🤖</h1>
@@ -8,7 +8,7 @@
   <strong>Self-hosted AI-assisted job application automation for hh.ru / hh.kz</strong>
 </p>
 
-> Active fork: `gest0r1/Otclick-hh`. Production install/update tracks this repository's `main` branch.
+> Production install/update tracks this repository's `main` branch.
 
 ---
 
@@ -27,7 +27,7 @@
 Use the same command for the first installation and every later update:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gest0r1/Otclick-hh/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/NurmukhamedKZ/Otclick-hh/main/install.sh | bash
 ```
 
 The canonical production directory is:
@@ -94,7 +94,7 @@ Production server:    GitHub exact commit -> changed prebuilt layers -> run/test
 The update command remains exactly the same:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gest0r1/Otclick-hh/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/NurmukhamedKZ/Otclick-hh/main/install.sh | bash
 ```
 
 Do not run:
@@ -110,7 +110,7 @@ on an existing installation. It rotates PostgreSQL/JWT/Fernet secrets and can in
 `/opt/otclick-hh` is the supported default. An override is available when deliberately needed:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gest0r1/Otclick-hh/main/install.sh | bash -s -- /some/other/path
+curl -fsSL https://raw.githubusercontent.com/NurmukhamedKZ/Otclick-hh/main/install.sh | bash -s -- /some/other/path
 ```
 
 ---
@@ -122,7 +122,10 @@ Otclick automates routine parts of working with hh.ru/hh.kz while keeping user-c
 - Vacancy search, saved filters, deduplication and exclusions.
 - Optional AI relevance screening.
 - Vacancy-specific cover letters generated from the resume and vacancy.
-- Background apply worker with throttling, limits and retries.
+- Vacancy funnel: discover → AI score → review → approved send queue, with source statistics and score calibration.
+- Background apply worker with throttling and retries; no billing and no quotas.
+- Safety switch: real submissions to hh are blocked while `ALLOW_REAL_APPLY=false` (the default).
+- Account sign-up and login in the web UI; connect hh.ru after logging in.
 - Draft answers for vacancy forms/tests.
 - Recruiter conversation support and todo flow.
 - Captcha handoff for manual handling.
@@ -181,14 +184,27 @@ Important generated secrets include:
 - `FERNET_KEY`;
 - `INTERNAL_CRON_TOKEN`.
 
-Typical AI settings:
+Typical AI settings (any OpenAI-compatible endpoint works: OpenAI, OpenCode Go, LongCat, local servers):
 
 ```env
 OPENAI_API_KEY=...
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=...
+OPENAI_STRUCTURED_OUTPUT_METHOD=function_calling   # json_schema only if the provider supports it
 AI_POSITIONING=balanced
 ```
+
+Accounts and sending:
+
+```env
+DISABLE_SIGNUP=false      # sign-up is open; set true after creating your account
+ALLOW_REAL_APPLY=false    # hard kill switch: nothing is sent to hh until this is true
+```
+
+The installer creates the first account (`OTCLICK_ADMIN_EMAIL`, password printed once) and seeds
+`backend/data/candidate` into it. That directory holds an **example** profile; edit the copy in
+`backend/data/candidate-local/` and reload it with `scripts/load_candidate_data.py`.
+Other accounts registered in the UI have no candidate profile until it is loaded for them.
 
 Without `OPENAI_API_KEY` the core stack can still start; AI-dependent functions remain unavailable or use their fallback behavior.
 
@@ -220,7 +236,7 @@ Never delete the database volume during a normal update.
 ### Update
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gest0r1/Otclick-hh/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/NurmukhamedKZ/Otclick-hh/main/install.sh | bash
 ```
 
 An ordinary update should show an incremental path such as:
@@ -290,7 +306,7 @@ Local development is allowed to build from source. Production is not.
 ### Backend
 
 ```bash
-git clone https://github.com/gest0r1/Otclick-hh.git
+git clone https://github.com/NurmukhamedKZ/Otclick-hh.git
 cd Otclick-hh
 uv sync --dev
 python3 infra/bootstrap.py --openai-key ""
@@ -393,6 +409,6 @@ Otclick-hh/
 
 ---
 
-## License and upstream
+## License
 
-This repository is based on the open-source Otclick project and retains the existing [`LICENSE`](LICENSE). For this deployment, use `https://github.com/gest0r1/Otclick-hh` as the source of truth.
+MIT, see [`LICENSE`](LICENSE). Source of truth: `https://github.com/NurmukhamedKZ/Otclick-hh`.

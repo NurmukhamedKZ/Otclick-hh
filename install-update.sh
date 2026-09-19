@@ -12,7 +12,7 @@ set -Eeuo pipefail
 # path. This makes the same one-command installer usable as a repair command after
 # an interrupted deployment or a stopped/crashed application container.
 
-REPO_SLUG="${OTCLICK_REPO_SLUG:-gest0r1/Otclick-hh}"
+REPO_SLUG="${OTCLICK_REPO_SLUG:-NurmukhamedKZ/Otclick-hh}"
 REF="${OTCLICK_REF:-main}"
 INSTALL_DIR="${OTCLICK_DIR:-/opt/otclick-hh}"
 LOG_DIR="${OTCLICK_LOG_DIR:-/var/log/otclick-hh}"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-REPO_URL="${OTCLICK_REPO_URL:-https://github.com/gest0r1/Otclick-hh.git}"
+REPO_URL="${OTCLICK_REPO_URL:-https://github.com/NurmukhamedKZ/Otclick-hh.git}"
 REF="${OTCLICK_REF:-main}"
 INSTALL_DIR="${OTCLICK_DIR:-/opt/otclick-hh}"
 LOG_DIR="${OTCLICK_LOG_DIR:-/var/log/otclick-hh}"
@@ -27,11 +27,11 @@ if [[ -d "$INSTALL_DIR/.git" && "${OTCLICK_FULL_INSTALL:-0}" != "1" ]]; then
   command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 1; }
   tmp_update="$(mktemp /tmp/otclick-update.XXXXXX.sh)"
   trap 'rm -f "$tmp_update"' EXIT
-  update_url="https://raw.githubusercontent.com/gest0r1/Otclick-hh/${REF}/install-update.sh"
+  update_url="https://raw.githubusercontent.com/NurmukhamedKZ/Otclick-hh/${REF}/install-update.sh"
   echo "[otclick] existing installation detected in $INSTALL_DIR; using incremental updater"
   curl -fsSL "$update_url" -o "$tmp_update"
   chmod 700 "$tmp_update"
-  exec env OTCLICK_REF="$REF" OTCLICK_DIR="$INSTALL_DIR" OTCLICK_REPO_SLUG="gest0r1/Otclick-hh" \
+  exec env OTCLICK_REF="$REF" OTCLICK_DIR="$INSTALL_DIR" OTCLICK_REPO_SLUG="NurmukhamedKZ/Otclick-hh" \
     bash "$tmp_update" </dev/null
 fi
 
@@ -536,8 +536,8 @@ find_existing_user_id() {
   response="$(curl -fsS \
     -H "apikey: $service_key" \
     -H "Authorization: Bearer $service_key" \
-    'http://127.0.0.1:54321/rest/v1/profiles?select=id&order=created_at.asc&limit=2')"
-  python3 -c 'import json,sys; rows=json.load(sys.stdin); print(rows[0]["id"] if len(rows)==1 else ("__MULTIPLE__" if len(rows)>1 else ""))' <<<"$response"
+    'http://127.0.0.1:54321/rest/v1/profiles?select=id&order=created_at.asc&limit=1')"
+  python3 -c 'import json,sys; rows=json.load(sys.stdin); print(rows[0]["id"] if rows else "")' <<<"$response"
 }
 
 sync_admin_email() {
@@ -589,12 +589,10 @@ ensure_single_user() {
   fi
   if [[ -z "$user_id" ]]; then
     existing="$(find_existing_user_id)"
-    if [[ "$existing" == "__MULTIPLE__" ]]; then
-      die "multiple profiles exist; set OTCLICK_USER_ID explicitly before continuing"
-    elif [[ -n "$existing" ]]; then
+    if [[ -n "$existing" ]]; then
       user_id="$existing"
       env_set OTCLICK_USER_ID "$user_id"
-      log "reusing the only existing profile: $user_id"
+      log "sign-up is open; seeding candidate data for the oldest account: $user_id"
     else
       create_first_user
       user_id="$(env_get OTCLICK_USER_ID)"
@@ -673,7 +671,7 @@ load_prebuilt_app_images() {
   local manifest_sha expected_digest actual_digest
   git_sha="$(git rev-parse HEAD)"
   release_tag="install-${git_sha}"
-  release_base="https://github.com/gest0r1/Otclick-hh/releases/download/${release_tag}"
+  release_base="https://github.com/NurmukhamedKZ/Otclick-hh/releases/download/${release_tag}"
   manifest_file="$(mktemp /tmp/otclick-manifest.XXXXXX.json)"
   sums_file="$(mktemp /tmp/otclick-sha256.XXXXXX.txt)"
   bundle_file="$(mktemp /tmp/otclick-images.XXXXXX.tar.zst)"
@@ -685,7 +683,7 @@ load_prebuilt_app_images() {
       "${release_base}/manifest.json" -o "$manifest_file"; then
     rm -f "$manifest_file" "$sums_file" "$bundle_file"
     echo "[otclick] prebuilt release is not ready for commit ${git_sha}." >&2
-    echo "[otclick] Check: https://github.com/gest0r1/Otclick-hh/actions/workflows/build-artifact.yml" >&2
+    echo "[otclick] Check: https://github.com/NurmukhamedKZ/Otclick-hh/actions/workflows/build-artifact.yml" >&2
     echo "[otclick] Local build is intentionally disabled on low-memory hosts." >&2
     echo "[otclick] Emergency override: OTCLICK_ALLOW_LOCAL_BUILD=1" >&2
     return 22
