@@ -221,6 +221,7 @@ deploys to managed platforms instead — no self-hosted Postgres/Auth/Kong stack
 This trades the "no cloud account needed" simplicity of Docker Compose for
 "no server to patch or back up."
 
+
 1. **Database — Supabase Cloud.** Create a project at
    [supabase.com](https://supabase.com/dashboard), then push the schema:
    ```bash
