@@ -21,9 +21,8 @@ from app.hh import errors as hh_errors
 from app.hh import web_captcha
 from app.services import apply as apply_service
 from app.services import captcha as captcha_service
-from app.services import form_filler
+from app.services import form_filler, worker_control
 from app.services import plan as plan_service
-from app.services import worker_control
 from app.services.notifications import notify
 from app.services.worker_runtime import heartbeat
 from app.worker import limiter, throttle
