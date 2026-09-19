@@ -11,7 +11,7 @@ import type {
   WorkerStatus,
   WorkerStopResponse,
 } from "@/lib/types";
-import { Btn, IconBtn, KeyHint, StatusDot, Tooltip } from "@/components/otclick/ui";
+import { Btn, IconBtn, KeyHint, StatusDot, Toggle, Tooltip } from "@/components/otclick/ui";
 import { IBell, IFilter, IPause, IPlay, IRefresh, ISearch, ISpark } from "@/components/otclick/icons";
 import { pushToast } from "@/components/toaster";
 import { openFiltersDrawer } from "@/components/filters-drawer";
@@ -87,6 +87,18 @@ export default function WorkerBar() {
     onError: (e) => pushToast({ kind: "error", title: e instanceof Error ? e.message : "stop failed" }),
   });
 
+  // Every runtime switch lives here: one endpoint, one persisted flag each.
+  const flagM = useMutation({
+    mutationFn: ({ flag, enabled }: { flag: "discovery" | "real_apply"; enabled: boolean }) =>
+      apiFetch<{ flag: string; enabled: boolean }>(
+        `/api/worker/flags/${flag}?enabled=${enabled}`,
+        { method: "POST" },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["worker-status"] }),
+    onError: (e) =>
+      pushToast({ kind: "error", title: e instanceof Error ? e.message : "не удалось переключить" }),
+  });
+
   const refresh = useCallback(async () => {
     setRefreshing(true);
     await qc.invalidateQueries({ queryKey: ["worker-status"] });
@@ -107,15 +119,12 @@ export default function WorkerBar() {
   const state = status?.state ?? "stopped";
   const isRunning = state === "running";
   // Кнопка отражает намерение (флаг включён), а не мгновенное состояние раннера:
-  // "запускается"/"капча"/"лимит" — это включённый воркер, показываем «стоп».
+  // "запускается"/"капча" — это включённый воркер, показываем «стоп».
   const isOn = state !== "stopped";
   const isErr = !!status?.last_error;
   const dot = isErr ? "err" : isRunning ? "ok" : state === "paused_captcha" || state === "paused_limit" || state === "starting" ? "warn" : "muted";
   const label = STATE_LABEL[state];
   const busy = startM.isPending || stopM.isPending;
-  // Бесплатный тир автономным не бывает: воркер проходит очередь один раз и
-  // встаёт сам, поэтому кнопка обещает пачку, а не постоянную работу.
-  const manual = status?.mode === "manual";
   const agentRunning = (status?.agent_state ?? "stopped") === "running";
   const agentBusy = agentStartM.isPending || agentStopM.isPending;
   const [menuOpen, setMenuOpen] = useState(false);
@@ -152,7 +161,7 @@ export default function WorkerBar() {
           )}
         </span>
         <span style={{ fontWeight: 600, fontSize: 14 }}>
-          {manual ? "ручной режим" : "автоотклик"} · {label}
+          автоотклик · {label}
         </span>
       </div>
       <div style={{ height: 18, width: 1, background: "#ffffff15" }} />
@@ -164,12 +173,9 @@ export default function WorkerBar() {
       </div>
       <div style={{ height: 18, width: 1, background: "#ffffff15" }} />
       <Link href="/applications" style={{ textDecoration: "none", color: "inherit", display: "flex", alignItems: "baseline", gap: 6, fontSize: 13 }}>
-        <span style={{ color: "#ffffff80" }}>{manual ? "всего" : "сегодня"}</span>
+        <span style={{ color: "#ffffff80" }}>сегодня</span>
         <span className="mono" style={{ fontWeight: 600 }}>
-          {manual ? (status?.total_used ?? 0) : (status?.today_count ?? 0)}
-          <span style={{ color: "#ffffff50" }}>
-            /{(manual ? status?.limit_total : status?.daily_limit) ?? "—"}
-          </span>
+          {status?.today_count ?? 0}
         </span>
       </Link>
       <Tooltip text="вакансии, найденные фильтрами и ждущие отклика">
@@ -232,42 +238,36 @@ export default function WorkerBar() {
           </>
         )}
       </button>
-      <Tooltip
-        text={
-          manual
-            ? "в бесплатном режиме нужно запускать вручную: пройдём очередь один раз и остановимся"
-            : "автономный режим: агент работает, пока вы спите"
-        }
-      >
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => (isOn ? stopM.mutate() : startM.mutate())}
-        style={{
-          border: "none",
-          background: isOn ? "#ffffff15" : "var(--yellow)",
-          color: isOn ? "#F5F1E6" : "var(--ink)",
-          borderRadius: 999,
-          padding: "8px 14px",
-          fontWeight: 600,
-          fontSize: 13,
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 6,
-          cursor: busy ? "not-allowed" : "pointer",
-          opacity: busy ? 0.6 : 1,
-        }}
-      >
-        {isOn ? (
-          <>
-            <IPause size={14} /> {manual ? "остановить" : "автоотклик"}
-          </>
-        ) : (
-          <>
-            <IPlay size={14} /> {manual ? "прогнать пачку" : "автоотклик"}
-          </>
-        )}
-      </button>
+      <Tooltip text="автономный режим: поиск и обработка продолжаются, пока режим включён">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => (isOn ? stopM.mutate() : startM.mutate())}
+          style={{
+            border: "none",
+            background: isOn ? "#ffffff15" : "var(--yellow)",
+            color: isOn ? "#F5F1E6" : "var(--ink)",
+            borderRadius: 999,
+            padding: "8px 14px",
+            fontWeight: 600,
+            fontSize: 13,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            cursor: busy ? "not-allowed" : "pointer",
+            opacity: busy ? 0.6 : 1,
+          }}
+        >
+          {isOn ? (
+            <>
+              <IPause size={14} /> автоотклик
+            </>
+          ) : (
+            <>
+              <IPlay size={14} /> автоотклик
+            </>
+          )}
+        </button>
       </Tooltip>
       <div ref={menuRef} style={{ position: "relative" }}>
         <IconBtn label="ещё" icon={<span style={{ fontSize: 18, lineHeight: 1 }}>⋯</span>} onDark onClick={() => setMenuOpen((v) => !v)} />
@@ -302,8 +302,61 @@ export default function WorkerBar() {
               <span className="oc-nav-item__icon"><IBell size={16} /></span>
               <span className="oc-nav-item__label">Уведомления</span>
             </button>
+            <div style={{ height: 1, background: "var(--line)", margin: "4px 8px" }} />
+            <SwitchRow
+              label="Поиск вакансий"
+              hint="воронка: обход источников и скоринг каждые 5 минут"
+              on={(status?.discovery_state ?? "stopped") === "running"}
+              disabled={flagM.isPending}
+              onChange={(enabled) => flagM.mutate({ flag: "discovery", enabled })}
+            />
+            <SwitchRow
+              label="Реальная отправка"
+              hint={
+                status?.real_apply_allowed_by_env
+                  ? "без него ни один отклик не уходит на hh"
+                  : "заблокировано: ALLOW_REAL_APPLY=false в .env"
+              }
+              on={!!status?.real_apply_enabled}
+              disabled={flagM.isPending || !status?.real_apply_allowed_by_env}
+              onChange={(enabled) => flagM.mutate({ flag: "real_apply", enabled })}
+            />
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+
+function SwitchRow({
+  label,
+  hint,
+  on,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  on: boolean;
+  disabled?: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "6px 8px",
+      }}
+    >
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>{label}</div>
+        <div style={{ fontSize: 11, color: "var(--muted)" }}>{hint}</div>
+      </div>
+      <div style={{ marginLeft: "auto" }}>
+        <Toggle on={on} disabled={disabled} onChange={onChange} />
       </div>
     </div>
   );

@@ -6,12 +6,10 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useNavCounts } from "@/hooks/useNavCounts";
 import { formatBadge } from "@/lib/nav-counts";
-import { apiFetch } from "@/lib/api";
-import { IconBtn, LinkBtn } from "@/components/otclick/ui";
-import { useQuery } from "@tanstack/react-query";
+import { IconBtn } from "@/components/otclick/ui";
 import {
   IHome, IList, IMail, IDoc, IUser, ISettings, ILogo, ILogout,
-  ITelegram, IBolt, IChevRight, IChart,
+  ITelegram, IChevRight, IChart, ISearch,
 } from "@/components/otclick/icons";
 
 const STORAGE_KEY = "oc-sidebar-collapsed";
@@ -22,15 +20,17 @@ type Item = {
   icon: React.ReactNode;
   label: string;
   badge?: "chats" | "todo" | "notifications";
+  mobile?: boolean;
 };
 
 const NAV: Item[] = [
-  { id: "dashboard", href: "/dashboard", icon: <IHome />, label: "Главная" },
-  { id: "applications", href: "/applications", icon: <IList />, label: "Отклики" },
+  { id: "dashboard", href: "/dashboard", icon: <IHome />, label: "Главная", mobile: true },
+  { id: "vacancies", href: "/vacancies", icon: <ISearch />, label: "Вакансии", mobile: true },
+  { id: "applications", href: "/applications", icon: <IList />, label: "Отклики", mobile: true },
   { id: "analytics", href: "/analytics", icon: <IChart />, label: "Аналитика" },
-  { id: "chats", href: "/chats", icon: <IMail />, label: "Чаты", badge: "chats" },
+  { id: "chats", href: "/chats", icon: <IMail />, label: "Чаты", badge: "chats", mobile: true },
   { id: "todo", href: "/todo", icon: <IDoc />, label: "Задания", badge: "todo" },
-  { id: "account", href: "/account", icon: <IUser />, label: "Аккаунт" },
+  { id: "account", href: "/account", icon: <IUser />, label: "Аккаунт", mobile: true },
 ];
 
 export default function Sidebar({ email }: { email: string | null }) {
@@ -40,12 +40,6 @@ export default function Sidebar({ email }: { email: string | null }) {
   const counts = useNavCounts();
   const [collapsed, setCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
-
-  const { data: billing, isPending: billingPending } = useQuery({
-    queryKey: ["billing-status"],
-    queryFn: () => apiFetch<{ plan: string }>("/api/billing/status"),
-    staleTime: 60_000,
-  });
 
   useEffect(() => {
     setCollapsed(window.localStorage.getItem(STORAGE_KEY) === "1");
@@ -67,8 +61,6 @@ export default function Sidebar({ email }: { email: string | null }) {
   }
 
   const initials = email ? email.split(/[@.]/)[0].slice(0, 2).toUpperCase() : "ME";
-  // stay hidden until the plan is actually known, otherwise Pro flashes for subscribers
-  const showPro = !billingPending && billing?.plan !== "active";
 
   return (
     <aside
@@ -85,8 +77,6 @@ export default function Sidebar({ email }: { email: string | null }) {
         top: 16,
         alignSelf: "flex-start",
         height: "calc(100vh - 32px)",
-        // no animation on the first paint: the stored collapsed width is only known
-        // after hydration, and sliding it would read as a glitch rather than intent
         transition: mounted ? "width var(--dur) var(--ease)" : "none",
       }}
     >
@@ -132,7 +122,7 @@ export default function Sidebar({ email }: { email: string | null }) {
             <Link
               key={it.id}
               href={it.href}
-              className="oc-nav-item"
+              className={`oc-nav-item${it.mobile ? "" : " oc-nav-item--desktop-secondary"}`}
               aria-current={active ? "page" : undefined}
               title={collapsed ? it.label : undefined}
             >
@@ -161,18 +151,6 @@ export default function Sidebar({ email }: { email: string | null }) {
           gap: 4,
         }}
       >
-        {showPro && (
-          <LinkBtn
-            href="/billing"
-            kind="yellow"
-            size="sm"
-            icon={<IBolt size={14} />}
-            label={collapsed ? "Подписка Pro" : undefined}
-            style={{ justifyContent: "center", marginBottom: 4 }}
-          >
-            {collapsed ? "" : "Pro"}
-          </LinkBtn>
-        )}
         <a
           href="https://t.me/UnixAuto"
           target="_blank"

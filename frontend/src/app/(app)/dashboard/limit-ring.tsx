@@ -12,63 +12,45 @@ export default function LimitRing() {
     refetchInterval: 15000,
   });
 
-  // На бесплатном тарифе лимит суммарный (30 всего), а не дневной — кольцо
-  // должно показывать именно ту цифру, в которую человек упрётся.
-  const manual = status?.mode === "manual";
-  const goal = (manual ? status?.limit_total : status?.daily_limit) ?? 30;
-  const current = (manual ? status?.total_used : status?.today_count) ?? 0;
-  const pct = goal > 0 ? Math.min(current / goal, 1) : 0;
-  const C = 2 * Math.PI * 52;
+  const current = status?.today_count ?? 0;
+  const workerState = status?.state ?? "stopped";
+  const running = workerState !== "stopped";
 
   return (
-    <Card tone="light" interactive={{ href: "/billing" }} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+    <Card
+      tone="light"
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        minHeight: 154,
+      }}
+    >
       <div>
-        <div style={{ fontSize: 17, fontWeight: 700 }}>
-          {manual ? "Бесплатные отклики" : "Лимит на сегодня"}
+        <div style={{ fontSize: 17, fontWeight: 700 }}>Отклики сегодня</div>
+        <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 4, maxWidth: 190 }}>
+          Счётчик отправленных откликов за текущий день.
         </div>
-        <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 4, maxWidth: 170 }}>
-          {manual
-            ? `${current} из ${goal} — дальше нужен тариф`
-            : "Бот сам остановится при достижении лимита"}
-        </div>
-        <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>
-          нужно больше — открыть тарифы →
+        <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 10 }}>
+          {running ? "обработка включена" : "обработка остановлена"}
         </div>
       </div>
-      <div style={{ position: "relative", width: 130, height: 130 }}>
-        <svg width="130" height="130" viewBox="0 0 130 130">
-          <circle cx="65" cy="65" r="52" stroke="var(--bg-deep)" strokeWidth="10" fill="none" />
-          <circle
-            cx="65"
-            cy="65"
-            r="52"
-            stroke="var(--coral)"
-            strokeWidth="10"
-            fill="none"
-            strokeDasharray={C}
-            strokeDashoffset={C * (1 - pct)}
-            strokeLinecap="round"
-            transform="rotate(-90 65 65)"
-          />
-        </svg>
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "flex",
-            flexDirection: "column",
-            justifyContent: "center",
-            alignItems: "center",
-          }}
-        >
-          <div style={{ fontSize: 10, color: "var(--muted)", letterSpacing: 0.5 }}>
-            {manual ? "всего" : "цель"}
-          </div>
-          <div style={{ fontSize: 26, fontWeight: 800, lineHeight: 1 }}>{goal}</div>
-          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>
-            {current} отправлено
-          </div>
-        </div>
+      <div
+        style={{
+          width: 130,
+          height: 130,
+          borderRadius: "50%",
+          background: "var(--bg-deep)",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+          alignItems: "center",
+          flexShrink: 0,
+        }}
+      >
+        <div style={{ fontSize: 10, color: "var(--muted)", letterSpacing: 0.5 }}>сегодня</div>
+        <div style={{ fontSize: 30, fontWeight: 800, lineHeight: 1.1 }}>{current}</div>
+        <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 2 }}>отправлено</div>
       </div>
     </Card>
   );

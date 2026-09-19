@@ -7,7 +7,6 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.db.supabase import anon_client
-from app.services import plan as plan_service
 
 logger = logging.getLogger(__name__)
 
@@ -64,16 +63,3 @@ async def get_current_user(
     _purge_expired(now)
     _token_cache[key] = (now + _TOKEN_CACHE_TTL_S, user.id)
     return user.id
-
-
-async def require_active_plan(user_id: str = Depends(get_current_user)) -> str:
-    """Gate genuinely paid features: 402 without an active subscription.
-
-    NOT the apply worker — free users run it too, capped by plan.limits_for.
-    """
-    if not await plan_service.check_access(user_id):
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail="plan_inactive: no active subscription",
-        )
-    return user_id

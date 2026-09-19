@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **`frontend/`** — Next.js 16 + React 19 + Tailwind v4 (Supabase SSR auth)
 - **`hh-applicant-tool/`** — existing Python CLI tool (source to copy from, not modify)
 - **`ext/`** — Firefox extension (WXT, MV2): autofills Google/Yandex/MS Forms + an AI chat tab, served by `/api/extension/*`. Forked from `extension/` (a gitignored copy of the OtclickUS extension kept as a porting source — never edit that copy). See `ext/README.md`
-- **`AUDIT.md`** — production-readiness audit: what's fixed, what's still open (older items; the CloudPayments amount-check and manual-cancel entries are obsolete — billing is Polar now). Read it before shipping anything near billing or the worker.
+- **`AUDIT.md`** — production-readiness audit: what's fixed, what's still open. Its billing entries are obsolete: there is no billing in this build (see "No billing"). Read it before shipping anything near the worker.
 
 Open-source implications for this file:
 - README.md is now the canonical **public** entrypoint (setup, features, roadmap, contributing) — keep this CLAUDE.md focused on internal architecture/dev guidance, don't duplicate README content, update both when a change affects both audiences.
@@ -97,6 +97,9 @@ FERNET_KEY=   # generate: python -c "from cryptography.fernet import Fernet; pri
 OPENAI_API_KEY=
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-5.4-nano
+# function_calling is portable across OpenAI-compatible providers; json_schema
+# only where the provider really implements OpenAI Structured Outputs.
+OPENAI_STRUCTURED_OUTPUT_METHOD=function_calling
 
 # hh OAuth app. Empty → the official Android app's borrowed keys, which answer
 # `error=geo_forbidden` on /oauth/authorize outside their region (login succeeds,
@@ -109,12 +112,9 @@ HH_REDIRECT_URI=
 # cron endpoints (shared secret for /internal/cron/*: refresh-tokens, prune-notifications)
 INTERNAL_CRON_TOKEN=
 
-# Polar.sh billing (merchant of record). Prices/intervals live in Polar products.
-POLAR_ACCESS_TOKEN=
-POLAR_WEBHOOK_SECRET=       # Standard Webhooks secret — never exposed
-POLAR_SERVER=sandbox        # sandbox | production
-POLAR_PRODUCT_SPRINT=       # product ids differ per Polar organisation
-POLAR_PRODUCT_MONTH=
+# Hard kill switch for every real response to hh (see "Two-key send gate").
+# Discovery, scoring, review and cover-letter drafts all work with it false.
+ALLOW_REAL_APPLY=false
 ```
 
 All non-secret config (rate limits, plan price, prompts, `REFRESH_THRESHOLD_DAYS`) has defaults in `config.py`.
@@ -131,19 +131,24 @@ api/
   filters.py                 — /api/filters/* (CRUD + vacancy preview)
   blacklist.py               — /api/blacklist/* (employer blacklist CRUD)
   captcha.py                 — /api/captcha/* (pending list, solve, dismiss)
-  worker.py                  — /api/worker/* (start/stop apply loop — free too, agent/start + agent/stop — paid, status)
+  worker.py                  — /api/worker/* (start/stop apply loop, agent/start|stop, flags/{flag}, status)
   qa.py                      — /api/qa (list/upsert/delete user-curated Q&A memory)
   forms.py                   — /api/forms/drafts (list, approve→post to hh, discard)
   chats.py                   — /api/chats (list negotiations, get messages, send message)
   recruiter.py               — /api/recruiter (escalation drafts send/discard, todos done/dismiss)
   analytics.py               — /api/analytics?days= (syncs hh negotiation states, then one RPC)
+  search_sources.py          — /api/search-sources/* (CRUD, URL preview, manual run + run poll)
+  vacancies.py               — /api/vacancies/* (backlog, decision, enrich, cover letter, maintenance, calibration)
+  selection_rules.py         — /api/selection-rules/* (proposals, approve/reject, toggle, rescore/archive impact)
+  send_queue.py              — /api/send-queue/* (queue/cancel/reset, bulk, sender control)
+  candidate_context.py       — /api/candidate-context (what the funnel actually knows about the candidate)
   extension.py               — /api/extension/* (context, fill, chat, qa, resume-file) for the Firefox extension
-  billing.py                 — /api/billing/* (subscribe→Polar checkout URL, portal, status)
-  webhooks.py                — /api/webhooks/polar (Standard Webhooks signature, no JWT)
   internal.py                — /internal/cron/* (X-Internal-Token via hmac.compare_digest, no JWT) → refresh-tokens, prune-notifications
   _debug.py                  — debug-only routes, mounted iff DEBUG_ENDPOINTS
   router.py                  — aggregates all routers
 ai/
+  openai_compat.py           — CompatibleChatOpenAI (portable structured output) + provider headers
+  cover_letter_prompt.py     — the rich v2 cover-letter system prompt
   agent.py                   — HHAgent: one ChatOpenAI shared by every AI path (write_form_answers, write_cover_letter, answer_recruiter, answer_recruiter_choice, filter_relevant_vacancies) — see below
   prompts.py                 — system prompts + builders; sanitize_ai_text (strip md/em-dashes)
   recruiter_tools.py         — langchain @tool defs for the recruiter agent (answer_recruiter_question / escalate_to_human / make_todo) + match_label; every one of them writes a draft, none post to hh
@@ -163,6 +168,26 @@ hh/
   datatypes.py               — hh API payload typed dicts
   user_agent.py              — random Android UA generator
 services/
+  # ── vacancy funnel (sources → scoring → rules → queue → statistics) ──
+  search_sources.py          — pure hh search-URL parser (keeps duplicate query keys)
+  search_source_service.py   — sources CRUD + per-source outcome stats
+  source_discovery.py        — paginate hh search over the web session → vacancy_pipeline
+  source_statistics.py       — atomic cumulative per-source counters (RPC)
+  vacancy_pipeline.py        — persistence + optimistic transitions + scoring claim leases
+  vacancy_review_service.py  — backlog/read model, full-page enrichment, user decisions
+  pipeline_scoring.py        — hard filter (rules + blacklist) → structured LLM score
+  pipeline_cover_letters.py  — structured rich draft, generate/save, approval invalidation
+  pipeline_maintenance.py    — rescore stale, retry incomplete, regenerate stale covers, bulk archive
+  selection_rules.py         — LLM rule proposals from a reject + approval → active versioned rule
+  selection_rule_actions.py  — rule toggle/delete/regenerate + rescore/archive impact
+  send_queue_service.py      — exact-text (SHA-256) approval + durable send jobs
+  send_runtime_control.py    — sender batches, desired_state, DB lease + progress
+  bulk_send_queue.py         — explicit bulk queueing of approved letters
+  persistent_sender.py       — leased sender loop (still behind the two-key send gate)
+  search_run_service.py      — durable manual discovery/scoring runs (search_runs)
+  calibration_report.py      — score vs. the user's actual decisions
+  context_fingerprints.py    — deterministic score/cover context hashes → stale detection
+  candidate_context_service.py — candidate context built from the user's resume + qa_memory
   hh_auth.py                 — async OAuth job manager + Fernet encrypt/decrypt + persist
   hh_credentials.py          — load ApiClient from stored creds; persist if auto-refreshed
   token_refresh.py           — refresh_user (one) + refresh_due (near-expiry cron batch)
@@ -174,8 +199,7 @@ services/
   form_drafts.py             — form-draft persistence + approval; approve() re-fetches xsrf, posts to hh
   cover_letter.py            — cover letter gen with PG cache + rand_text fallback
   blacklist.py               — employer blacklist CRUD + bulk auto-blacklist
-  billing.py                 — Polar checkout/portal + webhook verify, idempotent order, plan state
-  plan.py                    — limits_for/get_limits (free vs paid caps) + has_access/filter_paid (paid-only features)
+  plan.py                    — compatibility shim: no commercial quotas, everyone is "auto"/unlimited
   captcha.py                 — captcha_requests create/solve/dismiss helpers
   recruiter.py               — recruiter-chat persistence + new_employer_message cursor; shared by tools/poller/API
   chatik.py                  — chatik.hh.ru web API client (recent_chats/chat_messages/fetch_messages); real source of truth for chats — legacy negotiations API is frozen. Reads over stored web session (same cookies as form_filler), no browser
@@ -190,7 +214,9 @@ services/
   candidate_context.py       — extension candidate context: load_resume + _resume_summary + qa_memory.prompt_block, plus the verbatim `facts` dict
   extension_resume.py        — hh resume PDF bytes for the extension's <input type=file>
 schemas/
-  auth.py, resumes.py, filters.py, blacklist.py, billing.py, recruiter.py — Pydantic models
+  auth.py, resumes.py, filters.py, blacklist.py, recruiter.py — Pydantic models
+  vacancies.py, search_sources.py, selection_rules.py, send_queue.py,
+  candidate_context.py, calibration.py — funnel models
 ```
 
 ## Key Design Patterns
@@ -229,9 +255,31 @@ Negotiation states (used only for the «Отказ» tag) are cached per user fo
 
 **Analytics funnel**: `GET /api/analytics?days=` → `negotiation_sync.sync_states` (paged `GET /negotiations`, `order_by=updated_at`, writes only actual state changes so `hh_state_at` really means "when it changed"; throttled to 5 min per user, never raises) → `analytics.summary` → `analytics_summary()` in PG. Funnel: AI-checked → AI-kept → sent → viewed (`hh_viewed`) → replied (`hh_state` moved OR a `recruiter_chats` row saw an employer message) → invited (`hh_state='invitation'`). "Sent" counts only `sent`/`form_sent` rows — `form_required`/`failed`/`captcha` never reached hh and land in the failures breakdown instead. Rates are `null` when the denominator is 0; the UI prints "—", never a fake 0%. Attribution comes from `applications.filter_id` (passed `producer → ApplyJob → apply_one`) and `employer_name`, both set on new rows only — historical rows show up as "без фильтра".
 
-**Plan → limits (no trial, migration 026)**: gating is not a gate anymore, it's "which caps apply". `plan.limits_for(profile)` → `{mode, daily, total}`: `active`/`cancelled` inside `plan_expires_at` → `auto` + `PAID_DAILY_APPLIES`/day; everything else (`free`, expired paid) → `manual` + a lifetime `FREE_TOTAL_APPLIES`. `BILLING_ENABLED=False` (self-host default) short-circuits to unlimited+auto and never reads the plan — without it a self-hoster is capped at 30 applies inside their own instance. The free total is counted straight off `applications` where `status in ('sent','form_sent')` (no counter column; `form_required`/`failed`/`captcha` never reached hh and must not burn quota) and surfaces as `limiter.check` → `"limit_total"`. `has_access` survives only as "is this a paying customer" — billing status and `require_active_plan`, which now gates just the recruiter agent, not worker start. In `manual` mode the runner does **one** producer pass, drains the queue, then clears `worker_enabled` and stops (`_finish_batch`, state `idle`) — the flag must be cleared first or `worker_main` respawns it every 15 s and "one batch" becomes the old infinite loop. `limit_total` stops the runner the same way. `worker_main` gates only the agent loop on `plan.filter_paid`; the apply loop runs for free users too.
+**No billing.** Polar checkout, webhooks, plan gating and free/paid apply quotas were removed. `services/plan.py` survives as a compatibility shim (`has_access` → True, `limits_for` → `{"mode": "auto", "daily": None, "total": None}`) and `worker/limiter.py` keeps only the counters (`increment_apply_counter` RPC, `sent_total`) for status and analytics. `limiter.check` always returns `"allowed"`; the guard that actually matters is the two-key send gate below. `profiles` keeps its historical plan columns — nothing reads them.
 
-**Billing (Polar.sh, merchant of record)**: `/api/billing/subscribe` → `billing.polar_checkout_url` creates a hosted Checkout Session with `external_customer_id = user_id` → the frontend redirects there. Polar charges the card and POSTs to `/api/webhooks/polar`, verified by the SDK's `validate_event` (Standard Webhooks — never hand-rolled HMAC; note it base64-encodes the secret internally). Events handled: `order.paid` (records the payment idempotently — Polar order id → `payments.provider_payment_id` UNIQUE — then activates), `subscription.active`/`uncanceled` (activate), `subscription.canceled` (plan `cancelled`, paid period kept), `subscription.revoked` (back to `free`, **not** to a locked account). The access window is the subscription's `current_period_end`, taken from the provider — the old code guessed it from the charged amount and could not tell two same-priced plans apart. The user is matched by `customer.external_id`. In SDK models the event type field is `TYPE` (alias `type`), so `process_polar_event` reads both. The endpoint always answers 200 once the signature is valid, or Polar retries forever. Cancellation is the Polar **customer portal** (`/api/billing/portal`), which closes the old "real cancel is manual via support" debt.
+## Vacancy funnel: sources → scoring → rules → queue → statistics
+
+A persistent funnel in PostgreSQL, separate from the legacy `vacancy_producer → ApplyJob → apply_one` loop and independent of it. `asyncio.Queue` is not the source of truth here; `vacancy_pipeline` is. Migrations `035`, `037`–`045`.
+
+**1. Sources** (`search_sources.py` — pure parser, `search_source_service.py` — CRUD, `source_discovery.py` — the worker half). The user pastes an hh.ru/hh.kz search URL; it is parsed into an **ordered list of `{key, value}` pairs**, not an object — hh repeats `area`/`professional_role`/`search_field`, and a dict would silently drop all but the last. Discovery walks `GET /search/vacancy` over the **web session** (`hh/web.py` + `find_state("vacancySearchResult")`), forcing `order_by=publication_time`. The cursor is the previous run's first-page ids (`cursor.head_ids`): the scan stops at the first overlap — 3 pages on a first run, up to 20 incrementally, and `cursor_overlap_not_found_within_scan_limit` is recorded when even 20 pages did not reach known ground. Vacancies the user already applied to are skipped; everything else is upserted into `vacancy_pipeline` (unique on `(user_id, hh_vacancy_id)`) plus a `vacancy_pipeline_sources` link row, so one vacancy found by three sources is stored once and still attributed to all three.
+
+**2. Scoring** (`pipeline_scoring.py`). `MAX_SCORE_PER_RUN=15` per cycle. Each row is claimed with a **lease token** (`vacancy_pipeline.claim_for_scoring` → uuid, 10-minute lease): every terminal write carries `expected_claim_token`, so a reaped or superseded scorer cannot overwrite a newer attempt or a user's decision. Order: full-page enrichment → hard filter → structured LLM score → `scored` / `rejected_by_rule` / `score_error`. The score is four components of 0–25 (`role_fit`, `seniority_scale_fit`, `requirements_match`, `context_fit`) summed by the application, never by the model, plus pros/risks/unknowns/confidence. Transient hh failures (`web.HHTransientError`, raised after the bounded retry in `hh/web.py`) send the row back to `discovered` with `next_score_at` 60 s → 300 s, at most `MAX_TRANSIENT_SCORE_ATTEMPTS=3`; two consecutive transient failures open a per-run circuit breaker instead of burning the whole batch. `reap_expired_vacancy_scoring()` (RPC, called at the top of every worker pass) recovers orphaned claims and turns the third expiry into a visible `score_error`.
+
+Automatic rejects are **explainable and user-derived only**: approved `hard_reject` rules and the existing employer `blacklist`. `auto_reject_details` stores a snapshot per condition (which rule, which version, which terms matched), so the UI can say *why*. There is no hardcoded profession list — fit criteria come from the account's own data.
+
+**Candidate context** (`candidate_context_service.py`) is what grounds scoring, cover letters and rule proposals: the newest synced resume (`form_filler.load_resume` + `_resume_summary`) plus `qa_memory`, shaped as `{version, source_name, profile, facts}` with a stable `fact_key` per fact (`experience_N`, `skills`, `about`, `qa_N`). `version` is derived from `resumes.synced_at`, so re-syncing a resume correctly marks old scores and letters stale. No candidate tables, nothing to seed.
+
+**3. Rules** (`selection_rules.py`, `selection_rule_actions.py`). When the user rejects a vacancy with a reason, the LLM may propose a rule (`hard_reject` or `scoring_preference`) with an impact preview — a `vacancy_rule_proposals` row, never an active rule. Only explicit approval creates a versioned `vacancy_selection_rules` row. Rules are soft-deleted (`deleted_at`) and can be superseded (`superseded_by_rule_id`) so a score's `applied_rule_versions` stays meaningful. Scoring sees active, non-deleted, matching rules only; proposals are invisible to it.
+
+**4. Queue** (`send_queue_service.py`, `send_runtime_control.py`, `persistent_sender.py`, `bulk_send_queue.py`). `pipeline_cover_letters.generate_draft` writes a structured rich draft (assembled by the application from explicit blocks, so a model cannot satisfy the contract with two sentences) whose `cover_letter_meta` cites the `fact_key`s it used. Approval stores the **SHA-256 of the exact text**; editing the letter clears the approval, and an approved letter cannot be edited while its send job is live. Queued jobs are durable rows in `application_send_queue` (unique per vacancy), grouped into `application_send_batches` and driven by `application_send_control.desired_state` (`paused` / `running` / `stop_after_current`) under a Postgres lease (`acquire_application_send_lease`) that enforces one sender per account and a `safety_interval_seconds` between cycles.
+
+**Two-key send gate.** `settings.ALLOW_REAL_APPLY` (deployment, `.env`) **and** `profiles.real_apply_enabled` (per user, UI switch) must both be on or nothing reaches hh. The check lives in `form_filler.submit_response`, which is the single choke point every real submit routes through — the legacy apply loop, approved form drafts and the funnel sender alike. Do not add a second submit path that bypasses it.
+
+**5. Statistics.** Per-source cumulative counters (`vacancy_search_sources.stats`: new / duplicate / hard_filtered / score_error) are bumped through the atomic `increment_vacancy_source_stats` RPC, kept separate from the cursor so discovery and scoring can write concurrently. `search_source_service` adds current per-source outcome breakdowns, `pipeline_maintenance.get_status` reports stale/incomplete counts, and `calibration_report.py` compares the score against the user's actual accept/reject decisions. UI: `/vacancies/sources`, `/vacancies/stats`.
+
+**Manual runs** (`search_run_service.py`, migration 042). `POST /api/search-sources/run-now` does not run hh in the API process: it enqueues a `search_runs` row the worker claims via `claim_next_search_run()`. A partial unique index allows one active run per user (a double-click or second tab cannot start two concurrent hh cycles), and a claimed run older than two hours is failed as a crash recovery so the index can never wedge the account.
+
+**Runtime switches** (`worker_control.py`, migration 045). Every switch is persisted in `profiles` and flipped from the UI, never from env or a console: `apply` (`worker_enabled`, the legacy auto-apply runner), `discovery` (`discovery_enabled`, the funnel's discovery + scoring cycle, every `DISCOVERY_INTERVAL_S=5 min`), `agent` (`agent_enabled`) and `real_apply` (`real_apply_enabled`). `worker_main._reconcile` reads all of them in one pass (`active_user_flags`), recovers expired scoring leases, runs at most one manual search job, and reconciles the per-user runners. The three loops are independent: none implies another.
 
 **Browser extension (`ext/`)**: the Firefox add-on fills third-party application forms — a separate surface from the hh worker, sharing the same account and Q&A memory. `snapshot.ts` (ported from OtclickUS) collects the page's fields across shadow DOM and ARIA widgets; `deterministic-fill.ts` fills verbatim facts and attaches the hh resume PDF with no LLM call; everything else goes to `POST /api/extension/fill`, where `candidate_context.build` assembles resume + `qa_memory` and `HHAgent.fill_form_fields` decides one value per field. A value that matches no real option, or that the context doesn't support, is **dropped** rather than guessed, and the extension never clicks submit. Whatever the user corrects afterwards is posted to `/api/extension/qa` and lands in the same `qa_memory` the hh form drafts read. The chat tab is stateless server-side: the transcript lives in `browser.storage.local` and travels with each request. Auth reuses the web session — a content script on the Otclick origin reads the Supabase cookie and hands it to the background (Firefox has no `externally_connectable`).
 
@@ -255,10 +303,12 @@ Negotiation states (used only for the «Отказ» tag) are cached per user fo
 
 ## Frontend (`frontend/src/`)
 
-Next.js App Router. Authed pages under `app/(app)/` (dashboard, applications, analytics, billing + billing/success, account, notifications, chats, todo) behind `(app)/layout.tsx`; public `auth/`, `onboarding/`, landing `page.tsx`. Supabase SSR auth split across `lib/supabase/{client,server,middleware}.ts`.
+Next.js App Router. Authed pages under `app/(app)/` (dashboard, vacancies, applications, analytics, account, notifications, chats, todo) behind `(app)/layout.tsx`; public `auth/`, `onboarding/`, landing `page.tsx`. Supabase SSR auth split across `lib/supabase/{client,server,middleware}.ts`.
 
 - `lib/api.ts` — `apiFetch`: attaches the Supabase session JWT as `Bearer` to every backend call (backend `deps.get_current_user` validates it). Base URL from `NEXT_PUBLIC_API_URL`.
 - `hooks/` — `useHHConnect`, `useFilters`, `useBlacklist`, `useChats`, `useRecruiter`, `useFormDrafts`, `useNavCounts` wrap the backend endpoints.
+- `app/(app)/vacancies/` — the funnel UI: review backlog (`page.tsx` + `cover-letter-editor.tsx`), `sources/`, `rules/` + `rules/manage/`, `send/` + `sender-control.tsx` + `send-problems.tsx`, `bulk/`, `run/`, `stats/`, `profile/` (what the funnel knows about the candidate). `layout.tsx` holds the section nav.
+- `components/otclick/worker-bar.tsx` — the runtime switches: автоотклик, ИИ-агент, and in the ⋯ menu «Поиск вакансий» (discovery) and «Реальная отправка» (`POST /api/worker/flags/{flag}?enabled=`).
 - `components/otclick/` — app chrome (sidebar, worker-bar, hh-banner, captcha-banner, command-palette, onboarding-modal, qa-memory, `landing/`, shared `ui.tsx`/`icons.tsx`); top-level `captcha-modal`, `filters-drawer`, `toaster`.
 - `lib/` also holds pure, unit-tested helpers (`applications-url`, `command-registry`, `nav-counts`, `status`) — `npm test` runs them in CI.
 - Notifications stream in via Supabase Realtime (matches backend `notifications` inserts).
@@ -269,7 +319,7 @@ Env: `frontend/.env.local` (see `.env.local.example`) — `NEXT_PUBLIC_API_URL=h
 
 Migrations live in `infra/supabase/migrations/` (numbered SQL files, `001`–`025`). Applied by the `migrate` service against the local stack, tracked in `public.schema_migrations` — see Commands.
 
-- `profiles` — user profiles + plan state (`plan`, `trial_ends`, `plan_expires_at`, `polar_customer_id`/`polar_subscription_id`, legacy `cp_subscription_id`), `worker_enabled` / `agent_enabled`, `onboarded`, `timezone`, `negotiations_synced_at`. **`authenticated` may UPDATE only `onboarded` and `timezone`** (migration 024) — every billing/worker field is service_role-only, since PostgREST is exposed to the browser through Kong
+- `profiles` — user profiles + runtime switches `worker_enabled` / `discovery_enabled` / `agent_enabled` / `real_apply_enabled` (migration 045), `onboarded`, `timezone`, `negotiations_synced_at`, plus dead plan columns kept by older migrations. **`authenticated` may UPDATE only `onboarded` and `timezone`** (migration 024) — every switch is service_role-only and moves through `/api/worker/*`, since PostgREST is exposed to the browser through Kong
 - `hh_credentials` — encrypted hh tokens + `web_cookies_encrypted` per user (full RLS denial, service_role only)
 - `resumes` — user resume list synced from hh, unique on `(user_id, hh_resume_id)`; a new filter seeds its `text` from `title`
 - `filters` — saved vacancy search filters per user (`name`, `ai_filter_enabled`); `resume_id` is `ON DELETE SET NULL` (migration 021 — CASCADE used to wipe filters on reconnect). Search fields track hh's live params (migrations 029–031): `excluded_text` (hh-side word exclusion, replaced the client-side `excluded_regex`), `search_field` (default `name` — matching descriptions too was the main source of junk), `period` (default 30 days), `work_format`/`employment_form` (hh deprecated `schedule`/`employment`). No `professional_role`: it was seeded from the resume and AND-ed on top of `text`, dropping correct vacancies the employer had tagged loosely (migration 031). No salary filter: hh reads `salary` as RUR unless `currency` is passed, so a tenge number silently searched for ~4× the money
@@ -278,7 +328,7 @@ Migrations live in `infra/supabase/migrations/` (numbered SQL files, `001`–`02
 - `apply_counters` — per-user daily/hourly apply tallies (limiter)
 - `cover_letters_cache` — generated cover letters keyed on `(vacancy_id, resume_id)`
 - `vacancy_cache` — cached hh vacancy payloads
-- `payments` — payment transactions (`provider='polar'`), unique on `provider_payment_id` (= Polar order id)
+- `payments` — legacy payment table from migrations 006/027; no code reads or writes it
 - `notifications` — worker→UI events (read via Realtime)
 - `captcha_requests` — pending captcha challenges raised by worker
 - `form_drafts` — AI-filled test answers awaiting user approval (service_role only)
@@ -290,11 +340,21 @@ Migrations live in `infra/supabase/migrations/` (numbered SQL files, `001`–`02
 - `qa_memory` — user-curated Q&A (only answers the user EDITED when approving a form draft, plus manual entries), unique on `(user_id, question)`; service_role only. `services/qa_memory.prompt_block` injects it into form-test and recruiter prompts (migration 022)
 - `captcha-screenshots` — Supabase Storage bucket for captcha images
 
+Vacancy funnel tables (migrations 035, 037–045; all service_role only, RLS on with no anon/authenticated policy — the browser must go through the API so lifecycle transitions and approval cannot be bypassed via PostgREST):
+
+- `vacancy_search_sources` — a saved hh search: `query_pairs` (ordered array, duplicate keys preserved), `cursor` (opaque, currently `head_ids` + last-run stats), `stats` (cumulative counters), `enabled`, last checked/success/error
+- `vacancy_pipeline` — one row per `(user_id, hh_vacancy_id)`: snapshot, `status` (16 states from `discovered` to `sent`), `score`/`score_details`/`score_explanation`, `hard_filter_reason`/`auto_reject_details`, `cover_letter_draft`/`cover_letter_meta`/`approved_letter_hash`, retry state (`score_attempts`, `next_score_at`, `last_score_error`) and lease state (`score_claim_token`, `score_lease_expires_at`, `score_lease_failures`)
+- `vacancy_pipeline_sources` — which sources found a vacancy (many-to-many)
+- `vacancy_rule_proposals` / `vacancy_selection_rules` — proposed vs. approved selection rules; rules are versioned, soft-deletable and supersedable
+- `application_send_queue` / `application_send_batches` / `application_send_control` — durable approved send jobs, their batch, and the per-user sender state + DB lease
+- `search_runs` — durable manual discovery/scoring runs; one active run per user (partial unique index)
+- `cover_letters_cache.prompt_version` (migration 043) — invalidates letters generated by the old short prompt
+
 Migration 023 adds analytics: `applications.hh_state`/`hh_state_at`/`hh_viewed` (mirrored negotiation state — the only honest source for "invited to interview"), `applications.filter_id`/`employer_name` (breakdown attribution), `profiles.negotiations_synced_at`, and the `analytics_summary(user_id, days)` PG function that returns every metric as one jsonb (service_role only; revoked from anon/authenticated).
 
 Migrations 010–015 add the recruiter tables, `worker_enabled`, `form_drafts`, recruiter `question_text`, `worker_runtime`, and the relevance cache + `filters.ai_filter_enabled`. 016–022: `agent_enabled`, `onboarded`, `filters.name`, `resumes.professional_roles`, the two `ON DELETE SET NULL` fixes, `qa_memory`.
 
-Migration 024 locks down `profiles`: `REVOKE UPDATE/INSERT/DELETE` from `anon`/`authenticated`, then `GRANT UPDATE (onboarded, timezone)` back — without it any logged-in user could `PATCH /rest/v1/profiles` themselves a paid plan. It also adds `SET search_path` to the `SECURITY DEFINER` `handle_new_user`.
+Migration 024 locks down `profiles`: `REVOKE UPDATE/INSERT/DELETE` from `anon`/`authenticated`, then `GRANT UPDATE (onboarded, timezone)` back — without it any logged-in user could `PATCH /rest/v1/profiles` themselves a runtime switch (and, back when billing existed, a paid plan). It also adds `SET search_path` to the `SECURITY DEFINER` `handle_new_user`.
 
 Migration 025 adds two service_role-only functions: `increment_apply_counter(user_id, date)` (atomic daily cap) and `prune_notifications(read_days, keep_days)` (retention), plus an index on `notifications.created_at`.
 

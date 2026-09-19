@@ -54,16 +54,12 @@ async def test_disable_worker_clears_flag():
 async def _status(runtime_row: dict | None) -> object:
     from app.api import worker as worker_api
 
+    flags = {"apply": True, "discovery": False, "agent": False, "real_apply": False}
     with (
-        patch.object(worker_api.worker_control, "is_enabled", AsyncMock(return_value=True)),
         patch.object(
-            worker_api.worker_control, "is_agent_enabled", AsyncMock(return_value=False)
+            worker_api.worker_control, "get_flags", AsyncMock(return_value=flags)
         ),
         patch("app.services.worker_runtime.get", AsyncMock(return_value=runtime_row)),
-        patch(
-            "app.services.plan.get_limits",
-            AsyncMock(return_value={"mode": "auto", "daily": 100, "total": None}),
-        ),
         patch("app.worker.limiter.sent_total", return_value=12),
         patch("app.worker.limiter._read_day_count", return_value=3),
         patch("app.worker.limiter._tz_for_user", return_value=SimpleNamespace()),
