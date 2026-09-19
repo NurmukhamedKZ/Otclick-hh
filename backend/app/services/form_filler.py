@@ -579,6 +579,25 @@ async def submit_response(
     Returns (status, error): "sent"/"form_sent" on accept, "failed" + reason
     otherwise (network/parse error, dead session, or hh rejected).
     """
+    # Single choke point for every real submit — legacy apply loop, approved
+    # form drafts and the funnel's send queue all land here. Two keys: the
+    # deployment env gate and the user's own UI switch.
+    if not settings.ALLOW_REAL_APPLY:
+        logger.warning(
+            "fill: real HH submit blocked by ALLOW_REAL_APPLY=false vacancy=%s",
+            vacancy_id,
+        )
+        return "failed", "real_apply_disabled"
+    from app.services import worker_control
+
+    if not (await worker_control.get_flags(user_id))["real_apply"]:
+        logger.warning(
+            "fill: real HH submit blocked by user switch vacancy=%s user=%s",
+            vacancy_id,
+            user_id,
+        )
+        return "failed", "real_apply_disabled_by_user"
+
     loop = asyncio.get_running_loop()
     try:
         session = await load_web_session(user_id)

@@ -338,10 +338,9 @@ OPENAI_MODEL=gpt-5.4-nano
 # Shared secret for the /internal/cron/* endpoints (token refresh, notification pruning)
 INTERNAL_CRON_TOKEN=your-cron-token
 
-# Polar.sh billing — optional for self-hosted (leave BILLING_ENABLED=false)
-POLAR_ACCESS_TOKEN=
-POLAR_WEBHOOK_SECRET=
-POLAR_SERVER=sandbox
+# Hard kill switch for every real response to hh. Discovery, scoring, review
+# and letter drafts work with it off; a user also flips their own switch in the UI.
+ALLOW_REAL_APPLY=false
 ```
 
 ### AI features
@@ -412,7 +411,6 @@ curl -fsS -X POST http://127.0.0.1:8000/internal/cron/prune-notifications \
 | **hh.ru Integration** | Playwright (headless Chromium) + REST API |
 | **AI/LLM** | OpenAI (GPT) via langchain |
 | **Token Encryption** | Fernet (symmetric, cryptography) |
-| **Billing** | Polar.sh — merchant of record (optional) |
 | **Deployment** | Docker Compose (backend + worker + frontend) |
 | **Package Manager** | uv (Python), npm (frontend) |
 
@@ -435,8 +433,10 @@ otclick/
 │   │   │   ├── chats.py         # Recruiter chat messages
 │   │   │   ├── recruiter.py     # Recruiter escalation/todos
 │   │   │   ├── analytics.py     # Funnel/KPI analytics
-│   │   │   ├── billing.py       # Subscription management
-│   │   │   ├── webhooks.py      # Polar webhook
+│   │   │   ├── search_sources.py # Vacancy funnel: sources + manual run
+│   │   │   ├── vacancies.py     # Vacancy funnel: review, letters, maintenance
+│   │   │   ├── selection_rules.py # Learned rule proposals + lifecycle
+│   │   │   ├── send_queue.py    # Approved send queue + sender control
 │   │   │   ├── qa.py            # User-curated Q&A memory
 │   │   │   ├── extension.py     # Firefox extension: context/fill/chat/qa/resume-file
 │   │   │   └── internal.py      # Cron endpoints (token refresh, retention)

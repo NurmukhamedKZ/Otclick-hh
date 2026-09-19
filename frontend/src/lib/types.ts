@@ -71,16 +71,28 @@ export type BlacklistCreate = {
 export type WorkerStatus = {
   state: "starting" | "running" | "paused_captcha" | "paused_limit" | "idle" | "stopped";
   agent_state: "running" | "stopped";
+  /** Воронка: поиск по источникам + скоринг. Свой переключатель, не apply-цикл. */
+  discovery_state: "running" | "stopped";
   today_count: number;
-  daily_limit: number;
+  daily_limit: number | null;
   queued: number;
   next_run_at: string | null;
   last_error: string | null;
   skipped_has_test: number;
-  /** "manual" = бесплатный тир: одна пачка по кнопке, суммарный лимит. */
-  mode: "manual" | "auto";
+  /** Совместимость: в self-hosted сборке режим всегда автономный, без квоты. */
+  mode: "auto";
   limit_total: number | null;
   total_used: number;
+  /** Реальная отправка требует И env-флага, И переключателя пользователя. */
+  real_apply_enabled: boolean;
+  real_apply_allowed_by_env: boolean;
+};
+
+export type WorkerFlags = {
+  apply: boolean;
+  discovery: boolean;
+  agent: boolean;
+  real_apply: boolean;
 };
 
 export type WorkerStartResponse = {
@@ -131,29 +143,6 @@ export type CaptchaRequest = {
   solved: boolean;
   created_at: string;
   solved_at: string | null;
-};
-
-export type SubscribeResponse = {
-  checkout_url: string;
-};
-
-export type PortalResponse = {
-  portal_url: string;
-};
-
-export type PaymentEntry = {
-  provider_payment_id: string;
-  amount: number | null;
-  status: string;
-  created_at: string | null;
-};
-
-export type BillingStatus = {
-  plan: string;
-  plan_expires_at: string | null;
-  next_charge_at: string | null;
-  has_access: boolean;
-  history: PaymentEntry[];
 };
 
 export type NotificationRow = {

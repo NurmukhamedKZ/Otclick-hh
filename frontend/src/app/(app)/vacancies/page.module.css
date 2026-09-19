@@ -1,0 +1,247 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.headerRow {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.title {
+  font-size: 20px;
+  font-weight: 750;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+}
+
+.tab {
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 8px 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.tabActive {
+  background: var(--ink);
+  color: #f5f1e6;
+  border-color: var(--ink);
+}
+
+.list {
+  display: grid;
+  gap: 12px;
+}
+
+.vacancyCard {
+  padding: 18px;
+}
+
+.cardHead {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.role {
+  font-size: 17px;
+  font-weight: 750;
+  line-height: 1.25;
+}
+
+.company {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 5px;
+}
+
+.score {
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  background: var(--bg-deep);
+  font-weight: 800;
+  font-size: 19px;
+}
+
+.scoreMuted {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.summary {
+  font-size: 13px;
+  line-height: 1.5;
+  margin-top: 14px;
+  color: var(--ink);
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.detailsButton {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 5px 0;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  margin-top: 10px;
+}
+
+.details {
+  border-top: 1px solid var(--line-2);
+  margin-top: 12px;
+  padding-top: 14px;
+  display: grid;
+  gap: 14px;
+}
+
+.detailGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.detailBlock {
+  background: var(--bg-deep);
+  border-radius: 14px;
+  padding: 12px;
+}
+
+.detailTitle {
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 750;
+  margin-bottom: 7px;
+}
+
+.detailList {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.description {
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.55;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.rejectBox {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--bg-deep);
+}
+
+.rejectBox textarea {
+  width: 100%;
+  min-height: 88px;
+  resize: vertical;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 10px;
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.rejectBox textarea:focus {
+  border-color: var(--ink);
+}
+
+.rejectActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.error {
+  color: var(--err);
+  font-size: 13px;
+}
+
+.pager {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 10px;
+}
+
+@media (max-width: 760px) {
+  .headerRow {
+    align-items: flex-start;
+  }
+
+  .spacer {
+    display: none;
+  }
+
+  .vacancyCard {
+    padding: 15px;
+  }
+
+  .role {
+    font-size: 16px;
+  }
+
+  .score {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    font-size: 17px;
+  }
+
+  .detailGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .actions > * {
+    flex: 1 1 calc(50% - 4px);
+    justify-content: center;
+  }
+}

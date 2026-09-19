@@ -66,15 +66,17 @@ async def test_is_agent_enabled_reads_flag():
         assert await worker_control.is_agent_enabled("u1") is False
 
 
-def test_active_user_flags_maps_both_flags():
+def test_active_user_flags_maps_every_loop_flag():
     from app.services import worker_control
 
-    creds = _chain([{"user_id": "a"}, {"user_id": "b"}, {"user_id": "c"}])
+    creds = _chain([{"user_id": "a"}, {"user_id": "b"}, {"user_id": "c"}, {"user_id": "d"}])
     profiles = _chain(
         [
-            {"id": "a", "worker_enabled": True, "agent_enabled": False},
-            {"id": "b", "worker_enabled": False, "agent_enabled": True},
-            {"id": "c", "worker_enabled": False, "agent_enabled": False},  # dropped
+            {"id": "a", "worker_enabled": True, "discovery_enabled": False, "agent_enabled": False},
+            {"id": "b", "worker_enabled": False, "discovery_enabled": False, "agent_enabled": True},
+            {"id": "c", "worker_enabled": False, "discovery_enabled": True, "agent_enabled": False},
+            # every flag off → dropped
+            {"id": "d", "worker_enabled": False, "discovery_enabled": False, "agent_enabled": False},
         ]
     )
 
@@ -83,7 +85,11 @@ def test_active_user_flags_maps_both_flags():
 
     with patch.object(worker_control.service_client, "table", side_effect=_table):
         out = worker_control.active_user_flags()
-    assert out == {"a": (True, False), "b": (False, True)}
+    assert out == {
+        "a": {"apply": True, "discovery": False, "agent": False},
+        "b": {"apply": False, "discovery": False, "agent": True},
+        "c": {"apply": False, "discovery": True, "agent": False},
+    }
 
 
 def test_active_user_flags_empty_when_no_active_creds():
@@ -95,37 +101,48 @@ def test_active_user_flags_empty_when_no_active_creds():
 
 
 @pytest.mark.asyncio
-async def test_reconcile_drives_both_loops_gated_by_plan():
+async def test_reconcile_drives_apply_discovery_and_agent_independently():
+    """Each UI switch owns exactly one loop; none of them implies another."""
     import worker_main
 
     registry = MagicMock()
     registry.active_user_ids.return_value = ["b", "c"]  # c desired off now
     registry.reconcile = AsyncMock()
 
-    flags = {"a": (True, False), "b": (False, True)}
-    with patch.object(worker_main, "active_user_flags", return_value=flags), \
-         patch.object(worker_main, "filter_paid", side_effect=lambda u: u):
+    flags = {
+        "a": {"apply": True, "discovery": True, "agent": False},
+        "b": {"apply": False, "discovery": False, "agent": True},
+    }
+    with (
+        patch.object(worker_main, "active_user_flags", return_value=flags),
+        patch.object(worker_main, "_run_manual_search_job", new=AsyncMock(return_value=None)),
+        patch.object(worker_main, "_run_discovery_if_due", new=AsyncMock()) as discovery,
+    ):
         await worker_main._reconcile(registry)
 
     calls = {c.args[0]: c.args[1:] for c in registry.reconcile.await_args_list}
-    assert calls["a"] == (True, False)   # newly desired apply-only
-    assert calls["b"] == (False, True)   # agent-only
+    assert calls["a"] == (True, False)
+    assert calls["b"] == (False, True)
     assert calls["c"] == (False, False)  # live but no longer desired → stop both
+    discovery.assert_any_await("a", True)
+    discovery.assert_any_await("b", False)
 
 
 @pytest.mark.asyncio
-async def test_free_user_keeps_apply_loop_loses_agent():
-    """Бесплатный не выкидывается — его ограничивает лимитер, а не ворота.
-    Агент-рекрутёр автономен по определению, поэтому остаётся платным."""
+async def test_agent_flag_is_honoured_for_every_user():
     import worker_main
 
     registry = MagicMock()
     registry.active_user_ids.return_value = []
     registry.reconcile = AsyncMock()
 
-    flags = {"a": (True, True)}
-    with patch.object(worker_main, "active_user_flags", return_value=flags), \
-         patch.object(worker_main, "filter_paid", side_effect=lambda u: []):
+    flags = {"a": {"apply": False, "discovery": False, "agent": True}}
+    with (
+        patch.object(worker_main, "active_user_flags", return_value=flags),
+        patch.object(worker_main, "_run_manual_search_job", new=AsyncMock(return_value=None)),
+        patch.object(worker_main, "_run_discovery_if_due", new=AsyncMock()) as discovery,
+    ):
         await worker_main._reconcile(registry)
 
-    registry.reconcile.assert_awaited_once_with("a", True, False)
+    registry.reconcile.assert_awaited_once_with("a", False, True)
+    discovery.assert_awaited_once_with("a", False)

@@ -532,6 +532,9 @@ html { scroll-behavior: smooth; }
     gap: 2px !important;
   }
 
+  /* the bottom tab bar fits ~5 items: secondary sections stay desktop-only */
+  .oc-nav-item--desktop-secondary { display: none !important; }
+
   .oc-sidebar--collapsed .oc-nav-item { justify-content: center; padding: 6px 4px; }
   .oc-sidebar--collapsed .oc-nav-item__label { display: block; }
   .oc-nav-item {

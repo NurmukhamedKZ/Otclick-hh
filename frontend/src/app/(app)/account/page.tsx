@@ -17,12 +17,6 @@ type HHStatus = {
   hh_user_id: string | null;
 };
 
-type BillingStatusShape = {
-  plan: string;
-  plan_expires_at: string | null;
-  next_charge_at: string | null;
-};
-
 const TABS: { key: Tab; label: string }[] = [
   { key: "profile", label: "Профиль" },
   { key: "integrations", label: "Интеграции" },
@@ -37,7 +31,6 @@ export default function AccountPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [createdAt, setCreatedAt] = useState<string | null>(null);
   const [hh, setHH] = useState<HHStatus | null>(null);
-  const [billing, setBilling] = useState<BillingStatusShape | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -52,9 +45,6 @@ export default function AccountPage() {
     apiFetch<HHStatus>("/api/hh/status")
       .then(setHH)
       .catch((e) => setErr(e instanceof Error ? e.message : "hh status failed"));
-    apiFetch<BillingStatusShape>("/api/billing/status")
-      .then(setBilling)
-      .catch(() => undefined);
   }, [supabase]);
 
   async function disconnectHH() {
@@ -92,7 +82,6 @@ export default function AccountPage() {
   const memberSince = createdAt
     ? new Date(createdAt).toLocaleDateString("ru-RU", { month: "long", year: "numeric" })
     : null;
-  const isPro = billing?.plan === "active";
 
   return (
     <>
@@ -121,9 +110,6 @@ export default function AccountPage() {
             {memberSince ? `с ${memberSince}` : "—"}
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-            <Tag tone={isPro ? "dark" : "neutral"} dot>
-              {isPro ? "pro" : "free"}
-            </Tag>
             <Tag tone={hhTone} dot>
               {hhConnected ? "hh подключён" : "hh не подключён"}
             </Tag>
