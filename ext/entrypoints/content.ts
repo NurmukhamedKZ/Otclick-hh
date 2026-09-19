@@ -2,7 +2,7 @@ import { defineContentScript } from "wxt/sandbox";
 import { browser } from "wxt/browser";
 import { applyFill, findEl, snapshotWithOptions } from "../lib/snapshot";
 import { mergeFrameFields, withLabels, type FillResponse, type FilledField } from "../lib/api";
-import { readFieldValue, renderMarks } from "../lib/marks";
+import { readFieldValue } from "../lib/marks";
 import { deterministicFields } from "../lib/deterministic-fill";
 import { mountPanel, type PanelController } from "../lib/panel";
 import { appendMessage, clearHistory, loadHistory } from "../lib/chat-store";
@@ -141,8 +141,6 @@ async function saveEdits(): Promise<void> {
   }
 }
 
-/** Push the current applied set to both surfaces: in-page badges and the panel. */
 function show(): void {
-  renderMarks(lastApplied);
   panel?.setFilled(lastApplied);
 }

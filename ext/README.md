@@ -17,6 +17,22 @@
 Backend должен быть запущен с новым кодом: контейнер `api` собирает код внутрь
 образа, поэтому после правок в `backend/` нужен `docker compose build api && docker compose up -d api`.
 
+## Сборка на прод-сервер
+
+`.env.production` в репозитории уже указывает на задеплоенный стек (Railway API +
+Vercel frontend + Supabase Cloud) — `wxt build`/`wxt zip` подхватывают его
+автоматически, `.env` (локальный) не используется. Просто:
+
+```
+npm run build   # или npm run zip
+```
+
+и подгрузить `.output/firefox-mv2` как временное дополнение, либо раздать zip.
+Вход — на https://frontend-one-sepia-34.vercel.app/auth. Если адрес бэкенда/фронта
+изменится, поправить `.env.production` и добавить новый домен API в
+`host_permissions` (`wxt.config.ts`) и, для домена фронта, в `matches`
+(`entrypoints/otclick-sync.content.ts`).
+
 ## Команды
 
 | Команда | Что делает |
