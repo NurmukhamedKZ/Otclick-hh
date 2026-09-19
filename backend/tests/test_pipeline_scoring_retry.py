@@ -81,6 +81,7 @@ async def test_scoring_batch_opens_circuit_after_two_consecutive_hh_failures():
             new=AsyncMock(return_value={"version": 1, "profile": {}, "facts": []}),
         ),
         patch.object(svc.selection_rules, "load_active_rules", new=AsyncMock(return_value=[])),
+        patch.object(svc, "load_blacklist", return_value={}),
         patch.object(svc, "HHAgent", return_value=fake_agent),
         patch.object(svc, "score_one", new=AsyncMock(side_effect=["retryable", "retryable"])) as score_one,
     ):

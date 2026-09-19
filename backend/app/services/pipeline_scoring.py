@@ -2,7 +2,10 @@
 
 Scoring uses leased claim tokens: every terminal write must still own the same
 claim, so a reaped/old scorer cannot overwrite a newer attempt or a user action.
-Only ACTIVE user-approved rules participate; proposals are invisible here.
+
+Automatic rejects are explainable and come from the user's own data only: the
+employer blacklist and ACTIVE user-approved selection rules. There is no
+hardcoded profession list — the fit criteria are the account's resume.
 """
 
 from __future__ import annotations
@@ -10,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 from datetime import UTC, datetime, timedelta
 
 from pydantic import BaseModel, Field
@@ -38,9 +40,9 @@ _TRANSIENT_RETRY_DELAYS_S = (60, 300)
 
 class ScoreComponents(BaseModel):
     role_fit: int = Field(ge=0, le=25)
-    scale_fit: int = Field(ge=0, le=25)
-    transformation_mandate: int = Field(ge=0, le=25)
-    industry_business_context: int = Field(ge=0, le=25)
+    seniority_scale_fit: int = Field(ge=0, le=25)
+    requirements_match: int = Field(ge=0, le=25)
+    context_fit: int = Field(ge=0, le=25)
 
 
 class StructuredVacancyScore(BaseModel):
@@ -54,28 +56,7 @@ class StructuredVacancyScore(BaseModel):
     @property
     def total(self) -> int:
         c = self.components
-        return c.role_fit + c.scale_fit + c.transformation_mandate + c.industry_business_context
-
-
-_STRATEGIC_ACRONYM = re.compile(r"(?<![a-z0-9])(?:cio|cdto|cto)(?![a-z0-9])", re.IGNORECASE)
-_STRATEGIC_TITLE_SIGNALS = (
-    "ит директор",
-    "it директор",
-    "директор по ит",
-    "директор по информационным технологиям",
-    "директор по цифров",
-    "цифровой трансформац",
-    "digital transformation",
-    "digital director",
-    "technology director",
-)
-
-_HARD_TITLE_MISMATCHES: tuple[tuple[tuple[str, ...], str], ...] = (
-    (("системный администратор", "system administrator"), "role_mismatch_system_administration"),
-    (("руководитель технической поддержки", "head of technical support"), "role_mismatch_support"),
-    (("руководитель инфраструктуры", "директор по инфраструктуре", "head of infrastructure"), "role_mismatch_infrastructure"),
-    (("программист 1с", "1c developer", "senior developer", "lead developer", "ведущий разработчик"), "role_mismatch_hands_on_development"),
-)
+        return c.role_fit + c.seniority_scale_fit + c.requirements_match + c.context_fit
 
 
 def _matching_rules(vacancy: dict, rules: list[dict] | None) -> list[dict]:
@@ -89,24 +70,35 @@ def _matching_rules(vacancy: dict, rules: list[dict] | None) -> list[dict]:
     ]
 
 
-def hard_filter_reason(vacancy: dict, rules: list[dict] | None = None) -> str | None:
+def _blacklisted_employer(vacancy: dict, blacklist: dict[str, str] | None) -> tuple[str, str] | None:
+    """Return (employer_id, employer_name) when this employer is blacklisted."""
+    employer_id = str(vacancy.get("employer_id") or "").strip()
+    if not employer_id or employer_id not in (blacklist or {}):
+        return None
+    return employer_id, blacklist[employer_id] or str(vacancy.get("employer_name") or "")
+
+
+def hard_filter_reason(
+    vacancy: dict,
+    rules: list[dict] | None = None,
+    blacklist: dict[str, str] | None = None,
+) -> str | None:
     """Compatibility summary for the first hard-reject reason."""
     for rule in _matching_rules(vacancy, rules):
         if rule.get("action") == "hard_reject":
             return f"approved_rule:{rule.get('id')}:{rule.get('name') or 'hard_reject'}"
 
-    title = str(vacancy.get("title") or vacancy.get("name") or "").strip().lower()
-    if not title:
-        return None
-    if _STRATEGIC_ACRONYM.search(title) or any(signal in title for signal in _STRATEGIC_TITLE_SIGNALS):
-        return None
-    for patterns, reason in _HARD_TITLE_MISMATCHES:
-        if any(pattern in title for pattern in patterns):
-            return reason
+    hit = _blacklisted_employer(vacancy, blacklist)
+    if hit:
+        return f"blacklisted_employer:{hit[0]}"
     return None
 
 
-def hard_filter_details(vacancy: dict, rules: list[dict] | None = None) -> list[dict]:
+def hard_filter_details(
+    vacancy: dict,
+    rules: list[dict] | None = None,
+    blacklist: dict[str, str] | None = None,
+) -> list[dict]:
     """Return explainable snapshots for every automatic hard-reject condition."""
     details: list[dict] = []
     for rule in _matching_rules(vacancy, rules):
@@ -123,26 +115,34 @@ def hard_filter_details(vacancy: dict, rules: list[dict] | None = None) -> list[
             }
         )
 
-    title = str(vacancy.get("title") or vacancy.get("name") or "").strip().lower()
-    strategic = bool(
-        title
-        and (_STRATEGIC_ACRONYM.search(title) or any(signal in title for signal in _STRATEGIC_TITLE_SIGNALS))
-    )
-    if title and not strategic:
-        for patterns, reason in _HARD_TITLE_MISMATCHES:
-            matched = [pattern for pattern in patterns if pattern in title]
-            if matched:
-                details.append(
-                    {
-                        "type": "system",
-                        "reason": reason,
-                        "name": "Системный фильтр роли",
-                        "instruction": reason,
-                        "matches": [{"field": "title", "term": term} for term in matched],
-                    }
-                )
-                break
+    hit = _blacklisted_employer(vacancy, blacklist)
+    if hit:
+        employer_id, employer_name = hit
+        details.append(
+            {
+                "type": "blacklist",
+                "reason": "blacklisted_employer",
+                "name": f"Работодатель в чёрном списке: {employer_name or employer_id}",
+                "instruction": "employer is on the user blacklist",
+                "matches": [{"field": "employer_id", "term": employer_id}],
+            }
+        )
     return details
+
+
+def load_blacklist(user_id: str) -> dict[str, str]:
+    """{employer_id: employer_name} — the user's existing employer blacklist."""
+    res = (
+        service_client.table("blacklist")
+        .select("employer_id,employer_name")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    return {
+        str(row["employer_id"]): str(row.get("employer_name") or "")
+        for row in (res.data or [])
+        if row.get("employer_id")
+    }
 
 
 def _load_discovered(user_id: str, limit: int) -> list[dict]:
@@ -216,20 +216,23 @@ def _vacancy_for_prompt(vacancy: dict) -> str:
 
 
 def _system_prompt() -> str:
-    return """Ты оцениваешь соответствие вакансии карьерной стратегии кандидата CIO/CDTO.
+    return """Ты оцениваешь, насколько вакансия подходит конкретному кандидату.
 Не продавай кандидата и не пиши сопроводительное письмо. Нужна строгая оценка fit.
 
 Правила:
-1. Используй факты о вакансии только из VACANCY. Не угадывай выручку, отрасль, размер компании, подчинение или компенсацию по названию бренда.
-2. Используй факты о кандидате только из CANDIDATE. Не усиливай и не округляй метрики.
-3. APPROVED_SCORING_RULES — только явно одобренные пользователем предпочтения, match которых уже сработал на этой вакансии. Учитывай их в оценке; не превращай scoring preference в автоматический reject.
-4. Unknown не равен mismatch. Если масштаб/отрасль/мандат не указаны, добавь это в unknowns и не ставь экстремально низкую оценку только из-за отсутствия данных.
-5. Отличай CIO/CDTO трансформации от начальника эксплуатации/инфраструктуры. CTO высоко оценивай только при ответственности за платформу, архитектуру и продукты, а не hands-on development.
-6. Для компаний >100 млрд подходящим может быть CIO-1/CDTO-1 при сильном трансформационном мандате.
-7. Банки/bigtech/retail/e-commerce/дистрибуция как самостоятельное ядро — негативный сигнал; внутри диверсифицированного холдинга это не автоматический reject.
-8. Компоненты по 0..25: role_fit, scale_fit, transformation_mandate, industry_business_context. Итог будет рассчитан приложением как их сумма.
-9. confidence 0..100 отражает полноту данных, а не привлекательность вакансии.
-10. pros/risks/unknowns — короткие конкретные пункты, без общих фраз.
+1. Факты о вакансии бери только из VACANCY. Не угадывай отрасль, размер компании, подчинение, задачи или компенсацию по названию бренда.
+2. Факты о кандидате бери только из CANDIDATE (резюме и подтверждённые факты аккаунта). Не усиливай, не округляй и не додумывай опыт.
+3. APPROVED_SCORING_RULES — явно одобренные пользователем предпочтения, match которых уже сработал на этой вакансии. Учитывай их в оценке; scoring preference не превращается в автоматический отказ.
+4. Unknown не равен mismatch. Если требование, масштаб или отрасль не указаны, добавь это в unknowns и не занижай оценку только из-за отсутствия данных.
+5. Отличай совпадение названия должности от совпадения содержания: одна и та же должность в разных компаниях может означать разный уровень и круг задач.
+6. Компоненты по 0..25 каждая, итог считает приложение как их сумму:
+   - role_fit: насколько роль и её задачи совпадают с тем, что кандидат реально делал;
+   - seniority_scale_fit: уровень ответственности, размер команды/бюджета/бизнеса относительно опыта кандидата;
+   - requirements_match: покрытие заявленных требований, стека и обязанностей опытом и навыками из резюме;
+   - context_fit: отрасль, город/релокация, формат работы, занятость и условия относительно резюме.
+7. confidence 0..100 отражает полноту данных, а не привлекательность вакансии.
+8. pros/risks/unknowns — короткие конкретные пункты со ссылкой на факты, без общих фраз.
+9. explanation — короткое обоснование итоговой оценки на русском языке.
 """
 
 
@@ -350,6 +353,7 @@ async def score_one(
     context: dict,
     llm,
     rules: list[dict] | None = None,
+    blacklist: dict[str, str] | None = None,
 ) -> str:
     pipeline_id = str(row["id"])
     claim_token = await asyncio.to_thread(
@@ -379,14 +383,16 @@ async def score_one(
             prompt_version=SCORER_PROMPT_VERSION,
         )
         matched_rules = _matching_rules(vacancy, rules)
-        reject_details = hard_filter_details(vacancy, matched_rules)
+        reject_details = hard_filter_details(vacancy, matched_rules, blacklist)
         applied_versions = [
             int(rule["version"])
             for rule in matched_rules
             if rule.get("version") is not None
         ]
         if reject_details:
-            reason = hard_filter_reason(vacancy, matched_rules) or str(reject_details[0].get("reason") or "hard_reject")
+            reason = hard_filter_reason(vacancy, matched_rules, blacklist) or str(
+                reject_details[0].get("reason") or "hard_reject"
+            )
             changed = await asyncio.to_thread(
                 vacancy_pipeline.transition,
                 user_id=user_id,
@@ -506,9 +512,10 @@ async def score_user(user_id: str, limit: int = MAX_SCORE_PER_RUN) -> dict[str, 
         return summary
 
     try:
-        context, rules = await asyncio.gather(
+        context, rules, blacklist = await asyncio.gather(
             candidate_context_service.load_candidate_context(user_id),
             selection_rules.load_active_rules(user_id),
+            asyncio.to_thread(load_blacklist, user_id),
         )
     except Exception as ex:
         logger.warning("candidate context/rules unavailable user=%s", user_id, exc_info=True)
@@ -531,7 +538,9 @@ async def score_user(user_id: str, limit: int = MAX_SCORE_PER_RUN) -> dict[str, 
     llm = HHAgent(user_id).llm
     transient_streak = 0
     for row in rows:
-        outcome = await score_one(user_id, row, context=context, llm=llm, rules=rules)
+        outcome = await score_one(
+            user_id, row, context=context, llm=llm, rules=rules, blacklist=blacklist
+        )
         if outcome == "scored":
             summary["scored"] += 1
             transient_streak = 0

@@ -1,5 +1,7 @@
 import { createClient } from "@/lib/supabase/client";
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL!;
+
 export class ApiError extends Error {
   status: number;
   constructor(message: string, status: number) {
@@ -22,44 +24,14 @@ export async function apiFetch<T = unknown>(
   headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
-  // Caddy exposes frontend and FastAPI on one origin, so the browser image does
-  // not need an installation-specific NEXT_PUBLIC_API_URL baked at build time.
-  const res = await fetch(path, { ...init, headers });
+  const res = await fetch(`${API_URL}${path}`, { ...init, headers });
   const text = await res.text();
-  const contentType = res.headers.get("content-type") || "";
-  const isJson = contentType.includes("application/json");
-  let data: unknown = null;
-
-  if (text && isJson) {
-    try {
-      data = JSON.parse(text);
-    } catch {
-      if (res.ok) {
-        throw new ApiError("Server returned invalid JSON", res.status);
-      }
-    }
-  }
+  const data = text ? JSON.parse(text) : null;
 
   if (!res.ok) {
-    const detail =
-      data &&
-      typeof data === "object" &&
-      ("detail" in data || "message" in data)
-        ? (data as { detail?: unknown; message?: unknown }).detail ??
-          (data as { message?: unknown }).message
-        : null;
-    // Прокси и Next отдают ошибку HTML-страницей. Её нельзя пускать в message:
-    // баннер в UI показывает разметку целиком вместо человеческого текста.
-    const fallback = isJson ? text.trim().slice(0, 300) : "";
-    const msg = detail || fallback || `HTTP ${res.status}`;
-    throw new ApiError(
-      typeof msg === "string" ? msg : JSON.stringify(msg),
-      res.status,
-    );
-  }
-
-  if (!isJson) {
-    throw new ApiError("Server returned a non-JSON response", res.status);
+    const msg =
+      (data && (data.detail || data.message)) || `HTTP ${res.status}`;
+    throw new ApiError(typeof msg === "string" ? msg : JSON.stringify(msg), res.status);
   }
   return data as T;
 }

@@ -88,6 +88,7 @@ export default function CommandPalette() {
   const commands: (Command & { run: () => void })[] = useMemo(() => {
     const nav = [
       ["/dashboard", "Главная", "дашборд обзор"],
+      ["/vacancies", "Вакансии", "воронка скоринг источники правила очередь"],
       ["/applications", "Отклики", "заявки вакансии"],
       ["/chats", "Чаты", "переписка рекрутёр сообщения"],
       ["/todo", "Задания", "задачи черновики анкеты todo"],

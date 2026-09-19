@@ -1,0 +1,354 @@
+[
+  {
+    "method": "GET",
+    "url": "https://hh.ru/chat/5367968186"
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/static/main.72b2a6ea899cc5a8.css"
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/static/3331.24f64aba1bd7e72f.css"
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/static/2656.741821bc0e336445.css"
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/static/ChatPage.9d01814623fb69b9.css"
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/static/autolinker.c4ae9e683e04d142.js"
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/static/libphonenumber-js.4c4e8ca9c77270ef.js"
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/static/remarkable.d9f0244b09d0e57c.js"
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/static/notSharedVendors.62287d1c5ec4f19a.js"
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/static/3331.41cd41405c744cb5.js"
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/static/2656.229c41941d1403b7.js"
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/static/8082.712aef0c2f287097.js"
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/static/ChatPage.19e32cf413ce58a1.js"
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/static/Viewer.b2c724bfe0241ca6.js"
+  },
+  {
+    "method": "GET",
+    "url": "https://counter.yadro.ru/hit;HeadHunter?t14.6;r;s480*1040*24;uhttps%3A//hh.ru/chat/5367968186;h%u0427%u0430%u0442%u044B;0.2107142600920352"
+  },
+  {
+    "method": "GET",
+    "url": "https://cpa.hh.ru/api/tracker/sdk.js"
+  },
+  {
+    "method": "GET",
+    "url": "https://vk.com/js/api/openapi.js?169"
+  },
+  {
+    "method": "POST",
+    "url": "https://eye.targetads.io/web/collect?dl=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186&ref=&ul=en-us&ww=480&wh=1040&dt=%D0%A7%D0%B0%D1%82%D1%8B&pid=12775&cid=TA-1780130484651-J96OBYFU&yandexuid=&edttm=1780130484&sid=187669610&ss=1",
+    "post_data": "{\"cp\":{},\"uid\":\"996023CA75602DFF4D4C94D32C69A58FB0E3DCC52AF975B8DDD010B8DC7477E3\",\"event_name\":\"page_view\",\"ycid\":\"1779962146435871771\",\"gcid\":\"\"}"
+  },
+  {
+    "method": "POST",
+    "url": "https://sentry.hh.ru/api/607/envelope/?sentry_key=55d08dbf26984dd4b9206c097b9cc2ab&sentry_version=7&sentry_client=sentry.javascript.react%2F8.17.0",
+    "post_data": "{\"sent_at\":\"2026-05-30T08:41:24.850Z\",\"sdk\":{\"name\":\"sentry.javascript.react\",\"version\":\"8.17.0\"}}\n{\"type\":\"session\"}\n{\"sid\":\"e83cdc5b9e4c4e7d9e91cd5a82fa36b0\",\"init\":true,\"started\":\"2026-05-30T08:41:24.850Z\",\"timestamp\":\"2026-05-30T08:41:24.850Z\",\"status\":\"ok\",\"errors\":0,\"attrs\":{\"release\":\"xhh@26.22.5.5\",\"environment\":\"production\",\"user_agent\":\"Mozilla/5.0 (Linux; Android 14; SM-A556B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.7778.96 Mobile Safari/537.36\"}}"
+  },
+  {
+    "method": "POST",
+    "url": "https://hh.ru/anatskytics?hhtmSource=chat&hhtmFrom=&hhtmSourceLabel=&hhtmFromLabel=&fpAppVersion=5.0+%28Linux%3B+Android+14%3B+SM-A556B%29+AppleWebKit%2F537.36+%28KHTML%2C+like+Gecko%29+Chrome%2F148.0.7778.96+Mobile+Safari%2F537.36&userType=applicant&requestId=1780130484548fc492c7a5d43eefe000&hhid=187367839&originalRequestId=1780130484548fc492c7a5d43eefe000",
+    "post_data": null
+  },
+  {
+    "method": "GET",
+    "url": "https://vk.com/dist/public/api/openapi.0872b5cf548850a00f9eb9dac3a9a0a4.js?169"
+  },
+  {
+    "method": "POST",
+    "url": "https://hh.ru/anatskytics?hhtmSource=chat&hhtmFrom=&hhtmSourceLabel=&hhtmFromLabel=&event=integrity_violation&documentURL=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186&blockedURL=https%3A%2F%2Fst.hybrid.ai%2Ftxsp.js&destination=script&reportOnly=true&originalRequestId=1780130484548fc492c7a5d43eefe000",
+    "post_data": null
+  },
+  {
+    "method": "POST",
+    "url": "https://hh.ru/anatskytics?hhtmSource=chat&hhtmFrom=&hhtmSourceLabel=&hhtmFromLabel=&event=integrity_violation&documentURL=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186&blockedURL=https%3A%2F%2Ffp.hybrid.ai%2Fbobid.js&destination=script&reportOnly=true&originalRequestId=1780130484548fc492c7a5d43eefe000",
+    "post_data": null
+  },
+  {
+    "method": "POST",
+    "url": "https://hh.ru/anatskytics?hhtmSource=chat&hhtmFrom=&hhtmSourceLabel=&hhtmFromLabel=&event=user_in_experiment_check&source=xhh-js&not_in_experiment=apps_vacancy_feedback_force&originalRequestId=1780130484548fc492c7a5d43eefe000",
+    "post_data": null
+  },
+  {
+    "method": "POST",
+    "url": "https://hh.ru/anatskytics?hhtmSource=chat&hhtmFrom=&hhtmSourceLabel=&hhtmFromLabel=&event=user_in_experiment_check&source=xhh-js&experiment=applicant_mobile_web_header&originalRequestId=1780130484548fc492c7a5d43eefe000",
+    "post_data": null
+  },
+  {
+    "method": "POST",
+    "url": "https://hh.ru/anatskytics?hhtmSource=chat&hhtmFrom=&hhtmSourceLabel=&hhtmFromLabel=&event=web_performance&originalRequestId=1780130484548fc492c7a5d43eefe000",
+    "post_data": null
+  },
+  {
+    "method": "POST",
+    "url": "https://hh.ru/anatskytics?hhtmSource=chat&hhtmFrom=&hhtmSourceLabel=&hhtmFromLabel=&event=initial-notifications-data&supernovaViewed=applicant.job.search.status&supernovaViewed=applicant.specify.work.search.address&originalRequestId=1780130484548fc492c7a5d43eefe000",
+    "post_data": null
+  },
+  {
+    "method": "POST",
+    "url": "https://hh.ru/anatskytics?hhtmSource=chat&hhtmFrom=&hhtmSourceLabel=&hhtmFromLabel=&event=user_in_experiment_check&source=xhh-js&not_in_experiment=apps_profession_middle_ages&originalRequestId=1780130484548fc492c7a5d43eefe000",
+    "post_data": null
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/static/remote.chatik.60dddd127b118857.js"
+  },
+  {
+    "method": "GET",
+    "url": "https://hh.ru/shards/employer/account/widgets/advice-count"
+  },
+  {
+    "method": "GET",
+    "url": "https://redirect-frontend.weborama-tech.ru/rd?url=https%3A%2F%2Fhh.ru%2Fshards%2Fvendor_user_sync%3Fweborama_user_id%3D%7BWEBO_ID%7D"
+  },
+  {
+    "method": "POST",
+    "url": "https://hh.ru/anatskytics?hhtmSource=chat&hhtmFrom=&hhtmSourceLabel=&hhtmFromLabel=&event=element_shown&elementName=cookies_banner&originalRequestId=1780130484548fc492c7a5d43eefe000",
+    "post_data": null
+  },
+  {
+    "method": "GET",
+    "url": "https://top-fwz1.mail.ru/counter?_=0.46454354950994337;id=3209834;u=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186;userid=164416493;s=480*1040;vp=480*1040;touch=1;hds=2.25;sid=fdf1d54162085fab;ver=60.6.0;tz=-300%2FAsia%2FAlmaty;st=1780130484659;ct=1623/1625/1625//1138;rt=1138/379/0/0/0/1138/1138/1150/1150/1363/1291/1363/1512/1517;gl=u;ni=9.7//4g/0/0/;lvid=1779962145404%3A1780130485110%3A1%3A56ddccf1ec01a10a76a5193813efe937;opts=jst-vk%2Cwda%2Ccnhp%3Dh2%2Ccs%3D19684-48997-19984;fpid=9bWXIgOVG5XRF82ES8s-e;visible=true;js=13"
+  },
+  {
+    "method": "GET",
+    "url": "https://top-fwz1.mail.ru/counter?_=0.532958681674283;id=3399615;u=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186;userid=164416493;s=480*1040;vp=480*1040;touch=1;hds=2.25;sid=fdf1d54162085fab;ver=60.6.0;tz=-300%2FAsia%2FAlmaty;st=1780130484659;ct=1623/1625/1625//1138;rt=1138/379/0/0/0/1138/1138/1150/1150/1363/1291/1363/1512/1517;gl=u;ni=9.7//4g/0/0/;lvid=1779962145404%3A1780130485110%3A2%3A56ddccf1ec01a10a76a5193813efe937;opts=sec%2Cjst-vk%2Cwda%2Ccnhp%3Dh2%2Ccs%3D19684-48997-19984;fpid=9bWXIgOVG5XRF82ES8s-e;visible=true;js=13"
+  },
+  {
+    "method": "GET",
+    "url": "https://mc.yandex.ru/watch/156828?wmode=7&page-url=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186&charset=utf-8&site-info=%7B%22status%22%3A%22applicant%22%2C%22crypted_id%22%3A%227249D0C80FB4FF843B34624B46C664E7A5471C6F722104504734B32F0D03E9F8%22%2C%22UserID%22%3A%22996023CA75602DFF4D4C94D32C69A58FB0E3DCC52AF975B8DDD010B8DC7477E3%22%2C%22geoRegion%22%3A%221%22%2C%22collar%22%3A%22white%22%7D&uah=chu%0A%22Chromium%22%3Bv%3D%22148%22%2C%22HeadlessChrome%22%3Bv%3D%22148%22%2C%22Not%2FA)Brand%22%3Bv%3D%2299%22%0Acha%0Aarm%0Achb%0A64%0Achf%0A148.0.7778.96%0Achl%0A%22Chromium%22%3Bv%3D%22148.0.7778.96%22%2C%22HeadlessChrome%22%3Bv%3D%22148.0.7778.96%22%2C%22Not%2FA)Brand%22%3Bv%3D%2299.0.0.0%22%0Achm%0A%3F1%0Achp%0AAndroid%0Achv%0A14&browser-info=pv%3A1%3Avf%3Apudvqnsfv6ib5kxc1gvz1plajlgbj%3Afu%3A0%3Aen%3Autf-8%3Ala%3Aen-US%3Av%3A2520%3Acn%3A1%3Adp%3A0%3Als%3A859587893978%3Ahid%3A279216059%3Az%3A300%3Ai%3A20260530134125%3Aet%3A1780130485%3Ac%3A1%3Arn%3A677986573%3Arqn%3A1%3Au%3A1779962146435871771%3Aw%3A480x1040%3As%3A480x1040x24%3Ask%3A2.25%3Afp%3A868%3Awv%3A2%3Ads%3A13%2C137%2C459%2C137%2C0%2C0%2C%2C421%2C3%2C%2C%2C%2C1378%3Aco%3A0%3Ahdl%3A1%3Antf%3A1%3Ans%3A1780130483484%3Arqnl%3A1%3Ast%3A1780130485%3At%3A&t=clt(528)gdpr(14)clc(0-0-0)rqnt(1)aw(1)rcm(1)cdl(na)eco(42017300)ti(1)"
+  },
+  {
+    "method": "GET",
+    "url": "https://mc.yandex.ru/watch/93250637?wmode=7&page-url=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186&charset=utf-8&site-info=%7B%22status%22%3A%22applicant%22%2C%22crypted_id%22%3A%227249D0C80FB4FF843B34624B46C664E7A5471C6F722104504734B32F0D03E9F8%22%2C%22UserID%22%3A%22996023CA75602DFF4D4C94D32C69A58FB0E3DCC52AF975B8DDD010B8DC7477E3%22%2C%22geoRegion%22%3A%221%22%2C%22collar%22%3A%22white%22%7D&uah=chu%0A%22Chromium%22%3Bv%3D%22148%22%2C%22HeadlessChrome%22%3Bv%3D%22148%22%2C%22Not%2FA)Brand%22%3Bv%3D%2299%22%0Acha%0Aarm%0Achb%0A64%0Achf%0A148.0.7778.96%0Achl%0A%22Chromium%22%3Bv%3D%22148.0.7778.96%22%2C%22HeadlessChrome%22%3Bv%3D%22148.0.7778.96%22%2C%22Not%2FA)Brand%22%3Bv%3D%2299.0.0.0%22%0Achm%0A%3F1%0Achp%0AAndroid%0Achv%0A14&browser-info=pv%3A1%3Avf%3Apudvqnsfv6ib5kxc1gvz1plajlgbj%3Afu%3A0%3Aen%3Autf-8%3Ala%3Aen-US%3Av%3A2520%3Acn%3A2%3Adp%3A0%3Als%3A337478285035%3Ahid%3A279216059%3Az%3A300%3Ai%3A20260530134125%3Aet%3A1780130485%3Ac%3A1%3Arn%3A571131429%3Arqn%3A1%3Au%3A1779962146435871771%3Aw%3A480x1040%3As%3A480x1040x24%3Ask%3A2.25%3Afp%3A868%3Awv%3A2%3Ads%3A13%2C137%2C459%2C137%2C0%2C0%2C%2C421%2C3%2C%2C%2C%2C1378%3Aco%3A0%3Ahdl%3A1%3Antf%3A1%3Ans%3A1780130483484%3Arqnl%3A1%3Ast%3A1780130485%3At%3A&t=clt(534)gdpr(14)mc(p-1-ui-1)clc(0-0-0)rqnt(1)aw(1)rcm(1)cdl(na)eco(42017300)ti(1)"
+  },
+  {
+    "method": "GET",
+    "url": "https://mc.yandex.ru/watch/83135743?wmode=7&page-url=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186&charset=utf-8&site-info=%7B%22status%22%3A%22applicant%22%2C%22crypted_id%22%3A%227249D0C80FB4FF843B34624B46C664E7A5471C6F722104504734B32F0D03E9F8%22%2C%22UserID%22%3A%22996023CA75602DFF4D4C94D32C69A58FB0E3DCC52AF975B8DDD010B8DC7477E3%22%2C%22geoRegion%22%3A%221%22%2C%22collar%22%3A%22white%22%7D&uah=chu%0A%22Chromium%22%3Bv%3D%22148%22%2C%22HeadlessChrome%22%3Bv%3D%22148%22%2C%22Not%2FA)Brand%22%3Bv%3D%2299%22%0Acha%0Aarm%0Achb%0A64%0Achf%0A148.0.7778.96%0Achl%0A%22Chromium%22%3Bv%3D%22148.0.7778.96%22%2C%22HeadlessChrome%22%3Bv%3D%22148.0.7778.96%22%2C%22Not%2FA)Brand%22%3Bv%3D%2299.0.0.0%22%0Achm%0A%3F1%0Achp%0AAndroid%0Achv%0A14&browser-info=pv%3A1%3Avf%3Apudvqnsfv6ib5kxc1gvz1plajlgbj%3Afu%3A0%3Aen%3Autf-8%3Ala%3Aen-US%3Av%3A2520%3Acn%3A3%3Adp%3A0%3Als%3A920296005761%3Ahid%3A279216059%3Az%3A300%3Ai%3A20260530134125%3Aet%3A1780130485%3Ac%3A1%3Arn%3A329219917%3Arqn%3A1%3Au%3A1779962146435871771%3Aw%3A480x1040%3As%3A480x1040x24%3Ask%3A2.25%3Afp%3A868%3Awv%3A2%3Ads%3A13%2C137%2C459%2C137%2C0%2C0%2C%2C421%2C3%2C%2C%2C%2C1378%3Aco%3A0%3Ahdl%3A1%3Antf%3A1%3Ans%3A1780130483484%3Arqnl%3A1%3Ast%3A1780130485%3At%3A&t=clt(535)gdpr(14)mc(p-2-ui-2)clc(0-0-0)rqnt(1)aw(1)rcm(1)cdl(na)eco(42017300)ti(1)"
+  },
+  {
+    "method": "POST",
+    "url": "https://hh.ru/anatskytics?hhtmSource=chat&hhtmFrom=&hhtmSourceLabel=&hhtmFromLabel=&event=fingerprinting_done&executionTime=104.39999985694885&device_memory=16&hardware_concurrency=10&effective_type=4g&rtt=0&downlink=9.7&originalRequestId=1780130484548fc492c7a5d43eefe000",
+    "post_data": null
+  },
+  {
+    "method": "POST",
+    "url": "https://hh.ru/anatskytics?hhtmSource=chat&hhtmFrom=&hhtmSourceLabel=&hhtmFromLabel=&fingerprintFull=e1bfa755a0c8f997be73207cfa87b7eb&userType=applicant&requestId=1780130484548fc492c7a5d43eefe000&hhid=187367839&originalRequestId=1780130484548fc492c7a5d43eefe000",
+    "post_data": null
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/static/5319.40fd08c77a728e74.js"
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/static/847.6131d22470a6c99c.css"
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/static/847.7594696b7606fbd0.js"
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/static/6371.401a4a0cae339d54.css"
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/static/6371.408310ee829d96a2.js"
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/static/fallbackBlokoCommon.f88323d44756f373.js"
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/static/blokoStyles.da2afc0fe405e966.css"
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/static/fallbackBlokoIcon.f2ccaf811770d911.js"
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/static/fallbackBlokoLoading.5e4e944c72a353fb.js"
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/static/fallbackBlokoBreakpointProvider.f7364ded3f9ab159.js"
+  },
+  {
+    "method": "POST",
+    "url": "https://mc.yandex.ru/watch/156828/1?page-url=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186&charset=utf-8&uah=chu%0A%22Chromium%22%3Bv%3D%22148%22%2C%22HeadlessChrome%22%3Bv%3D%22148%22%2C%22Not%2FA)Brand%22%3Bv%3D%2299%22%0Acha%0Aarm%0Achb%0A64%0Achf%0A148.0.7778.96%0Achl%0A%22Chromium%22%3Bv%3D%22148.0.7778.96%22%2C%22HeadlessChrome%22%3Bv%3D%22148.0.7778.96%22%2C%22Not%2FA)Brand%22%3Bv%3D%2299.0.0.0%22%0Achm%0A%3F1%0Achp%0AAndroid%0Achv%0A14&hidv2=2952602863936471088&hittoken=1780130486_9331cc1019848fc007506264a336c5d72e58188795dc48be58575c1001864e19&browser-info=pa%3A1%3Aar%3A1%3Avf%3Apudvqnsfv6ib5kxc1gvz1plajlgbj%3Afu%3A0%3Aen%3Autf-8%3Ala%3Aen-US%3Av%3A2520%3Acn%3A1%3Adp%3A0%3Als%3A859587893978%3Ahid%3A279216059%3Az%3A300%3Ai%3A20260530134125%3Aet%3A1780130485%3Ac%3A1%3Arn%3A508330085%3Arqn%3A2%3Au%3A1779962146435871771%3Aw%3A480x1040%3As%3A480x1040x24%3Ask%3A2.25%3Awv%3A2%3Aco%3A0%3Ahdl%3A1%3Antf%3A1%3Ans%3A1780130483484%3Aadb%3A2%3Arqnl%3A1%3Ast%3A1780130485&t=gdpr(14)mc(p-4-ui-3-up-1)clc(0-0-0)rqnt(2)aw(1)rcm(1)cdl(na)eco(42017300)ti(0)&force-urlencoded=1&site-info=%7B%22__ym%22%3A%7B%22user_id%22%3A%22996023CA75602DFF4D4C94D32C69A58FB0E3DCC52AF975B8DDD010B8DC7477E3%22%7D%7D",
+    "post_data": null
+  },
+  {
+    "method": "POST",
+    "url": "https://mc.yandex.ru/watch/156828/1?page-url=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186&charset=utf-8&uah=chu%0A%22Chromium%22%3Bv%3D%22148%22%2C%22HeadlessChrome%22%3Bv%3D%22148%22%2C%22Not%2FA)Brand%22%3Bv%3D%2299%22%0Acha%0Aarm%0Achb%0A64%0Achf%0A148.0.7778.96%0Achl%0A%22Chromium%22%3Bv%3D%22148.0.7778.96%22%2C%22HeadlessChrome%22%3Bv%3D%22148.0.7778.96%22%2C%22Not%2FA)Brand%22%3Bv%3D%2299.0.0.0%22%0Achm%0A%3F1%0Achp%0AAndroid%0Achv%0A14&hidv2=2952602863936471088&hittoken=1780130486_9331cc1019848fc007506264a336c5d72e58188795dc48be58575c1001864e19&browser-info=pa%3A1%3Aar%3A1%3Avf%3Apudvqnsfv6ib5kxc1gvz1plajlgbj%3Afu%3A0%3Aen%3Autf-8%3Ala%3Aen-US%3Av%3A2520%3Acn%3A1%3Adp%3A0%3Als%3A859587893978%3Ahid%3A279216059%3Az%3A300%3Ai%3A20260530134125%3Aet%3A1780130485%3Ac%3A1%3Arn%3A300299768%3Arqn%3A3%3Au%3A1779962146435871771%3Aw%3A480x1040%3As%3A480x1040x24%3Ask%3A2.25%3Awv%3A2%3Aco%3A0%3Ahdl%3A1%3Antf%3A1%3Ans%3A1780130483484%3Aadb%3A2%3Arqnl%3A1%3Ast%3A1780130485&t=gdpr(14)mc(p-4-ui-3-up-1)clc(0-0-0)rqnt(3)aw(1)rcm(1)cdl(na)eco(42017300)ti(0)&force-urlencoded=1&site-info=%7B%22__ymu%22%3A%7B%22status%22%3A%22applicant%22%2C%22crypted_id%22%3A%227249D0C80FB4FF843B34624B46C664E7A5471C6F722104504734B32F0D03E9F8%22%2C%22UserID%22%3A%22996023CA75602DFF4D4C94D32C69A58FB0E3DCC52AF975B8DDD010B8DC7477E3%22%2C%22collar%22%3A%22white%22%7D%7D",
+    "post_data": null
+  },
+  {
+    "method": "GET",
+    "url": "https://hh.ru/shards/vendor_user_sync?weborama_user_id=fqJtCyHOTZd@"
+  },
+  {
+    "method": "POST",
+    "url": "https://mc.yandex.ru/watch/93250637/1?page-url=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186&charset=utf-8&uah=chu%0A%22Chromium%22%3Bv%3D%22148%22%2C%22HeadlessChrome%22%3Bv%3D%22148%22%2C%22Not%2FA)Brand%22%3Bv%3D%2299%22%0Acha%0Aarm%0Achb%0A64%0Achf%0A148.0.7778.96%0Achl%0A%22Chromium%22%3Bv%3D%22148.0.7778.96%22%2C%22HeadlessChrome%22%3Bv%3D%22148.0.7778.96%22%2C%22Not%2FA)Brand%22%3Bv%3D%2299.0.0.0%22%0Achm%0A%3F1%0Achp%0AAndroid%0Achv%0A14&hidv2=2952602865024630832&hittoken=1780130486_ca2dc351c0237a4adc0d7403817b58b8603ee693fd836f88cf6813e9c9d8f038&browser-info=pa%3A1%3Aar%3A1%3Avf%3Apudvqnsfv6ib5kxc1gvz1plajlgbj%3Afu%3A0%3Aen%3Autf-8%3Ala%3Aen-US%3Av%3A2520%3Acn%3A2%3Adp%3A0%3Als%3A337478285035%3Ahid%3A279216059%3Az%3A300%3Ai%3A20260530134125%3Aet%3A1780130485%3Ac%3A1%3Arn%3A428566178%3Arqn%3A2%3Au%3A1779962146435871771%3Aw%3A480x1040%3As%3A480x1040x24%3Ask%3A2.25%3Awv%3A2%3Aco%3A0%3Ahdl%3A1%3Antf%3A1%3Aeu%3A0%3Ans%3A1780130483484%3Aadb%3A2%3Arqnl%3A1%3Ast%3A1780130485&t=gdpr(14)mc(p-5-ui-3-up-2)clc(0-0-0)rqnt(2)aw(1)rcm(1)cdl(na)eco(42017300)ti(0)&force-urlencoded=1&site-info=%7B%22__ym%22%3A%7B%22user_id%22%3A%22996023CA75602DFF4D4C94D32C69A58FB0E3DCC52AF975B8DDD010B8DC7477E3%22%7D%7D",
+    "post_data": null
+  },
+  {
+    "method": "POST",
+    "url": "https://mc.yandex.ru/watch/93250637/1?page-url=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186&charset=utf-8&uah=chu%0A%22Chromium%22%3Bv%3D%22148%22%2C%22HeadlessChrome%22%3Bv%3D%22148%22%2C%22Not%2FA)Brand%22%3Bv%3D%2299%22%0Acha%0Aarm%0Achb%0A64%0Achf%0A148.0.7778.96%0Achl%0A%22Chromium%22%3Bv%3D%22148.0.7778.96%22%2C%22HeadlessChrome%22%3Bv%3D%22148.0.7778.96%22%2C%22Not%2FA)Brand%22%3Bv%3D%2299.0.0.0%22%0Achm%0A%3F1%0Achp%0AAndroid%0Achv%0A14&hidv2=2952602865024630832&hittoken=1780130486_ca2dc351c0237a4adc0d7403817b58b8603ee693fd836f88cf6813e9c9d8f038&browser-info=pa%3A1%3Aar%3A1%3Avf%3Apudvqnsfv6ib5kxc1gvz1plajlgbj%3Afu%3A0%3Aen%3Autf-8%3Ala%3Aen-US%3Av%3A2520%3Acn%3A2%3Adp%3A0%3Als%3A337478285035%3Ahid%3A279216059%3Az%3A300%3Ai%3A20260530134125%3Aet%3A1780130485%3Ac%3A1%3Arn%3A188643223%3Arqn%3A3%3Au%3A1779962146435871771%3Aw%3A480x1040%3As%3A480x1040x24%3Ask%3A2.25%3Awv%3A2%3Aco%3A0%3Ahdl%3A1%3Antf%3A1%3Aeu%3A0%3Ans%3A1780130483484%3Aadb%3A2%3Arqnl%3A1%3Ast%3A1780130485&t=gdpr(14)mc(p-5-ui-3-up-2)clc(0-0-0)rqnt(3)aw(1)rcm(1)cdl(na)eco(42017300)ti(0)&force-urlencoded=1&site-info=%7B%22__ymu%22%3A%7B%22status%22%3A%22applicant%22%2C%22crypted_id%22%3A%227249D0C80FB4FF843B34624B46C664E7A5471C6F722104504734B32F0D03E9F8%22%2C%22UserID%22%3A%22996023CA75602DFF4D4C94D32C69A58FB0E3DCC52AF975B8DDD010B8DC7477E3%22%2C%22collar%22%3A%22white%22%7D%7D",
+    "post_data": null
+  },
+  {
+    "method": "POST",
+    "url": "https://mc.yandex.ru/watch/83135743/1?page-url=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186&charset=utf-8&uah=chu%0A%22Chromium%22%3Bv%3D%22148%22%2C%22HeadlessChrome%22%3Bv%3D%22148%22%2C%22Not%2FA)Brand%22%3Bv%3D%2299%22%0Acha%0Aarm%0Achb%0A64%0Achf%0A148.0.7778.96%0Achl%0A%22Chromium%22%3Bv%3D%22148.0.7778.96%22%2C%22HeadlessChrome%22%3Bv%3D%22148.0.7778.96%22%2C%22Not%2FA)Brand%22%3Bv%3D%2299.0.0.0%22%0Achm%0A%3F1%0Achp%0AAndroid%0Achv%0A14&hidv2=2952602866524094488&hittoken=1780130486_c9101fceded28a7e714dee8bc9735f317f4afa217e7921659e5b803d62619168&browser-info=pa%3A1%3Aar%3A1%3Avf%3Apudvqnsfv6ib5kxc1gvz1plajlgbj%3Afu%3A0%3Aen%3Autf-8%3Ala%3Aen-US%3Av%3A2520%3Acn%3A3%3Adp%3A0%3Als%3A920296005761%3Ahid%3A279216059%3Az%3A300%3Ai%3A20260530134125%3Aet%3A1780130485%3Ac%3A1%3Arn%3A18621417%3Arqn%3A2%3Au%3A1779962146435871771%3Aw%3A480x1040%3As%3A480x1040x24%3Ask%3A2.25%3Awv%3A2%3Aco%3A0%3Ahdl%3A1%3Antf%3A1%3Aeu%3A0%3Ans%3A1780130483484%3Aadb%3A2%3Arqnl%3A1%3Ast%3A1780130485&t=gdpr(14)mc(p-6-ui-3-up-3)clc(0-0-0)rqnt(2)aw(1)rcm(1)cdl(na)eco(42017300)ti(0)&force-urlencoded=1&site-info=%7B%22__ym%22%3A%7B%22user_id%22%3A%22996023CA75602DFF4D4C94D32C69A58FB0E3DCC52AF975B8DDD010B8DC7477E3%22%7D%7D",
+    "post_data": null
+  },
+  {
+    "method": "POST",
+    "url": "https://mc.yandex.ru/watch/83135743/1?page-url=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186&charset=utf-8&uah=chu%0A%22Chromium%22%3Bv%3D%22148%22%2C%22HeadlessChrome%22%3Bv%3D%22148%22%2C%22Not%2FA)Brand%22%3Bv%3D%2299%22%0Acha%0Aarm%0Achb%0A64%0Achf%0A148.0.7778.96%0Achl%0A%22Chromium%22%3Bv%3D%22148.0.7778.96%22%2C%22HeadlessChrome%22%3Bv%3D%22148.0.7778.96%22%2C%22Not%2FA)Brand%22%3Bv%3D%2299.0.0.0%22%0Achm%0A%3F1%0Achp%0AAndroid%0Achv%0A14&hidv2=2952602866524094488&hittoken=1780130486_c9101fceded28a7e714dee8bc9735f317f4afa217e7921659e5b803d62619168&browser-info=pa%3A1%3Aar%3A1%3Avf%3Apudvqnsfv6ib5kxc1gvz1plajlgbj%3Afu%3A0%3Aen%3Autf-8%3Ala%3Aen-US%3Av%3A2520%3Acn%3A3%3Adp%3A0%3Als%3A920296005761%3Ahid%3A279216059%3Az%3A300%3Ai%3A20260530134125%3Aet%3A1780130485%3Ac%3A1%3Arn%3A39892528%3Arqn%3A3%3Au%3A1779962146435871771%3Aw%3A480x1040%3As%3A480x1040x24%3Ask%3A2.25%3Awv%3A2%3Aco%3A0%3Ahdl%3A1%3Antf%3A1%3Aeu%3A0%3Ans%3A1780130483484%3Aadb%3A2%3Arqnl%3A1%3Ast%3A1780130485&t=gdpr(14)mc(p-6-ui-3-up-3)clc(0-0-0)rqnt(3)aw(1)rcm(1)cdl(na)eco(42017300)ti(0)&force-urlencoded=1&site-info=%7B%22__ymu%22%3A%7B%22status%22%3A%22applicant%22%2C%22crypted_id%22%3A%227249D0C80FB4FF843B34624B46C664E7A5471C6F722104504734B32F0D03E9F8%22%2C%22UserID%22%3A%22996023CA75602DFF4D4C94D32C69A58FB0E3DCC52AF975B8DDD010B8DC7477E3%22%2C%22collar%22%3A%22white%22%7D%7D",
+    "post_data": null
+  },
+  {
+    "method": "GET",
+    "url": "https://vk.com/rtrg?p=VK-RTRG-318408-3u7id&metatag_url=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186"
+  },
+  {
+    "method": "GET",
+    "url": "https://vk.com/rtrg?p=VK-RTRG-737575-4yDN2&metatag_url=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186"
+  },
+  {
+    "method": "POST",
+    "url": "https://hh.ru/anatskytics?hhtmFrom=&hhtmFromLabel=&hhtmSource=chat_hh_page&hhtmSourceLabel=&method=GET&path=%2Fchat%2F5367968186&screenName=app&sender=python&event=web_performance&originalRequestId=1780130484548fc492c7a5d43eefe000",
+    "post_data": null
+  },
+  {
+    "method": "POST",
+    "url": "https://hh.ru/anatskytics?hhtmFromLabel=chat_list&hhtmSource=chat_hh_page&hhtmSourceLabel=&method=GET&path=%2Fchat%2F5367968186&screenName=app&sender=python&event=screen_shown&width=480&height=1040&layout=chat&chatId=5367968186&writeMessageState=ALLOWED&unreadMessageCount=0&chat_type=NEGOTIATION&originalRequestId=1780130484548fc492c7a5d43eefe000",
+    "post_data": null
+  },
+  {
+    "method": "GET",
+    "url": "https://hh.ru/api/fl/idgib-w-hh"
+  },
+  {
+    "method": "GET",
+    "url": "https://dss.hybrid.ai/Pixel/GetSubstitute?pid=660fb8507bc72f6ce8ce4d72&pid=68a861d170e7b26cfc61bcdc&pid=68a861d170e7b26cfc61bce0&url=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186&rf="
+  },
+  {
+    "method": "GET",
+    "url": "https://dss.hybrid.ai/Pixel/TrackTp?pid=660fb8507bc72f6ce8ce4d72&pid=68a861d170e7b26cfc61bcdc&pid=68a861d170e7b26cfc61bce0&url=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186&rf=&foadh=&gapl=&cs=&pcs=&vcs="
+  },
+  {
+    "method": "GET",
+    "url": "https://dss.hybrid.ai/Pixel/Track2?pid=660fb8507bc72f6ce8ce4d72&pid=68a861d170e7b26cfc61bcdc&pid=68a861d170e7b26cfc61bce0&bobid=a9ff16042a5e45f3a8e2924c2a1988e0&evt=PageView&cost=&text=&ltm=false&cnt=&url=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186&rf=&lng=en-US&tz=-5&sw=480&sh=1040&foadh=&gapl=&cs=&pcs=&vcs=&r="
+  },
+  {
+    "method": "POST",
+    "url": "https://hh.ru/anatskytics?hhtmSource=chat&hhtmFrom=&hhtmSourceLabel=&hhtmFromLabel=&event=integrity_violation&documentURL=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186&blockedURL=https%3A%2F%2Fdss.hybrid.ai%2FPixel%2FGetSubstitute%3Fpid%3D660fb8507bc72f6ce8ce4d72%26pid%3D68a861d170e7b26cfc61bcdc%26pid%3D68a861d170e7b26cfc61bce0%26url%3Dhttps%253A%252F%252Fhh.ru%252Fchat%252F5367968186%26rf%3D&destination=script&reportOnly=true&originalRequestId=1780130484548fc492c7a5d43eefe000",
+    "post_data": null
+  },
+  {
+    "method": "POST",
+    "url": "https://hh.ru/anatskytics?hhtmSource=chat&hhtmFrom=&hhtmSourceLabel=&hhtmFromLabel=&event=integrity_violation&documentURL=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186&blockedURL=https%3A%2F%2Fdss.hybrid.ai%2FPixel%2FTrackTp%3Fpid%3D660fb8507bc72f6ce8ce4d72%26pid%3D68a861d170e7b26cfc61bcdc%26pid%3D68a861d170e7b26cfc61bce0%26url%3Dhttps%253A%252F%252Fhh.ru%252Fchat%252F5367968186%26rf%3D%26foadh%3D%26gapl%3D%26cs%3D%26pcs%3D%26vcs%3D&destination=script&reportOnly=true&originalRequestId=1780130484548fc492c7a5d43eefe000",
+    "post_data": null
+  },
+  {
+    "method": "POST",
+    "url": "https://hh.ru/anatskytics?hhtmFrom=&hhtmFromLabel=&hhtmSource=chat_hh_page&hhtmSourceLabel=&method=GET&path=%2Fchat%2F5367968186&screenName=app&sender=python&event=element_shown&elementName=chat_quick_reply&layout=chat&chatId=5367968186&hasSendQuickReplies=true&hasInsertQuickReplies=false&quickReplyListIds=message_id_14303083766_action_button_0%2Cmessage_id_14303083766_action_button_1&originalRequestId=1780130484548fc492c7a5d43eefe000",
+    "post_data": null
+  },
+  {
+    "method": "POST",
+    "url": "https://cpa.hh.ru/api/tracker/hit?url=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186&ref=&sw=480&sh=1040&rnd=0.9308580300837788&uid=159518914e7b4043855688b83566d8a8",
+    "post_data": null
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/chatik/api/chat_data?chatId=5367968186&applicantId=164416493&do_not_track_session_events=false"
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/chatik/api/quick_replies?chatId=5367968186&messageId=14303083766&do_not_track_session_events=false"
+  },
+  {
+    "method": "GET",
+    "url": "https://top-fwz1.mail.ru/tracker?_=0.1376653845135163;id=3209834;u=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186;userid=164416493;title=%D0%A7%D0%B0%D1%82%D1%8B;s=480*1040;vp=480*1040;touch=1;hds=2.25;sid=fdf1d54162085fab;ver=60.6.0;tz=-300%2FAsia%2FAlmaty;st=1780130484659;nt=0/0/1780130483484/////0/6/19/19/156/77/158/617/754/626/1175/1378/1381/2927/2927/2928;ct=1623/1625/1625/1627/1138;rt=1138/379/0/0/0/1138/1138/1150/1150/1363/1291/1363/1512/1517;gl=u;ni=9.7//4g/0/0/;lvid=1779962145404%3A1780130486412%3A3%3A56ddccf1ec01a10a76a5193813efe937;opts=jst-ym-vk%2Cwda%2Ccnhp%3Dh2%2Ccs%3D19684-48997-19984;fpid=9bWXIgOVG5XRF82ES8s-e;visible=true;js=13;e=RT%2Fload;et=1780130486412"
+  },
+  {
+    "method": "GET",
+    "url": "https://top-fwz1.mail.ru/tracker?_=0.585562094678085;id=3399615;u=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186;userid=164416493;title=%D0%A7%D0%B0%D1%82%D1%8B;s=480*1040;vp=480*1040;touch=1;hds=2.25;sid=fdf1d54162085fab;ver=60.6.0;tz=-300%2FAsia%2FAlmaty;st=1780130484659;nt=0/0/1780130483484/////0/6/19/19/156/77/158/617/754/626/1175/1378/1381/2927/2927/2928;ct=1623/1625/1625/1627/1138;rt=1138/379/0/0/0/1138/1138/1150/1150/1363/1291/1363/1512/1517;gl=u;ni=9.7//4g/0/0/;lvid=1779962145404%3A1780130486412%3A4%3A56ddccf1ec01a10a76a5193813efe937;opts=sec%2Cjst-ym-vk%2Cwda%2Ccnhp%3Dh2%2Ccs%3D19684-48997-19984;fpid=9bWXIgOVG5XRF82ES8s-e;visible=true;js=13;e=RT%2Fload;et=1780130486412"
+  },
+  {
+    "method": "POST",
+    "url": "https://hh.ru/anatskytics?hhtmSource=chat&hhtmFrom=&hhtmSourceLabel=&hhtmFromLabel=&event=web_performance&originalRequestId=1780130484548fc492c7a5d43eefe000",
+    "post_data": null
+  },
+  {
+    "method": "POST",
+    "url": "https://hh.ru/anatskytics?hhtmFrom=&hhtmFromLabel=&hhtmSource=chat_hh_page&hhtmSourceLabel=&method=GET&path=%2Fchat%2F5367968186&screenName=app&sender=python&event=web_performance&originalRequestId=1780130484548fc492c7a5d43eefe000",
+    "post_data": null
+  },
+  {
+    "method": "POST",
+    "url": "https://hh.ru/api/fl?u=8904b7c0-4a21-11f1-9913-3b69330000001&cfidsgib-w-hh=BD%2FDcAszHpGwUEvKg3xQ1AvtuxZDFBMRVgMU0BGd7XJ2UJ9RN9TRaPXpV%2FktelACORmUxEuB0%2BWSQg%2FbFLIuN5pn15xkoY8w%2Bd0UbW%2FJ6MCnT6a0b0CICcHnaCwXaOP6X%2BwEDSeWW7PMad%2Bsj%2BiVcD8uWXw21wLRuIek",
+    "post_data": "MDA18904b7c0-4a21-11f1-9913-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5gGvBA==svKGlA=="
+  },
+  {
+    "method": "GET",
+    "url": "https://chatik.hh.ru/chatik/api/unread"
+  },
+  {
+    "method": "POST",
+    "url": "https://hh.ru/anatskytics?hhtmSource=chat&hhtmFrom=&hhtmSourceLabel=&hhtmFromLabel=&event=integrity_violation&documentURL=https%3A%2F%2Fhh.ru%2Fchat%2F5367968186&blockedURL=https%3A%2F%2Femd.hybrid.ai%2Fplgt.js%3Fexl%3D%26foadh%3D%26gapl%3D%26cs%3D%26pcs%3D%26vcs%3D&destination=script&reportOnly=true&originalRequestId=1780130484548fc492c7a5d43eefe000",
+    "post_data": null
+  },
+  {
+    "method": "POST",
+    "url": "https://hh.ru/anatskytics?hhtmSource=chat&hhtmFrom=&hhtmSourceLabel=&hhtmFromLabel=&event=web_performance&originalRequestId=1780130484548fc492c7a5d43eefe000",
+    "post_data": null
+  },
+  {
+    "method": "POST",
+    "url": "https://hh.ru/anatskytics?hhtmSource=chat&hhtmFrom=&hhtmSourceLabel=&hhtmFromLabel=&event=sp_fingerprinting_done&executionTime=8681.399999856949&device_memory=16&hardware_concurrency=10&effective_type=4g&rtt=0&downlink=9.7&originalRequestId=1780130484548fc492c7a5d43eefe000",
+    "post_data": null
+  },
+  {
+    "method": "POST",
+    "url": "https://hh.ru/anatskytics?hhtmSource=chat&hhtmFrom=&hhtmSourceLabel=&hhtmFromLabel=&fingerprintSP=7ae8719e7cb4ce616ae6551ca67ef249f46b0dc9&userType=applicant&requestId=1780130484548fc492c7a5d43eefe000&hhid=187367839&originalRequestId=1780130484548fc492c7a5d43eefe000",
+    "post_data": null
+  }
+]

@@ -1,5 +1,10 @@
 """Standalone worker entrypoint for systemd / docker.
 
+Three independent per-user loops, each driven by its own persisted UI switch
+(`worker_control.active_user_flags`): the legacy auto-apply runner (`apply`),
+the funnel's discovery + scoring cycle (`discovery`) and the recruiter agent
+(`agent`). Nothing auto-starts at boot.
+
 Manual `run-now` requests are durable `search_runs` jobs. Vacancy scoring itself
 uses leased claims; every reconcile pass recovers expired claims before taking
 new work so a killed worker cannot strand a vacancy forever.
@@ -101,28 +106,30 @@ async def _reconcile(registry) -> None:
         # Recovery failure must be visible but must not take the whole worker down.
         logger.exception("vacancy scoring lease recovery failed")
 
+    # A manual run already did this user's discovery+scoring in this pass; doing
+    # it twice would double the HH traffic for the one account that just asked.
     manual_user = await _run_manual_search_job()
 
     loop = asyncio.get_running_loop()
     flags = await loop.run_in_executor(None, active_user_flags)
 
-    desired_agent: dict[str, bool] = {}
-    for uid, (discovery_on, agent_on) in flags.items():
-        desired_agent[uid] = agent_on
-        if uid != manual_user:
-            await _run_discovery_if_due(uid, discovery_on)
-
+    # Users with a live runner but no longer desired → reconcile to (False, False).
+    desired = {uid: (f["apply"], f["agent"]) for uid, f in flags.items()}
     for uid in registry.active_user_ids():
-        desired_agent.setdefault(uid, False)
+        desired.setdefault(uid, (False, False))
 
-    for uid, agent_on in desired_agent.items():
+    for uid, (apply_on, agent_on) in desired.items():
+        discovery_on = bool(flags.get(uid, {}).get("discovery"))
         logger.info(
-            "reconcile: user=%s discovery=%s agent=%s",
+            "reconcile: user=%s apply=%s discovery=%s agent=%s",
             uid,
-            bool(flags.get(uid, (False, False))[0]),
+            apply_on,
+            discovery_on,
             agent_on,
         )
-        await registry.reconcile(uid, False, agent_on)
+        if uid != manual_user:
+            await _run_discovery_if_due(uid, discovery_on)
+        await registry.reconcile(uid, apply_on, agent_on)
 
 
 async def main() -> None:
@@ -138,7 +145,7 @@ async def main() -> None:
 
     registry = get_registry()
     logger.info(
-        "worker_main: discovery/scoring/recruiter reconcile loop start (every %ds)",
+        "worker_main: apply/discovery/recruiter reconcile loop start (every %ds)",
         POLL_INTERVAL_S,
     )
     while not stop_event.is_set():
@@ -151,7 +158,7 @@ async def main() -> None:
         except TimeoutError:
             pass
 
-    logger.info("stopping recruiter/legacy runners")
+    logger.info("stopping all runners")
     await registry.stop_all()
     logger.info("worker_main shutdown complete")
 

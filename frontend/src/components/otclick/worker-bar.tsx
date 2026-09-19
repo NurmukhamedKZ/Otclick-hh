@@ -11,7 +11,7 @@ import type {
   WorkerStatus,
   WorkerStopResponse,
 } from "@/lib/types";
-import { Btn, IconBtn, KeyHint, StatusDot, Tooltip } from "@/components/otclick/ui";
+import { Btn, IconBtn, KeyHint, StatusDot, Toggle, Tooltip } from "@/components/otclick/ui";
 import { IBell, IFilter, IPause, IPlay, IRefresh, ISearch, ISpark } from "@/components/otclick/icons";
 import { pushToast } from "@/components/toaster";
 import { openFiltersDrawer } from "@/components/filters-drawer";
@@ -85,6 +85,18 @@ export default function WorkerBar() {
       pushToast({ kind: "info", title: "ИИ-агент остановлен" });
     },
     onError: (e) => pushToast({ kind: "error", title: e instanceof Error ? e.message : "stop failed" }),
+  });
+
+  // Every runtime switch lives here: one endpoint, one persisted flag each.
+  const flagM = useMutation({
+    mutationFn: ({ flag, enabled }: { flag: "discovery" | "real_apply"; enabled: boolean }) =>
+      apiFetch<{ flag: string; enabled: boolean }>(
+        `/api/worker/flags/${flag}?enabled=${enabled}`,
+        { method: "POST" },
+      ),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["worker-status"] }),
+    onError: (e) =>
+      pushToast({ kind: "error", title: e instanceof Error ? e.message : "не удалось переключить" }),
   });
 
   const refresh = useCallback(async () => {
@@ -290,8 +302,61 @@ export default function WorkerBar() {
               <span className="oc-nav-item__icon"><IBell size={16} /></span>
               <span className="oc-nav-item__label">Уведомления</span>
             </button>
+            <div style={{ height: 1, background: "var(--line)", margin: "4px 8px" }} />
+            <SwitchRow
+              label="Поиск вакансий"
+              hint="воронка: обход источников и скоринг каждые 5 минут"
+              on={(status?.discovery_state ?? "stopped") === "running"}
+              disabled={flagM.isPending}
+              onChange={(enabled) => flagM.mutate({ flag: "discovery", enabled })}
+            />
+            <SwitchRow
+              label="Реальная отправка"
+              hint={
+                status?.real_apply_allowed_by_env
+                  ? "без него ни один отклик не уходит на hh"
+                  : "заблокировано: ALLOW_REAL_APPLY=false в .env"
+              }
+              on={!!status?.real_apply_enabled}
+              disabled={flagM.isPending || !status?.real_apply_allowed_by_env}
+              onChange={(enabled) => flagM.mutate({ flag: "real_apply", enabled })}
+            />
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+
+function SwitchRow({
+  label,
+  hint,
+  on,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  on: boolean;
+  disabled?: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "6px 8px",
+      }}
+    >
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>{label}</div>
+        <div style={{ fontSize: 11, color: "var(--muted)" }}>{hint}</div>
+      </div>
+      <div style={{ marginLeft: "auto" }}>
+        <Toggle on={on} disabled={disabled} onChange={onChange} />
       </div>
     </div>
   );

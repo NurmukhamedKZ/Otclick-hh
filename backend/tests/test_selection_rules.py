@@ -109,9 +109,9 @@ async def test_score_one_passes_only_matching_scoring_preferences_to_llm():
         {
             "components": {
                 "role_fit": 20,
-                "scale_fit": 20,
-                "transformation_mandate": 22,
-                "industry_business_context": 18,
+                "seniority_scale_fit": 20,
+                "requirements_match": 22,
+                "context_fit": 18,
             },
             "pros": [],
             "risks": [],

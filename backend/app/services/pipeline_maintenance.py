@@ -166,9 +166,10 @@ async def rescore_stale(user_id: str) -> dict:
     if not rows:
         return {"matched_stale": 0, "requeued": 0, "scoring": _empty_scoring_summary()}
 
-    context, rules = await asyncio.gather(
+    context, rules, blacklist = await asyncio.gather(
         candidate_context_service.load_candidate_context(user_id),
         selection_rules.load_active_rules(user_id),
+        asyncio.to_thread(pipeline_scoring.load_blacklist, user_id),
     )
     llm = HHAgent(user_id).llm
 
@@ -185,6 +186,7 @@ async def rescore_stale(user_id: str) -> dict:
             context=context,
             llm=llm,
             rules=rules,
+            blacklist=blacklist,
         )
         _count_outcome(scoring, outcome)
     return {"matched_stale": len(rows), "requeued": len(requeued_rows), "scoring": scoring}
@@ -203,9 +205,10 @@ async def retry_incomplete(user_id: str) -> dict:
         }
 
     # Resolve dependencies before rewriting score_error/inconsistent rows.
-    context, rules = await asyncio.gather(
+    context, rules, blacklist = await asyncio.gather(
         candidate_context_service.load_candidate_context(user_id),
         selection_rules.load_active_rules(user_id),
+        asyncio.to_thread(pipeline_scoring.load_blacklist, user_id),
     )
     llm = HHAgent(user_id).llm
 
@@ -227,6 +230,7 @@ async def retry_incomplete(user_id: str) -> dict:
             context=context,
             llm=llm,
             rules=rules,
+            blacklist=blacklist,
         )
         _count_outcome(scoring, outcome)
 

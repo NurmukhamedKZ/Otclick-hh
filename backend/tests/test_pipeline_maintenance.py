@@ -18,6 +18,7 @@ async def test_rescore_stale_scores_only_rows_requeued_by_this_action():
         patch.object(svc, "_stale_score_rows", new=AsyncMock(return_value=rows)),
         patch.object(svc.candidate_context_service, "load_candidate_context", new=AsyncMock(return_value={"version": 1})) as context,
         patch.object(svc.selection_rules, "load_active_rules", new=AsyncMock(return_value=[])) as rules,
+        patch.object(svc.pipeline_scoring, "load_blacklist", return_value={}),
         patch.object(svc, "HHAgent", return_value=MagicMock(llm=llm)),
         patch.object(svc, "_requeue_score", side_effect=[True, False]) as requeue,
         patch.object(svc.pipeline_scoring, "score_one", new=AsyncMock(return_value="scored")) as score_one,
@@ -53,6 +54,7 @@ async def test_rescore_loads_context_before_requeueing_anything():
             new=AsyncMock(side_effect=RuntimeError("profile unavailable")),
         ),
         patch.object(svc.selection_rules, "load_active_rules", new=AsyncMock(return_value=[])),
+        patch.object(svc.pipeline_scoring, "load_blacklist", return_value={}),
         patch.object(svc, "_requeue_score") as requeue,
     ):
         with pytest.raises(RuntimeError):

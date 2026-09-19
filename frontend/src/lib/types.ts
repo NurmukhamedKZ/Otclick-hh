@@ -71,16 +71,28 @@ export type BlacklistCreate = {
 export type WorkerStatus = {
   state: "starting" | "running" | "paused_captcha" | "paused_limit" | "idle" | "stopped";
   agent_state: "running" | "stopped";
+  /** Воронка: поиск по источникам + скоринг. Свой переключатель, не apply-цикл. */
+  discovery_state: "running" | "stopped";
   today_count: number;
   daily_limit: number | null;
   queued: number;
   next_run_at: string | null;
   last_error: string | null;
   skipped_has_test: number;
-  /** Compatibility field; the non-commercial build always reports auto. */
+  /** Совместимость: в self-hosted сборке режим всегда автономный, без квоты. */
   mode: "auto";
   limit_total: number | null;
   total_used: number;
+  /** Реальная отправка требует И env-флага, И переключателя пользователя. */
+  real_apply_enabled: boolean;
+  real_apply_allowed_by_env: boolean;
+};
+
+export type WorkerFlags = {
+  apply: boolean;
+  discovery: boolean;
+  agent: boolean;
+  real_apply: boolean;
 };
 
 export type WorkerStartResponse = {

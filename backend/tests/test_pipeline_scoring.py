@@ -3,27 +3,43 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+_REJECT_RULE = {
+    "id": "rule-1",
+    "version": 3,
+    "name": "Без выездной работы",
+    "action": "hard_reject",
+    "active": True,
+    "instruction": "отклонять разъездные вакансии",
+    "match": {"title_any": ["разъездной"]},
+}
 
-def test_hard_filter_rejects_explicit_non_target_title():
+
+def test_hard_filter_reason_comes_from_approved_rules_only():
     from app.services.pipeline_scoring import hard_filter_reason
 
-    assert hard_filter_reason({"title": "Руководитель инфраструктуры"}) == "role_mismatch_infrastructure"
-    assert hard_filter_reason({"title": "Ведущий разработчик"}) == "role_mismatch_hands_on_development"
+    vacancy = {"title": "Разъездной инженер"}
+    assert hard_filter_reason(vacancy) is None
+    assert hard_filter_reason(vacancy, [_REJECT_RULE]) == "approved_rule:rule-1:Без выездной работы"
 
 
-def test_hard_filter_does_not_reject_explicit_strategic_role():
+def test_hard_filter_ignores_rules_that_do_not_match_and_inactive_ones():
     from app.services.pipeline_scoring import hard_filter_reason
 
-    assert hard_filter_reason({"title": "CIO / Руководитель инфраструктуры"}) is None
-    assert hard_filter_reason({"title": "CDTO"}) is None
-    assert hard_filter_reason({"title": "Директор по инфраструктуре и цифровой трансформации"}) is None
+    assert hard_filter_reason({"title": "Инженер"}, [_REJECT_RULE]) is None
+    assert hard_filter_reason({"title": "Разъездной инженер"}, [{**_REJECT_RULE, "active": False}]) is None
+    assert hard_filter_reason({"title": "Разъездной инженер"}, [{**_REJECT_RULE, "deleted_at": "2026-01-01"}]) is None
 
 
-def test_cto_acronym_does_not_match_inside_generic_director_word():
-    from app.services.pipeline_scoring import hard_filter_reason
+def test_blacklisted_employer_is_an_explainable_hard_reject():
+    from app.services.pipeline_scoring import hard_filter_details, hard_filter_reason
 
-    assert hard_filter_reason({"title": "Infrastructure Director / Head of Infrastructure"}) == "role_mismatch_infrastructure"
-    assert hard_filter_reason({"title": "CTO / Head of Infrastructure"}) is None
+    vacancy = {"title": "Инженер", "employer_id": "42", "employer_name": "Рога"}
+    assert hard_filter_reason(vacancy, [], {"42": "Рога"}) == "blacklisted_employer:42"
+    assert hard_filter_reason(vacancy, [], {"7": "Копыта"}) is None
+
+    detail = hard_filter_details(vacancy, [], {"42": "Рога"})[0]
+    assert detail["type"] == "blacklist"
+    assert detail["matches"] == [{"field": "employer_id", "term": "42"}]
 
 
 def test_structured_score_total_is_sum_of_components():
@@ -33,15 +49,15 @@ def test_structured_score_total_is_sum_of_components():
         {
             "components": {
                 "role_fit": 23,
-                "scale_fit": 18,
-                "transformation_mandate": 22,
-                "industry_business_context": 17,
+                "seniority_scale_fit": 18,
+                "requirements_match": 22,
+                "context_fit": 17,
             },
-            "pros": ["роль уровня CIO"],
+            "pros": ["роль совпадает с последним местом работы"],
             "risks": [],
-            "unknowns": ["не указана выручка"],
+            "unknowns": ["не указан размер команды"],
             "confidence": 75,
-            "explanation": "Сильный трансформационный мандат, масштаб требует уточнения.",
+            "explanation": "Требования покрыты, масштаб требует уточнения.",
         }
     )
     assert score.total == 80
@@ -55,8 +71,9 @@ async def test_hard_filtered_vacancy_becomes_explainable_rule_reject_without_llm
         "id": "p1",
         "status": "scoring",
         "hh_vacancy_id": "123",
-        "title": "Руководитель инфраструктуры",
-        "description": "Эксплуатация инфраструктуры.",
+        "title": "Разъездной инженер",
+        "employer_id": "42",
+        "description": "Работа с выездами к клиентам.",
         "sources": [],
     }
     with (
@@ -75,6 +92,7 @@ async def test_hard_filtered_vacancy_becomes_explainable_rule_reject_without_llm
             {"id": "p1"},
             context={"version": 1, "profile": {}, "facts": []},
             llm=object(),
+            blacklist={"42": "Рога"},
         )
 
     assert outcome == "hard_filtered"
@@ -83,9 +101,9 @@ async def test_hard_filtered_vacancy_becomes_explainable_rule_reject_without_llm
     assert final["to_status"] == "rejected_by_rule"
     assert final["expected_claim_token"] == "claim-1"
     assert final["changes"]["score"] == 0
-    assert final["changes"]["hard_filter_reason"] == "role_mismatch_infrastructure"
-    assert final["changes"]["auto_reject_details"][0]["type"] == "system"
-    assert final["changes"]["auto_reject_details"][0]["matches"][0]["field"] == "title"
+    assert final["changes"]["hard_filter_reason"] == "blacklisted_employer:42"
+    assert final["changes"]["auto_reject_details"][0]["type"] == "blacklist"
+    assert final["changes"]["auto_reject_details"][0]["matches"][0]["field"] == "employer_id"
 
 
 @pytest.mark.asyncio
@@ -96,8 +114,8 @@ async def test_llm_failure_becomes_score_error_not_positive_match():
         "id": "p1",
         "status": "scoring",
         "hh_vacancy_id": "123",
-        "title": "CIO",
-        "description": "Трансформация бизнеса и IT.",
+        "title": "Инженер",
+        "description": "Поддержка внутренних сервисов.",
         "sources": [],
     }
     with (

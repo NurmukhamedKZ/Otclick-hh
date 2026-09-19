@@ -17,5 +17,4 @@ docs
 backend/tests
 backend/poc_day1.py
 backend/poc_day1_playwright.py
-# backend/scripts is intentionally INCLUDED: the production image needs
-# load_candidate_data.py for single-user install/profile reload.
+backend/scripts

@@ -1,7 +1,7 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
-async def test_worker_flag_starts_discovery_and_scoring_not_legacy_apply():
+async def test_discovery_flag_starts_discovery_and_scoring_without_apply_loop():
     import worker_main
 
     registry = MagicMock()
@@ -14,7 +14,7 @@ async def test_worker_flag_starts_discovery_and_scoring_not_legacy_apply():
         patch.object(
             worker_main,
             "active_user_flags",
-            return_value={"u1": (True, False)},
+            return_value={"u1": {"apply": False, "discovery": True, "agent": False}},
         ),
         patch.object(
             worker_main,
@@ -44,7 +44,7 @@ async def test_worker_flag_starts_discovery_and_scoring_not_legacy_apply():
 
     discover.assert_awaited_once_with("u1")
     score.assert_awaited_once_with("u1")
-    # Critical contract: legacy auto-apply loop is never started by worker_main.
+    # The discovery switch is its own loop: it must not start the apply runner.
     registry.reconcile.assert_awaited_once_with("u1", False, False)
 
 
@@ -61,7 +61,7 @@ async def test_discovery_and_scoring_are_not_repeated_on_every_15_second_reconci
         patch.object(
             worker_main,
             "active_user_flags",
-            return_value={"u1": (True, False)},
+            return_value={"u1": {"apply": False, "discovery": True, "agent": False}},
         ),
         patch.object(worker_main, "_monotonic", side_effect=[100.0, 101.0]),
         patch.object(

@@ -66,8 +66,8 @@ def ask_openai_key() -> str:
     """The one value we cannot generate. Skipped on a non-interactive stdin."""
     if not sys.stdin.isatty():
         return ""
-    print("OpenAI/OpenAI-compatible key — powers vacancy scoring and candidate-facing AI text.")
-    print("Enter to skip; discovery/review still work and AI failures stay explicit.")
+    print("OpenAI-compatible key — powers vacancy scoring, cover letters, test answers")
+    print("and the recruiter agent. Enter to skip; discovery/review still work.")
     return input("OPENAI_API_KEY: ").strip()
 
 
@@ -88,10 +88,10 @@ def main() -> None:
 
     target.write_text(render((ROOT / ".env.example").read_text(), values))
     target.chmod(0o600)
-    print(f"\nWrote {target}.")
+    print(f"\nWrote {target}. Next: docker compose up -d --build → http://localhost:3000")
     if not openai_key:
-        print("No AI key: search/discovery/manual review can run, but LLM scoring and")
-        print("new-funnel cover-letter generation will report an explicit unavailable/error state.")
+        print("No AI key: discovery and manual review run, but LLM scoring and funnel")
+        print("cover-letter generation report an explicit error instead of guessing.")
         print("Add OPENAI_API_KEY later or point OPENAI_BASE_URL at a compatible model.")
 
 

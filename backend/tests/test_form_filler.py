@@ -333,7 +333,9 @@ def test_answer_payload_adds_test_meta_and_tasks():
 async def test_submit_response_plain_posts_without_test_fields(monkeypatch):
     """The Task 5 regression: an answers=None apply must not send the test-only
     keys (uidPk/guid/startTime/testRequired) — those only exist for tests."""
-    from app.services import form_filler
+    from unittest.mock import AsyncMock
+
+    from app.services import form_filler, worker_control
 
     captured = {}
 
@@ -353,6 +355,7 @@ async def test_submit_response_plain_posts_without_test_fields(monkeypatch):
         return "hr"
 
     monkeypatch.setattr(form_filler.settings, "ALLOW_REAL_APPLY", True)
+    monkeypatch.setattr(worker_control, "get_flags", AsyncMock(return_value={"real_apply": True}))
     monkeypatch.setattr(form_filler, "_post_response", _fake_post)
     monkeypatch.setattr(form_filler, "load_web_session", _fake_session)
     monkeypatch.setattr(form_filler, "_get_hh_resume_id", _fake_hh_resume)

@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Install Python deps first (cached layer)
-# Build context = repo root (see docker-compose.yml).
+# Build context = repo root (see docker-compose.yml `context: ..`)
 COPY pyproject.toml uv.lock ./
 RUN pip install uv && uv pip install --system --no-cache .
 
@@ -24,13 +24,9 @@ RUN pip install uv && uv pip install --system --no-cache .
 RUN playwright install --with-deps chromium \
     && chmod -R a+rX /ms-playwright
 
-# App code + prepared single-user data/maintenance scripts. Keeping data/scripts
-# inside the image lets install.sh load the curated candidate context without
-# mounting the source tree into the running API container.
+# App code
 COPY backend/app ./app
 COPY backend/worker_main.py ./worker_main.py
-COPY backend/data ./data
-COPY backend/scripts ./scripts
 
 # Non-root user
 RUN useradd -m -u 1000 app && chown -R app:app /app /home/app

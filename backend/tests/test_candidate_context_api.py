@@ -40,14 +40,53 @@ async def test_candidate_context_api_returns_runtime_profile_and_facts():
     assert result.facts[0].fact_key == "revenue_growth"
 
 
-def test_prepared_candidate_context_still_contains_active_facts():
-    import json
-    from pathlib import Path
+@pytest.mark.asyncio
+async def test_context_is_built_from_the_users_resume_and_qa_memory():
+    """No bundled persona: facts must come from this account's own data and
+    carry stable keys, because generated letters cite them by key."""
+    from app.services import candidate_context_service as svc
 
-    path = Path(__file__).resolve().parents[1] / "data" / "candidate" / "confirmed_facts.json"
-    document = json.loads(path.read_text(encoding="utf-8"))
+    resume = {
+        "title": "Инженер данных",
+        "area": {"name": "Алматы"},
+        "skill_set": ["SQL", "Python"],
+        "skills": "<p>Строю витрины данных.</p>",
+        "experience": [
+            {"position": "Инженер данных", "company": "Рога", "description": "ETL", "start": "2020-01-01"},
+            {"position": "Аналитик", "company": "Копыта", "description": "Отчётность", "start": "2017-01-01"},
+        ],
+    }
+    row = {"id": "r-uuid", "hh_resume_id": "hh-1", "title": "Инженер данных", "synced_at": "2026-09-01T10:00:00+00:00"}
 
-    assert len(document["facts"]) >= 1
-    assert all(str(fact.get("key") or "").strip() for fact in document["facts"])
-    assert isinstance(document.get("guardrails"), list)
-    assert document["guardrails"]
+    with (
+        patch.object(svc, "_latest_resume_row", return_value=row),
+        patch("app.services.form_filler.load_resume", new=AsyncMock(return_value=resume)),
+        patch.object(
+            svc.qa_memory,
+            "list_all",
+            new=AsyncMock(return_value=[{"question": "Готовы к переезду?", "answer": "Да"}]),
+        ),
+    ):
+        context = await svc.load_candidate_context("u1")
+
+    keys = [f["fact_key"] for f in context["facts"]]
+    assert keys == ["experience_1", "experience_2", "skills", "about", "qa_1"]
+    assert len(set(keys)) == len(keys)
+    assert context["source_name"] == "hh_resume:hh-1"
+    assert context["profile"]["resume_id"] == "r-uuid"
+    # The grounding text every LLM claim must be traceable to.
+    assert "Инженер данных" in context["profile"]["resume_summary"]
+    # A re-synced resume must produce a new version so fingerprints go stale.
+    assert context["version"] > 1
+
+
+@pytest.mark.asyncio
+async def test_context_without_a_synced_resume_is_an_explicit_conflict():
+    from fastapi import HTTPException
+
+    from app.services import candidate_context_service as svc
+
+    with patch.object(svc, "_latest_resume_row", return_value=None):
+        with pytest.raises(HTTPException) as ex:
+            await svc.load_candidate_context("u1")
+    assert ex.value.status_code == 409

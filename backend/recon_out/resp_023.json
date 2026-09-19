@@ -1,0 +1,2 @@
+"use strict";(globalThis.__chatik_LOADABLE_LOADED_CHUNKS__=globalThis.__chatik_LOADABLE_LOADED_CHUNKS__||[]).push([["8758"],{86458:function(t,_,e){e.r(_),e.d(_,{BreakpointContext:()=>n,default:()=>o});var i=e(72910);const n=(0,i.createContext)({renderRestriction:!1}),o=()=>(0,i.useContext)(n)}}]);
+//# sourceMappingURL=fallbackBlokoBreakpointProvider.f7364ded3f9ab159.js.map

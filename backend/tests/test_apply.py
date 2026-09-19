@@ -574,6 +574,7 @@ async def test_submit_response_returns_captcha_wall_tag_on_captcha_redirect():
     from unittest.mock import MagicMock
 
     from app.services import form_filler as ff
+    from app.services import worker_control
 
     session = MagicMock()
     get_resp = MagicMock()
@@ -590,6 +591,7 @@ async def test_submit_response_returns_captcha_wall_tag_on_captcha_redirect():
         patch.object(ff, "load_web_session", new=_fake_session),
         patch.object(ff, "_get_hh_resume_id", new=_fake_resume_id),
         patch.object(ff.settings, "ALLOW_REAL_APPLY", True),
+        patch.object(worker_control, "get_flags", new=AsyncMock(return_value={"real_apply": True})),
     ):
         status, error = await ff.submit_response("u1", "r-uuid", "v1", letter="hi", answers=None)
 
