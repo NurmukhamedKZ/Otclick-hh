@@ -556,6 +556,13 @@ async def submit_response(
     Returns (status, error): "sent"/"form_sent" on accept, "failed" + reason
     otherwise (network/parse error, dead session, or hh rejected).
     """
+    if not settings.ALLOW_REAL_APPLY:
+        logger.warning(
+            "fill: real HH submit blocked by ALLOW_REAL_APPLY=false vacancy=%s",
+            vacancy_id,
+        )
+        return "failed", "real_apply_disabled"
+
     loop = asyncio.get_running_loop()
     try:
         session = await load_web_session(user_id)

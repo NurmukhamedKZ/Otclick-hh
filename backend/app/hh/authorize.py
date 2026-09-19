@@ -1,26 +1,41 @@
-"""Playwright OAuth flow for hh.ru.
+"""Playwright web-login flow for hh.ru.
 
-Adapted from backend/poc_day1_playwright.py. Differs from
-hh-applicant-tool/operations/authorize.py — the upstream selectors are stale
-(Magritte UI changed). Our POC selectors are verified Day 1.
+The product uses the authenticated hh.ru web session as its primary data path.
+OAuth tokens are optional, so connection must not depend on a borrowed mobile
+OAuth client id. The legacy public function names are kept for compatibility
+with the service layer; they now return ``(None, cookies)`` after a successful
+normal hh.ru web login.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from urllib.parse import parse_qs, urlencode, urlsplit
 
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api import async_playwright
-
-from .client_keys import ANDROID_CLIENT_ID, REDIRECT_URI
 
 logger = logging.getLogger(__name__)
 
-HH_OAUTH_AUTHORIZE = "https://hh.ru/oauth/authorize"
+HH_WEB_LOGIN = "https://hh.ru/account/login"
+HH_SESSION_CHECK = "https://hh.ru/applicant/resumes"
 
-SEL_LOGIN_INPUT = 'input[data-qa="login-input-username"], input[name="login"], input[type="email"]'
+# HH changes the first step of the form independently for desktop/mobile and
+# for A/B experiments.  `username` is the current Magritte field name; the
+# other variants are kept for older rollouts and regional mirrors.
+SEL_LOGIN_INPUT = (
+    'input[data-qa="login-input-username"], '
+    'input[data-qa="applicant-login-input-email"], '
+    'input[name="username"], '
+    'input[name="login"], '
+    'input[autocomplete="username"], '
+    'input[type="email"], '
+    'input[type="tel"], '
+    # Some current regional login pages omit both name and data-qa.  Scope the
+    # generic fallback to the login form so it cannot select unrelated fields.
+    'form[data-qa="account-login-form"] input[type="text"]:not([autocomplete="one-time-code"]), '
+    'form[data-qa="account-login-form"] input:not([type]):not([autocomplete="one-time-code"])'
+)
 SEL_EXPAND_PASSWORD = (
     'button:has-text("Войти с паролем"), '
     'button:has-text("Войти по паролю"), '
@@ -36,61 +51,134 @@ SEL_PASSWORD_INPUT = (
 SEL_CAPTCHA_IMAGE = 'img[data-qa="account-captcha-picture"]'
 SEL_CAPTCHA_INPUT = 'input[data-qa="account-captcha-input"]'
 
-SEL_CODE_CONTAINER = 'div[data-qa="account-login-code-input"]'
+SEL_CODE_CONTAINER = (
+    'div[data-qa="account-login-code-input"], '
+    'div[data-qa="applicant-login-input-otp"]'
+)
 SEL_PIN_CODE_INPUT = 'input[data-qa="magritte-pincode-input-field"]'
 
-
-def build_authorize_url() -> str:
-    qs = urlencode({
-        "client_id": ANDROID_CLIENT_ID,
-        "response_type": "code",
-        "redirect_uri": REDIRECT_URI,
-    })
-    return f"{HH_OAUTH_AUTHORIZE}?{qs}"
+SEL_APPLICANT_ACCOUNT_TYPE = 'input[data-qa*="account-type-card-APPLICANT"]'
+SEL_ACCOUNT_TYPE_SUBMIT = 'button[data-qa="submit-button"]'
+SEL_EMAIL_CREDENTIAL_TYPE = 'input[data-qa*="credential-type-email"]'
 
 
-def _watch_redirect(page) -> asyncio.Future[str]:
-    """Resolve with the full redirect_uri URL hh sends the browser to.
+def _is_auth_wall(url: str) -> bool:
+    return "/account/login" in url or "/account/captcha" in url
 
-    Works both for the Android custom scheme (which never loads) and for a real
-    https callback of a self-registered app — we only need the URL, not its
-    response, so it does not matter whether the host resolves.
+
+async def _login_page_diagnostics(page) -> str:
+    """Return a small, non-sensitive description when HH did not render login.
+
+    DDoS-Guard commonly returns an HTTP 200 challenge page, so the HTTP status
+    alone cannot distinguish it from a usable login form.  Do not include the
+    full HTML: it can contain anti-bot tokens and is not useful to the user.
     """
-    fut: asyncio.Future[str] = asyncio.Future()
+    try:
+        title = (await page.title()).strip()
+        body = " ".join((await page.locator("body").inner_text()).split())[:500]
+    except Exception:
+        return "page content could not be read"
 
-    def handle_request(request):
-        if request.url.startswith(REDIRECT_URI) and not fut.done():
-            fut.set_result(request.url)
+    marker = f"{title} {body}".lower()
+    if any(value in marker for value in ("ddos-guard", "access denied", "доступ ограничен")):
+        return "anti-bot protection page"
+    inputs = await page.locator("input:visible").evaluate_all(
+        """elements => elements.map(element => ({
+            type: element.type,
+            name: element.name,
+            autocomplete: element.autocomplete,
+            inputmode: element.inputMode,
+            qa: element.getAttribute("data-qa"),
+            placeholder: element.placeholder,
+        }))"""
+    )
+    return f"title={title!r}, visible inputs={inputs!r}"
 
-    page.on("request", handle_request)
-    return fut
 
+async def _open_web_login(page) -> None:
+    """Open the normal HH login page and wait for the actual form.
 
-def _extract_code(redirect_url: str) -> str | None:
-    """Pull the OAuth code out of the redirect, or None with the reason logged.
-
-    Deliberately does NOT raise. The login itself already succeeded by this
-    point and the browser holds a working hh.ru web session — which is what the
-    product actually runs on. Blowing up here used to throw those cookies away
-    over an OAuth grant nothing needs any more.
+    Deliberately wait only for DOMContentLoaded. HH pages include third-party
+    analytics that can keep the browser ``load`` event pending indefinitely;
+    form readiness, not unrelated resources, is the condition we care about.
     """
-    parts = urlsplit(redirect_url)
-    params = parse_qs(parts.query)
-    params.update(parse_qs(parts.fragment))  # hh may answer in the fragment
-    code = (params.get("code") or [None])[0]
-    if code:
-        return code
-    err = (params.get("error_description") or params.get("error") or [None])[0]
-    if err == "geo_forbidden":
-        logger.warning(
-            "hh oauth: geo_forbidden — hh refuses the OAuth grant for this "
-            "region under client_id %s. Continuing on the web session alone; "
-            "register your own app (dev.hh.kz/admin) to get tokens back.",
-            ANDROID_CLIENT_ID[:8],
+    response = await page.goto(
+        HH_WEB_LOGIN,
+        timeout=30000,
+        wait_until="domcontentloaded",
+    )
+    status = getattr(response, "status", None)
+    if status is not None and status >= 400:
+        if status in {403, 429, 451}:
+            raise RuntimeError(
+                "HH login is blocked by the site's anti-bot protection "
+                f"(HTTP {status}); this is not an account-password error"
+            )
+        raise RuntimeError(f"HH login page returned HTTP {status}")
+    # HH can first ask whether the visitor is an applicant or an employer.
+    # The applicant radio is selected by default, but its explicit "Войти"
+    # button must still be pressed before the credential form is rendered.
+    applicant_type = page.locator(SEL_APPLICANT_ACCOUNT_TYPE)
+    if await applicant_type.count():
+        await applicant_type.check()
+        await page.locator(SEL_ACCOUNT_TYPE_SUBMIT).click()
+
+    # The next HH screen defaults to phone sign-in. This product receives an
+    # email address, so switch explicitly before locating the username field.
+    email_credential_type = page.locator(SEL_EMAIL_CREDENTIAL_TYPE)
+    if await email_credential_type.count():
+        await email_credential_type.check(force=True)
+
+    try:
+        await page.wait_for_selector(SEL_LOGIN_INPUT, timeout=15000, state="visible")
+    except Exception as ex:
+        diagnostics = await _login_page_diagnostics(page)
+        raise RuntimeError(
+            "HH login form did not become ready "
+            f"(url={page.url}; {diagnostics})"
+        ) from ex
+
+
+async def _verified_web_cookies(page, context) -> list[dict]:
+    """Return cookies only after HH itself proves the session is authenticated.
+
+    A mere ``hhtoken`` cookie is insufficient because HH also issues it to
+    anonymous visitors. Prefer the post-login navigation signal, then verify
+    the same browser context against the applicant resumes page. A redirect
+    back to /account/login means authentication did not succeed.
+    """
+    try:
+        await page.wait_for_url(
+            lambda url: not _is_auth_wall(str(url)),
+            timeout=30000,
+            wait_until="domcontentloaded",
         )
-    else:
-        logger.warning("hh oauth: no code in redirect %s", redirect_url)
-    return None
+    except PlaywrightTimeoutError:
+        # Some HH login variants may update session state before navigating.
+        # The authenticated-page probe below is authoritative.
+        pass
+
+    probe = await context.new_page()
+    try:
+        response = await probe.goto(
+            HH_SESSION_CHECK,
+            timeout=30000,
+            wait_until="domcontentloaded",
+        )
+        status = getattr(response, "status", None)
+        if status in {401, 403}:
+            raise RuntimeError("HH rejected the login: invalid email or password")
+        if status is not None and status >= 400:
+            raise RuntimeError(f"HH session validation returned HTTP {status}")
+        if _is_auth_wall(probe.url):
+            raise RuntimeError("HH login did not create an authenticated web session")
+    finally:
+        await probe.close()
+
+    cookies = await context.cookies()
+    if not cookies:
+        raise RuntimeError("HH login succeeded but browser session has no cookies")
+    return cookies
 
 
 async def get_auth_code(
@@ -99,14 +187,15 @@ async def get_auth_code(
     on_captcha: Callable[[bytes], Awaitable[str]] | None = None,
     headless: bool = True,
 ) -> tuple[str | None, list[dict]]:
-    """Run Playwright OAuth flow → returns (hh OAuth code or None, web cookies).
+    """Log in through the normal HH web page and return ``(None, cookies)``.
 
-    The cookies are the logged-in hh.ru session captured from the same browser
-    context. Stored alongside the tokens and reused by the form-filler to solve
-    vacancy tests over the web endpoint — avoids re-login (and its captcha).
+    The function keeps its historical name so callers do not need a migration.
+    No OAuth authorize endpoint, mobile client id, redirect URI or code exchange
+    is required for the product's cookies-only data path.
 
-    on_captcha: async callback (screenshot_png_bytes) -> solution_string.
-                If captcha appears and callback is None, raises RuntimeError.
+    ``on_captcha`` is an async callback receiving a screenshot and returning the
+    human-entered solution. If captcha appears and no callback exists, the flow
+    raises RuntimeError.
     """
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=headless)
@@ -115,15 +204,13 @@ async def get_auth_code(
             context = await browser.new_context(**device)
             page = await context.new_page()
 
-            redirect_future = _watch_redirect(page)
-
-            await page.goto(build_authorize_url(), timeout=30000, wait_until="load")
-
-            await page.wait_for_selector(SEL_LOGIN_INPUT, timeout=10000, state="visible")
+            await _open_web_login(page)
             await page.fill(SEL_LOGIN_INPUT, username)
 
             try:
-                await page.wait_for_selector(SEL_EXPAND_PASSWORD, timeout=5000, state="visible")
+                await page.wait_for_selector(
+                    SEL_EXPAND_PASSWORD, timeout=5000, state="visible"
+                )
                 await page.click(SEL_EXPAND_PASSWORD)
             except Exception:
                 pass  # password field may already be visible
@@ -131,31 +218,32 @@ async def get_auth_code(
             await _handle_captcha_if_present(page, on_captcha)
 
             try:
-                await page.wait_for_selector(SEL_PASSWORD_INPUT, timeout=15000, state="visible")
+                await page.wait_for_selector(
+                    SEL_PASSWORD_INPUT, timeout=15000, state="visible"
+                )
             except Exception:
                 try:
-                    import logging
                     inputs = await page.evaluate(
                         "Array.from(document.querySelectorAll('input,button'))"
                         ".slice(0,40).map(e=>({tag:e.tagName,type:e.type,"
                         "name:e.name,qa:e.getAttribute('data-qa'),"
                         "text:(e.innerText||'').slice(0,40)}))"
                     )
-                    logging.getLogger(__name__).error(
+                    logger.error(
                         "hh login: password field missing. URL=%s inputs=%s",
-                        page.url, inputs,
+                        page.url,
+                        inputs,
                     )
                 except Exception:
                     pass
                 raise
+
             await page.fill(SEL_PASSWORD_INPUT, password)
             await page.keyboard.press("Enter")
-
             await _handle_captcha_if_present(page, on_captcha)
 
-            code = _extract_code(await asyncio.wait_for(redirect_future, timeout=120.0))
-            cookies = await context.cookies()
-            return code, cookies
+            cookies = await _verified_web_cookies(page, context)
+            return None, cookies
         finally:
             await browser.close()
 
@@ -196,15 +284,9 @@ async def get_auth_code_via_email_code(
     on_captcha: Callable[[bytes], Awaitable[str]] | None = None,
     headless: bool = True,
 ) -> tuple[str | None, list[dict]]:
-    """Run Playwright OAuth flow using email-code (passwordless) → returns (code or None, web cookies).
+    """Log in to the normal HH web page using an email one-time code.
 
-    Flow:
-    1. Fill email → press Enter → captcha? → code page
-    2. on_code_required callback: code page is visible → ask user for code from email
-    3. Fill pincode input → press Enter → captcha? → intercept redirect
-
-    on_code_required: async callback () → code_string. Called when hh.ru shows the code input page.
-    on_captcha: async callback (screenshot_png_bytes) → solution_string.
+    Returns ``(None, cookies)``. OAuth is intentionally not part of this flow.
     """
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=headless)
@@ -213,17 +295,14 @@ async def get_auth_code_via_email_code(
             context = await browser.new_context(**device)
             page = await context.new_page()
 
-            redirect_future = _watch_redirect(page)
-
-            await page.goto(build_authorize_url(), timeout=30000, wait_until="load")
-
-            await page.wait_for_selector(SEL_LOGIN_INPUT, timeout=10000, state="visible")
+            await _open_web_login(page)
             await page.fill(SEL_LOGIN_INPUT, email)
             await page.keyboard.press("Enter")
 
             await _handle_captcha_if_present(page, on_captcha)
-
-            await page.wait_for_selector(SEL_CODE_CONTAINER, timeout=30000, state="visible")
+            await page.wait_for_selector(
+                SEL_CODE_CONTAINER, timeout=30000, state="visible"
+            )
 
             if on_code_required is None:
                 raise RuntimeError("Email code required but no handler provided")
@@ -231,11 +310,9 @@ async def get_auth_code_via_email_code(
 
             await page.fill(SEL_PIN_CODE_INPUT, code)
             await page.keyboard.press("Enter")
-
             await _handle_captcha_if_present(page, on_captcha)
 
-            oauth_code = _extract_code(await asyncio.wait_for(redirect_future, timeout=120.0))
-            cookies = await context.cookies()
-            return oauth_code, cookies
+            cookies = await _verified_web_cookies(page, context)
+            return None, cookies
         finally:
             await browser.close()

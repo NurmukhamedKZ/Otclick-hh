@@ -92,7 +92,16 @@ async def disconnect(user_id: str = Depends(get_current_user)):
 
 @router.post("/refresh", response_model=HHRefreshResponse)
 async def refresh(user_id: str = Depends(get_current_user)):
-    """Force-refresh access_token for the current user."""
+    """Force-refresh an optional applicant API token.
+
+    The vacancy funnel itself uses hh.ru web-session cookies. A cookies-only
+    connection is valid in 2026 and has nothing to refresh through OAuth, so
+    return an explicit no-op instead of turning a healthy connection into a UI
+    error.
+    """
+    connection = hh_auth.get_credentials_status(user_id)
+    if connection.get("connected") and not connection.get("has_api_token"):
+        return HHRefreshResponse(status="not_applicable")
     try:
         result = await token_refresh.refresh_user(user_id)
     except HHCredentialsInvalid as ex:

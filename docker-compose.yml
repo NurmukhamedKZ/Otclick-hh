@@ -1,10 +1,9 @@
-# Full local stack: backend API + worker + frontend + self-hosted Supabase.
-# Run from repo root:  docker compose up -d --build
+# Full single-user stack: Caddy + frontend + backend API/worker + self-hosted Supabase.
+# Installer uses exact-SHA prebuilt application images; local `--build` is an
+# explicit emergency/development path only.
 #
-# ONE env file: the repo-root .env (see .env.example). It feeds all three
-# consumers — compose's own ${...} substitutions (stack keys, frontend build
-# args) and the api/worker containers (app settings). `cd backend && uvicorn`
-# reads the same file (config.py looks at ../.env too).
+# ONE env file: the repo-root .env (see .env.example). Browser traffic uses one
+# Caddy origin; internal services keep private Docker-network URLs.
 
 services:
   db:
@@ -28,10 +27,7 @@ services:
       retries: 10
 
   migrate:
-    # One-shot: applies any infra/supabase/migrations/*.sql not yet recorded in
-    # public.schema_migrations. On a fresh volume the db init hook already ran
-    # the same script, so this is a no-op; on an existing volume it's the only
-    # thing that applies new migrations (init hooks never fire twice).
+    # One-shot: applies migrations not yet recorded in schema_migrations.
     image: supabase/postgres:15.1.1.78
     container_name: aiautoclicker-migrate
     restart: "no"
@@ -58,24 +54,22 @@ services:
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999
-      API_EXTERNAL_URL: http://localhost:54321/auth/v1
+      API_EXTERNAL_URL: ${SUPABASE_PUBLIC_URL:-http://localhost}/auth/v1
       GOTRUE_DB_DRIVER: postgres
       GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/postgres
-      GOTRUE_SITE_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      GOTRUE_SITE_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost}
       GOTRUE_URI_ALLOW_LIST: "*"
-      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_DISABLE_SIGNUP: "${DISABLE_SIGNUP:-true}"
       GOTRUE_JWT_SECRET: ${JWT_SECRET}
       GOTRUE_JWT_EXP: 3600
       GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
       GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
-      # Local self-host has no SMTP configured by default — autoconfirm so
-      # sign-up doesn't dead-end waiting on a confirmation email. Self-hosters
-      # who wire up SMTP (GOTRUE_SMTP_*) should flip this back to "false".
+      # No SMTP by default; installer creates an already-confirmed admin user.
       GOTRUE_MAILER_AUTOCONFIRM: "true"
       GOTRUE_EXTERNAL_GOOGLE_ENABLED: ${ENABLE_GOOGLE_AUTH:-false}
       GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOTRUE_EXTERNAL_GOOGLE_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-      GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}/auth/callback
+      GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI: ${NEXT_PUBLIC_APP_URL:-http://localhost}/auth/callback
 
   rest:
     image: postgrest/postgrest:v12.2.0
@@ -112,9 +106,6 @@ services:
       DNS_NODES: "''"
       RLIMIT_NOFILE: 10000
       APP_NAME: realtime
-      # Kong proxies to http://realtime:4000/socket/ → Host header is "realtime",
-      # and Realtime resolves the tenant from that host. The self-host seed
-      # defaults to "realtime-dev", which would 404 as TenantNotFound.
       SELF_HOST_TENANT_NAME: realtime
       SEED_SELF_HOST: "true"
       RUN_JANITOR: "true"
@@ -144,8 +135,6 @@ services:
       - supabase-storage-data:/var/lib/storage
 
   storage-init:
-    # One-shot: creates the captcha-screenshots bucket after storage-api has
-    # finished its own internal migrations (see create-captcha-bucket.sh).
     image: supabase/postgres:15.1.1.78
     container_name: aiautoclicker-storage-init
     restart: "no"
@@ -176,16 +165,10 @@ services:
       SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
     volumes:
       - ./infra/supabase/kong.yml:/kong.yml.tpl:ro
-    # Kong's declarative config doesn't do env substitution natively for
-    # $ANON_KEY/$SERVICE_ROLE_KEY placeholders — replace them inline with
-    # sed (available in the base image, no root needed).
-    # NOTE: "$$" (not "\$") is required here — Compose's own interpolation
-    # runs on this string first, and "$$" is Compose's escape for a literal
-    # "$"; "\$" is not special to Compose and still gets substituted with
-    # the real key value, breaking the sed search pattern.
     entrypoint: ["sh", "-c", "sed 's|$$ANON_KEY|'\"${ANON_KEY}\"'|g; s|$$SERVICE_ROLE_KEY|'\"${SERVICE_ROLE_KEY}\"'|g' /kong.yml.tpl > /tmp/kong.yml; exec /docker-entrypoint.sh kong docker-start"]
+    # Local installer/admin access only. Public browser requests go through Caddy.
     ports:
-      - "54321:8000"
+      - "127.0.0.1:54321:8000"
     healthcheck:
       test: ["CMD", "kong", "health"]
       interval: 10s
@@ -202,10 +185,13 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    volumes:
+      # Per-install candidate data lives outside the prebuilt image and survives
+      # git/image updates. The application only reads it when the explicit
+      # candidate loader is invoked.
+      - ./backend/data/candidate-local:/app/data/candidate-local:ro
     ports:
-      - "8000:8000"
-    # /api/hh/connect поднимает headless Chromium прямо здесь — те же 64 МБ
-    # /dev/shm по умолчанию роняют его на середине OAuth.
+      - "127.0.0.1:8000:8000"
     shm_size: "1gb"
     depends_on:
       kong:
@@ -222,45 +208,66 @@ services:
       start_period: 20s
 
   worker:
-    # Reuse the API image — same code, different entrypoint.
     image: aiautoclicker-backend:latest
     container_name: aiautoclicker-worker
     restart: unless-stopped
     env_file:
       - .env
+    volumes:
+      - ./backend/data/candidate-local:/app/data/candidate-local:ro
     command: ["python", "worker_main.py"]
     depends_on:
       api:
         condition: service_healthy
       kong:
         condition: service_healthy
-    # Playwright Chromium needs more shared memory than the 64 MB default.
     shm_size: "1gb"
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
-        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
-        # Backend FastAPI, not the Supabase gateway (54321) — /api/* lives here.
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-        NEXT_PUBLIC_GOOGLE_AUTH_ENABLED: ${NEXT_PUBLIC_GOOGLE_AUTH_ENABLED:-false}
     image: aiautoclicker-frontend:latest
     container_name: aiautoclicker-frontend
     restart: unless-stopped
     environment:
-      # Server-side Supabase calls (middleware, server components) run inside
-      # this container, where NEXT_PUBLIC_SUPABASE_URL's "localhost" points at
-      # itself, not the kong container. Route server-side calls over the
-      # docker network instead; the browser keeps using the public URL.
+      # Server-side calls use private Kong. The browser gets the public anon key
+      # from a first-party runtime cookie and uses the Caddy same-origin URL.
       SUPABASE_URL: http://kong:8000
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      GOOGLE_AUTH_ENABLED: ${NEXT_PUBLIC_GOOGLE_AUTH_ENABLED:-false}
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: aiautoclicker-caddy
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      kong:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+    environment:
+      CADDY_SITE_ADDRESS: "${CADDY_SITE_ADDRESS:-:80}"
+    ports:
+      # Direct mode uses 80/443. When another reverse proxy already owns those
+      # host ports, the installer switches these bindings to loopback 18080/18443.
+      - "${CADDY_HTTP_BIND:-80}:80"
+      - "${CADDY_HTTPS_BIND:-443}:443"
+      - "${CADDY_HTTPS_BIND:-443}:443/udp"
+    volumes:
+      - ./infra/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
 
 volumes:
   supabase-db-data:
   supabase-storage-data:
+  caddy-data:
+  caddy-config:

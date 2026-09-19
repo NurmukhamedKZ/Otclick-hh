@@ -9,10 +9,13 @@ wheels/
 # Virtual environments
 .venv
 
-# Env vars
+# Env vars / installer state
 .env
 .env.local
-
+backups/
+# Per-install candidate data. install.sh seeds this from the curated defaults;
+# users may edit it without making future git updates dirty.
+backend/data/candidate-local/
 
 # Sub Repos
 hh-applicant-tool/
@@ -23,6 +26,8 @@ extension/
 
 .wordstat.env
 .gstack/
+# Local pipeline/planning state — not tracked.
+.tmp/
 
 # recon dumps (contain a logged-in hh page)
 backend/recon_oauth_out/

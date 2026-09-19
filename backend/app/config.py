@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     DEBUG_ENDPOINTS: bool = False
     LOG_LEVEL: str = "INFO"
 
+    # Hard safety gate for every real vacancy response. Development, discovery,
+    # scoring and review must work with this false. Enabling it is necessary but
+    # not sufficient for the new funnel: a send job still needs explicit approval.
+    ALLOW_REAL_APPLY: bool = False
+
     # hh OAuth application. Empty → the official Android app's keys (see
     # app/hh/client_keys.py), which answer `geo_forbidden` outside their region.
     # Set all three together; HH_REDIRECT_URI must match the app's registration.
@@ -36,30 +41,17 @@ class Settings(BaseSettings):
     INTERNAL_CRON_TOKEN: str = ""
     REFRESH_THRESHOLD_DAYS: int = 2
 
-    # Polar.sh billing (merchant of record). Prices, intervals and currency live
-    # in the Polar products, not here — the code only knows product ids.
-    POLAR_ACCESS_TOKEN: str = ""
-    POLAR_WEBHOOK_SECRET: str = ""
-    POLAR_SERVER: str = "sandbox"  # "sandbox" | "production"
-    POLAR_SUCCESS_URL: str = "http://localhost:3000/billing/success"
-    # Product ids differ between the sandbox and production organisations, so
-    # they are env, not code. One per plan id in PLANS (POLAR_PRODUCT_<PLAN>).
-    POLAR_PRODUCT_SPRINT: str = ""
-    POLAR_PRODUCT_MONTH: str = ""
-    PLAN_CURRENCY: str = "KZT"  # display only
-
-    # Free tier vs paid. BILLING_ENABLED=False (self-host default) turns the
-    # paywall off entirely: no caps, autonomous mode for everyone. Without it a
-    # self-hoster would sit on 30 applies inside their own instance and could
-    # only fix it by editing SQL.
-    BILLING_ENABLED: bool = False
-    FREE_TOTAL_APPLIES: int = 30      # lifetime, not per day
-    PAID_DAILY_APPLIES: int = 100
-
+    # Generic OpenAI-compatible chat endpoint. The endpoint may be OpenAI itself,
+    # OpenCode Go, LongCat direct, or another provider implementing the protocol.
     OPENAI_API_KEY: str = ""
     OPENAI_BASE_URL: str = "https://api.openai.com/v1"
     OPENAI_MODEL: str = "gpt-5.4-nano"
     OPENAI_RATE_LIMIT: int = 60
+    # function_calling is the portable default. json_schema can be selected for
+    # providers that explicitly support OpenAI Structured Outputs.
+    OPENAI_STRUCTURED_OUTPUT_METHOD: Literal[
+        "function_calling", "json_mode", "json_schema"
+    ] = "function_calling"
 
     # Positioning tactics baked into AI-generated candidate-facing text. See
     # docs/spec-ai-positioning.md. "full" opts into the guide's more
@@ -77,17 +69,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-
-
-# Paid plans offered in-app. Price and interval live in the Polar product —
-# duplicating them here is how you get two sources of truth that drift. `price`
-# stays only because the UI prints it; the access window comes from the
-# subscription's current_period_end, not from a local period_days.
-# The Polar product id per plan lives in POLAR_PRODUCT_<PLAN> (see billing.py).
-# `price` is in ₸ and is only printed in the UI — the charge itself comes from
-# the Polar product, so these two must be kept in sync by hand.
-PLANS: dict[str, dict] = {
-    "sprint": {"id": "sprint", "name": "Otclick Спринт", "price": 1000},
-    "month": {"id": "month", "name": "Otclick Месяц", "price": 3000},
-}
-DEFAULT_PLAN_ID = "month"

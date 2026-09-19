@@ -1,7 +1,8 @@
 """Cover letter generator with Postgres cache.
 
-- Cache key: (vacancy_id, resume_id). Hit → skip OpenAI.
-- Miss → caller's llm.ainvoke; on failure → rand_text fallback template.
+- Cache key: (vacancy_id, resume_id) plus prompt-version validation.
+- Hit for current prompt version → skip OpenAI.
+- Miss/stale cache → caller's llm.ainvoke; on failure → rand_text fallback template.
 - All writes via service_role (RLS deny-all on table).
 """
 
@@ -15,12 +16,15 @@ import re
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.ai.prompts import build_cover_letter_prompt, sanitize_ai_text
+from app.ai.cover_letter_prompt import build_cover_letter_prompt
+from app.ai.prompts import sanitize_ai_text
 from app.config import settings
 from app.db.supabase import service_client
 
 logger = logging.getLogger(__name__)
 
+
+COVER_LETTER_PROMPT_VERSION = "v2-rich"
 
 FALLBACK_TEMPLATE = (
     "{Здравствуйте|Добрый день}! Меня заинтересовала вакансия "
@@ -75,14 +79,28 @@ def _build_prompt(vacancy: dict, resume: dict) -> str:
 def _cache_get(vacancy_id: str, resume_uuid: str) -> str | None:
     res = (
         service_client.table("cover_letters_cache")
-        .select("text")
+        .select("text,prompt_version")
         .eq("vacancy_id", vacancy_id)
         .eq("resume_id", resume_uuid)
         .maybe_single()
         .execute()
     )
     row = res.data if res else None
-    return row["text"] if row else None
+    if not row:
+        return None
+
+    # `None` keeps old unit-test/mocked rows backwards compatible. In a migrated
+    # database legacy rows receive the explicit default `v1` and are regenerated.
+    prompt_version = row.get("prompt_version")
+    if prompt_version not in (None, COVER_LETTER_PROMPT_VERSION):
+        logger.debug(
+            "cover_letter: stale cache vacancy=%s version=%s current=%s",
+            vacancy_id,
+            prompt_version,
+            COVER_LETTER_PROMPT_VERSION,
+        )
+        return None
+    return row["text"]
 
 
 def _cache_put(
@@ -103,6 +121,7 @@ def _cache_put(
                 "text": text,
                 "model": model,
                 "source": source,
+                "prompt_version": COVER_LETTER_PROMPT_VERSION,
             },
             on_conflict="vacancy_id,resume_id",
         ).execute()
