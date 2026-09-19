@@ -1,8 +1,12 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
+      - "feature/**"
+      - "integration/**"
   pull_request:
 
 jobs:
@@ -10,6 +14,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate installer and compose contract
+        run: |
+          bash -n install.sh
+          bash -n install-one.sh
+          bash -n install-update.sh
+          python3 -m py_compile infra/bootstrap.py backend/scripts/load_candidate_data.py
+          python3 infra/bootstrap.py --openai-key ci-placeholder
+          docker compose -f docker-compose.yml -f docker-compose.prebuilt.yml config >/dev/null
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
@@ -57,3 +69,9 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit
       - run: npm test
+      - run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: http://localhost
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
+          NEXT_PUBLIC_API_URL: http://localhost
+          NEXT_PUBLIC_GOOGLE_AUTH_ENABLED: "false"

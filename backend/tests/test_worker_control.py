@@ -74,7 +74,7 @@ def test_active_user_flags_maps_both_flags():
         [
             {"id": "a", "worker_enabled": True, "agent_enabled": False},
             {"id": "b", "worker_enabled": False, "agent_enabled": True},
-            {"id": "c", "worker_enabled": False, "agent_enabled": False},  # dropped
+            {"id": "c", "worker_enabled": False, "agent_enabled": False},
         ]
     )
 
@@ -95,28 +95,31 @@ def test_active_user_flags_empty_when_no_active_creds():
 
 
 @pytest.mark.asyncio
-async def test_reconcile_drives_both_loops_gated_by_plan():
+async def test_reconcile_drives_discovery_and_agent_without_plan_gate():
     import worker_main
 
     registry = MagicMock()
-    registry.active_user_ids.return_value = ["b", "c"]  # c desired off now
+    registry.active_user_ids.return_value = ["b", "c"]
     registry.reconcile = AsyncMock()
 
     flags = {"a": (True, False), "b": (False, True)}
-    with patch.object(worker_main, "active_user_flags", return_value=flags), \
-         patch.object(worker_main, "filter_paid", side_effect=lambda u: u):
+    with (
+        patch.object(worker_main, "active_user_flags", return_value=flags),
+        patch.object(worker_main, "_run_manual_search_job", new=AsyncMock(return_value=None)),
+        patch.object(worker_main, "_run_discovery_if_due", new=AsyncMock()) as discovery,
+    ):
         await worker_main._reconcile(registry)
 
     calls = {c.args[0]: c.args[1:] for c in registry.reconcile.await_args_list}
-    assert calls["a"] == (True, False)   # newly desired apply-only
-    assert calls["b"] == (False, True)   # agent-only
-    assert calls["c"] == (False, False)  # live but no longer desired → stop both
+    assert calls["a"] == (False, False)
+    assert calls["b"] == (False, True)
+    assert calls["c"] == (False, False)
+    discovery.assert_any_await("a", True)
+    discovery.assert_any_await("b", False)
 
 
 @pytest.mark.asyncio
-async def test_free_user_keeps_apply_loop_loses_agent():
-    """Бесплатный не выкидывается — его ограничивает лимитер, а не ворота.
-    Агент-рекрутёр автономен по определению, поэтому остаётся платным."""
+async def test_agent_flag_is_honoured_for_every_user():
     import worker_main
 
     registry = MagicMock()
@@ -124,8 +127,12 @@ async def test_free_user_keeps_apply_loop_loses_agent():
     registry.reconcile = AsyncMock()
 
     flags = {"a": (True, True)}
-    with patch.object(worker_main, "active_user_flags", return_value=flags), \
-         patch.object(worker_main, "filter_paid", side_effect=lambda u: []):
+    with (
+        patch.object(worker_main, "active_user_flags", return_value=flags),
+        patch.object(worker_main, "_run_manual_search_job", new=AsyncMock(return_value=None)),
+        patch.object(worker_main, "_run_discovery_if_due", new=AsyncMock()) as discovery,
+    ):
         await worker_main._reconcile(registry)
 
-    registry.reconcile.assert_awaited_once_with("a", True, False)
+    registry.reconcile.assert_awaited_once_with("a", False, True)
+    discovery.assert_awaited_once_with("a", True)

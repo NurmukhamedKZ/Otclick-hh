@@ -36,11 +36,15 @@ class CaptchaSolveRequest(BaseModel):
 
 class HHStatusResponse(BaseModel):
     connected: bool
+    # The new vacancy funnel runs on the authenticated hh.ru web session.
+    # Applicant Bearer/API access is optional and must never determine whether
+    # the account is considered connected.
+    has_api_token: bool = False
     expires_at: datetime | None = None
     last_refreshed_at: datetime | None = None
     hh_user_id: str | None = None
 
 
 class HHRefreshResponse(BaseModel):
-    status: Literal["refreshed", "invalid", "error"]
+    status: Literal["refreshed", "invalid", "error", "not_applicable"]
     error: str | None = None

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -15,7 +14,6 @@ from app.api.deps import get_current_user
 from app.config import settings
 from app.db.supabase import service_client
 from app.services.notifications import notify
-from app.worker.limiter import DAILY_LIMIT, DEFAULT_TZ
 
 router = APIRouter(prefix="/api/_debug", tags=["debug"])
 
@@ -54,32 +52,6 @@ async def restore_token(user_id: str = Depends(get_current_user)) -> dict:
 
     await loop.run_in_executor(None, _do)
     return {"ok": True}
-
-
-@router.post("/counter/saturate")
-async def saturate_counter(user_id: str = Depends(get_current_user)) -> dict:
-    _ensure_enabled()
-    loop = asyncio.get_running_loop()
-
-    def _do() -> str:
-        res = (
-            service_client.table("profiles")
-            .select("timezone")
-            .eq("id", user_id)
-            .maybe_single()
-            .execute()
-        )
-        tz_name = (res.data or {}).get("timezone") if res else None
-        tz = ZoneInfo(tz_name or DEFAULT_TZ)
-        local_date = datetime.now(tz).date().isoformat()
-        service_client.table("apply_counters").upsert(
-            {"user_id": user_id, "date": local_date, "count": DAILY_LIMIT},
-            on_conflict="user_id,date",
-        ).execute()
-        return local_date
-
-    local_date = await loop.run_in_executor(None, _do)
-    return {"ok": True, "date": local_date, "count": DAILY_LIMIT}
 
 
 @router.post("/counter/reset")

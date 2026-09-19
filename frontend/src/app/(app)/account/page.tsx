@@ -12,15 +12,10 @@ type Tab = "profile" | "integrations" | "danger";
 
 type HHStatus = {
   connected: boolean;
+  has_api_token: boolean;
   expires_at: string | null;
   last_refreshed_at: string | null;
   hh_user_id: string | null;
-};
-
-type BillingStatusShape = {
-  plan: string;
-  plan_expires_at: string | null;
-  next_charge_at: string | null;
 };
 
 const TABS: { key: Tab; label: string }[] = [
@@ -37,7 +32,6 @@ export default function AccountPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [createdAt, setCreatedAt] = useState<string | null>(null);
   const [hh, setHH] = useState<HHStatus | null>(null);
-  const [billing, setBilling] = useState<BillingStatusShape | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -52,9 +46,6 @@ export default function AccountPage() {
     apiFetch<HHStatus>("/api/hh/status")
       .then(setHH)
       .catch((e) => setErr(e instanceof Error ? e.message : "hh status failed"));
-    apiFetch<BillingStatusShape>("/api/billing/status")
-      .then(setBilling)
-      .catch(() => undefined);
   }, [supabase]);
 
   async function disconnectHH() {
@@ -92,7 +83,6 @@ export default function AccountPage() {
   const memberSince = createdAt
     ? new Date(createdAt).toLocaleDateString("ru-RU", { month: "long", year: "numeric" })
     : null;
-  const isPro = billing?.plan === "active";
 
   return (
     <>
@@ -121,9 +111,6 @@ export default function AccountPage() {
             {memberSince ? `с ${memberSince}` : "—"}
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-            <Tag tone={isPro ? "dark" : "neutral"} dot>
-              {isPro ? "pro" : "free"}
-            </Tag>
             <Tag tone={hhTone} dot>
               {hhConnected ? "hh подключён" : "hh не подключён"}
             </Tag>
@@ -225,15 +212,18 @@ export default function AccountPage() {
                 marginBottom: 16,
               }}
             >
+              <Row k="сессия" v={hhConnected ? "web-session / cookies" : "—"} />
               <Row k="hh user_id" v={hh?.hh_user_id ?? "—"} />
               <Row
-                k="токен"
+                k="API token"
                 v={
-                  hh?.expires_at ? `до ${new Date(hh.expires_at).toLocaleString("ru-RU")}` : "—"
+                  hh?.has_api_token && hh.expires_at
+                    ? `до ${new Date(hh.expires_at).toLocaleString("ru-RU")}`
+                    : "не используется"
                 }
               />
               <Row
-                k="последнее обновление"
+                k="последнее подключение"
                 v={
                   hh?.last_refreshed_at
                     ? new Date(hh.last_refreshed_at).toLocaleString("ru-RU")
@@ -244,11 +234,13 @@ export default function AccountPage() {
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {hhConnected ? (
                 <>
-                  <Btn kind="yellow" size="sm" icon={<IRefresh size={14} />} onClick={refreshHH}>
-                    refresh token
-                  </Btn>
+                  {hh?.has_api_token && (
+                    <Btn kind="yellow" size="sm" icon={<IRefresh size={14} />} onClick={refreshHH}>
+                      refresh API token
+                    </Btn>
+                  )}
                   <LinkBtn href="/onboarding" kind="ghostDark" size="sm" icon={<ILink size={14} />}>
-                    переподключить
+                    переподключить web-session
                   </LinkBtn>
                   <Btn kind="ghostDark" size="sm" icon={<IPower size={14} />} onClick={disconnectHH}>
                     отключить
@@ -298,7 +290,7 @@ export default function AccountPage() {
             />
             <DangerRow
               title="Удалить аккаунт"
-              sub="навсегда удалит данные, отклики, токены hh"
+              sub="навсегда удалит данные, отклики, web-session hh"
               btnLabel="Удалить"
               tone="err"
               disabled

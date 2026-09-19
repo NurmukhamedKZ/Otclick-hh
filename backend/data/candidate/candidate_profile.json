@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "source": "example template: replace with your own profile",
+  "target_roles": [
+    {"role": "Python Backend Developer", "priority": 1},
+    {"role": "Software Engineer", "priority": 2}
+  ],
+  "not_interested": ["Только поддержка legacy без развития", "Микроменеджмент"],
+  "industries": {"priority": ["fintech", "SaaS"], "not_interesting_as_standalone_core": []},
+  "compensation": {"target_fixed_net_rub_per_month": 300000},
+  "positioning": {
+    "working_hypothesis": "Backend-разработчик, который доводит продуктовые фичи до продакшена."
+  }
+}

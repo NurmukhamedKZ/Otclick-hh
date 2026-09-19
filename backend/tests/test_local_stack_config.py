@@ -1,13 +1,11 @@
 """Local self-hosted Supabase wiring — static config checks (no running stack needed).
 
-Guards the class of bug that broke hh auth after the cloud→local move: the frontend
-was built with NEXT_PUBLIC_API_URL pointing at Kong (54321) instead of the backend
-(8000), so every /api/* call 404'd. NEXT_PUBLIC_* is baked at image build time, so a
-wrong default in a template file silently ships.
+The production frontend image must be portable between installations: per-install
+Supabase JWT/anon material is supplied at container runtime, never baked into the
+Next.js image. Browser traffic stays same-origin behind Caddy.
 """
 
 import os
-import re
 from pathlib import Path
 
 # Set required env BEFORE importing app modules
@@ -92,10 +90,10 @@ def test_supabase_public_url_has_local_default():
     assert Settings.model_fields["SUPABASE_PUBLIC_URL"].default == "http://localhost:54321"
 
 
-# --- port wiring: backend is 8000, Kong is 54321 -----------------------------------
+# --- local-dev template ------------------------------------------------------------
 
 
-def test_frontend_env_template_points_api_at_backend_not_kong():
+def test_frontend_dev_env_template_keeps_direct_local_ports():
     text = _read("frontend/.env.local.example")
 
     api_url = _env_value(text, "NEXT_PUBLIC_API_URL")
@@ -107,19 +105,43 @@ def test_frontend_env_template_points_api_at_backend_not_kong():
     assert api_url != supabase_url
 
 
-def test_compose_api_url_default_points_at_backend():
+# --- production frontend portability -----------------------------------------------
+
+
+def test_production_frontend_does_not_bake_install_specific_supabase_values():
+    compose = _read("docker-compose.yml")
+    dockerfile = _read("frontend/Dockerfile")
+
+    frontend_block = compose.split("  frontend:", 1)[1].split("\n  caddy:", 1)[0]
+    assert "args:" not in frontend_block
+    assert "SUPABASE_URL: http://kong:8000" in frontend_block
+    assert "SUPABASE_ANON_KEY: ${ANON_KEY}" in frontend_block
+
+    assert "ARG NEXT_PUBLIC_SUPABASE_ANON_KEY" not in dockerfile
+    assert "ARG NEXT_PUBLIC_SUPABASE_URL" not in dockerfile
+    assert "ARG NEXT_PUBLIC_API_URL" not in dockerfile
+
+
+def test_browser_client_uses_runtime_cookie_and_same_origin():
+    client = _read("frontend/src/lib/supabase/client.ts")
+    api = _read("frontend/src/lib/api.ts")
+    middleware = _read("frontend/src/lib/supabase/middleware.ts")
+
+    assert 'ANON_KEY_COOKIE = "otclick-supabase-anon-key"' in client
+    assert "window.location.origin" in client
+    assert "NEXT_PUBLIC_SUPABASE_ANON_KEY" not in client
+    assert "NEXT_PUBLIC_SUPABASE_URL" not in client
+    assert "process.env.NEXT_PUBLIC_API_URL" not in api
+    assert "const res = await fetch(path" in api
+    assert "process.env.SUPABASE_ANON_KEY" in middleware
+    assert "nextResponse.cookies.set(ANON_KEY_COOKIE" in middleware
+
+
+def test_compose_keeps_api_and_kong_diagnostics_on_loopback():
     compose = _read("docker-compose.yml")
 
-    match = re.search(r"NEXT_PUBLIC_API_URL:\s*\$\{NEXT_PUBLIC_API_URL:-([^}]+)\}", compose)
-    assert match, "compose must define a NEXT_PUBLIC_API_URL build arg with a default"
-    assert match.group(1).strip().endswith(f":{BACKEND_PORT}")
-
-
-def test_compose_publishes_both_ports():
-    compose = _read("docker-compose.yml")
-
-    assert f'"{KONG_PORT}:8000"' in compose, "Kong must be published on 54321"
-    assert f'"{BACKEND_PORT}:8000"' in compose, "backend must be published on 8000"
+    assert f'"127.0.0.1:{KONG_PORT}:8000"' in compose
+    assert f'"127.0.0.1:{BACKEND_PORT}:8000"' in compose
 
 
 # --- backend env template ----------------------------------------------------------
@@ -130,10 +152,30 @@ def test_backend_env_example_uses_in_network_supabase_url():
     text = _read(".env.example")
 
     assert _env_value(text, "SUPABASE_URL") == "http://kong:8000"
-    assert _env_value(text, "SUPABASE_PUBLIC_URL") == f"http://localhost:{KONG_PORT}"
+    assert _env_value(text, "SUPABASE_PUBLIC_URL") == "http://localhost"
 
 
 def test_no_cloud_supabase_leftovers_in_templates():
     for rel in (".env.example", "frontend/.env.local.example", "README.md"):
         text = _read(rel)
         assert ".supabase.co" not in text, f"{rel} still references a cloud Supabase project"
+
+
+# --- prebuilt-image install/update safety -----------------------------------------
+
+
+def test_fresh_db_init_runs_bind_mounted_migrations_through_shell():
+    script = _read("infra/supabase/init/zz2-run-app-migrations.sh")
+
+    assert "exec sh /migrate.sh" in script
+    assert "\nexec /migrate.sh\n" not in script
+
+
+def test_candidate_local_data_is_runtime_mounted_into_prebuilt_backend_services():
+    compose = _read("docker-compose.yml")
+    mount = "./backend/data/candidate-local:/app/data/candidate-local:ro"
+
+    api_block = compose.split("  api:", 1)[1].split("\n  worker:", 1)[0]
+    worker_block = compose.split("  worker:", 1)[1].split("\n  frontend:", 1)[0]
+    assert mount in api_block
+    assert mount in worker_block

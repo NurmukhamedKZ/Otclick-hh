@@ -92,7 +92,6 @@ export default function CommandPalette() {
       ["/chats", "Чаты", "переписка рекрутёр сообщения"],
       ["/todo", "Задания", "задачи черновики анкеты todo"],
       ["/account", "Аккаунт", "настройки профиль hh"],
-      ["/billing", "Подписка", "оплата тариф pro billing"],
     ].map(([href, label, keywords]) => ({
       id: `nav:${href}`,
       label,

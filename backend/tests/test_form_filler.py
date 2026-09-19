@@ -352,6 +352,7 @@ async def test_submit_response_plain_posts_without_test_fields(monkeypatch):
     async def _fake_hh_resume(user_id, resume_row_id):
         return "hr"
 
+    monkeypatch.setattr(form_filler.settings, "ALLOW_REAL_APPLY", True)
     monkeypatch.setattr(form_filler, "_post_response", _fake_post)
     monkeypatch.setattr(form_filler, "load_web_session", _fake_session)
     monkeypatch.setattr(form_filler, "_get_hh_resume_id", _fake_hh_resume)

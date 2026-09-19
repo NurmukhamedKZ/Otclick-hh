@@ -1,0 +1,11 @@
+# Production compatibility override for the unified main product line.
+#
+# The product frontend is already runtime-safe: browser Supabase/API access is
+# same-origin and the public anon key / Google-auth flag are delivered through
+# first-party runtime cookies. Therefore the prebuilt production path must not
+# replace the standalone `node server.js` entrypoint or rewrite the .next tree.
+#
+# Keep this file so install-update.sh can use one stable compose command across
+# releases and include the override in its content hash without changing service
+# behavior.
+services: {}

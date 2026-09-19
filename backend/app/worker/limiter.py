@@ -1,9 +1,11 @@
-"""Per-user apply limits.
+"""Apply counters and compatibility limiter.
 
-Paid: N/day in the user's local TZ. Free: a lifetime total, counted straight off
-`applications` — no counter column, one query per loop iteration is cheaper than
-a new entity to keep in sync. Which of the two applies comes from
-`plan.limits_for`, never from a constant here.
+Commercial free/paid quotas were removed from the self-hosted build. `check()`
+therefore never blocks sending. Daily counters and total-delivered helpers remain
+because they are useful for analytics/status and are independent of billing.
+
+The hard `ALLOW_REAL_APPLY` safety gate and explicit send-queue approval are
+separate controls and are intentionally unaffected by this module.
 """
 
 from __future__ import annotations
@@ -14,20 +16,16 @@ from datetime import datetime
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from app.config import settings
 from app.db.supabase import service_client
-from app.services import plan as plan_service
 
 logger = logging.getLogger(__name__)
 
-DAILY_LIMIT = settings.PAID_DAILY_APPLIES
 DEFAULT_TZ = "Asia/Almaty"
 
-# Statuses that actually reached hh. form_required / failed / captcha never did
-# and must not burn a free user's lifetime quota.
+# Statuses that actually reached hh. form_required / failed / captcha never did.
 COUNTED_STATUSES = ("sent", "form_sent")
 
-LimitResult = Literal["allowed", "limit_day", "limit_total"]
+LimitResult = Literal["allowed"]
 
 
 def _tz_for_user(user_id: str) -> ZoneInfo:
@@ -63,9 +61,7 @@ def _read_day_count(user_id: str, local_date: str) -> int:
 
 
 def _increment_day(user_id: str, local_date: str) -> int:
-    """Atomic +1 (migration 025). A read-modify-write here loses increments as
-    soon as anything other than the single per-user runner writes, and the daily
-    cap stops holding."""
+    """Atomic +1 (migration 025), retained for status/analytics counters."""
     res = service_client.rpc(
         "increment_apply_counter", {"p_user_id": user_id, "p_date": local_date}
     ).execute()
@@ -73,7 +69,7 @@ def _increment_day(user_id: str, local_date: str) -> int:
 
 
 def sent_total(user_id: str) -> int:
-    """Applies that actually reached hh, ever. Drives the free lifetime cap."""
+    """Count responses that actually reached hh, across all time."""
     res = (
         service_client.table("applications")
         .select("id", count="exact")
@@ -85,17 +81,7 @@ def sent_total(user_id: str) -> int:
 
 
 def _check_sync(user_id: str) -> LimitResult:
-    limits = plan_service.limits_for(plan_service._fetch_profile(user_id))
-
-    total_cap = limits["total"]
-    if total_cap is not None and sent_total(user_id) >= total_cap:
-        return "limit_total"
-
-    daily_cap = limits["daily"]
-    if daily_cap is not None:
-        tz = _tz_for_user(user_id)
-        if _read_day_count(user_id, _today_local(tz)) >= daily_cap:
-            return "limit_day"
+    """Compatibility hook: commercial quotas no longer exist."""
     return "allowed"
 
 
@@ -105,8 +91,7 @@ def _increment_sync(user_id: str) -> int:
 
 
 async def check(user_id: str) -> LimitResult:
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, _check_sync, user_id)
+    return "allowed"
 
 
 async def increment(user_id: str) -> int:
