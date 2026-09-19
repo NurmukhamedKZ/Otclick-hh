@@ -7,28 +7,46 @@ import { createClient } from "@/lib/supabase/client";
 import { Btn } from "@/components/otclick/ui";
 import { IEye, ILock, ILogo, IMail } from "@/components/otclick/icons";
 
+type Mode = "login" | "signup";
+
 export default function AuthPage() {
   const router = useRouter();
   const supabase = createClient();
+  const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const googleAuthEnabled = process.env.NEXT_PUBLIC_GOOGLE_AUTH_ENABLED === "true";
 
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
     setErr(null);
+    setMsg(null);
     setLoading(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    setLoading(false);
-    if (error) {
-      setErr(error.message);
-      return;
+    if (mode === "login") {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      setLoading(false);
+      if (error) return setErr(error.message);
+      router.push("/dashboard");
+      router.refresh();
+    } else {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { emailRedirectTo: `${location.origin}/auth/callback` },
+      });
+      setLoading(false);
+      if (error) return setErr(error.message);
+      if (data.session) {
+        router.push("/dashboard");
+        router.refresh();
+      } else {
+        setMsg("Проверь почту — отправлена ссылка подтверждения.");
+      }
     }
-    router.push("/dashboard");
-    router.refresh();
   }
 
   async function google() {
@@ -39,6 +57,8 @@ export default function AuthPage() {
     });
     if (error) setErr(error.message);
   }
+
+  const isLogin = mode === "login";
 
   return (
     <div
@@ -95,12 +115,17 @@ export default function AuthPage() {
           <ILogo size={48} />
           <h1
             className="serif"
-            style={{ fontSize: 56, lineHeight: 1, margin: "24px 0 16px", fontWeight: 400 }}
+            style={{
+              fontSize: 56,
+              lineHeight: 1,
+              margin: "24px 0 16px",
+              fontWeight: 400,
+            }}
           >
-            Персональный<br />поиск вакансий
+            Войди и забудь<br />про отклики
           </h1>
           <div style={{ color: "#ffffff80", fontSize: 16, lineHeight: 1.5 }}>
-            Один пользователь. Поиск, оценка, ручной выбор и контроль каждого сопроводительного письма.
+            Подключи hh, настрой фильтры один раз — дальше всё сам.
           </div>
           <div
             style={{
@@ -141,9 +166,40 @@ export default function AuthPage() {
         }}
       >
         <div style={{ maxWidth: 380, width: "100%", margin: "0 auto" }}>
-          <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 4 }}>Вход</div>
+          <div
+            style={{
+              display: "inline-flex",
+              background: "var(--surface)",
+              padding: 6,
+              borderRadius: 999,
+              marginBottom: 24,
+            }}
+          >
+            {(["login", "signup"] as const).map((id) => (
+              <button
+                type="button"
+                key={id}
+                onClick={() => setMode(id)}
+                style={{
+                  border: "none",
+                  padding: "8px 22px",
+                  borderRadius: 999,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  background: mode === id ? "var(--ink)" : "transparent",
+                  color: mode === id ? "#F5F1E6" : "var(--ink)",
+                  cursor: "pointer",
+                }}
+              >
+                {id === "login" ? "войти" : "регистрация"}
+              </button>
+            ))}
+          </div>
+          <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 4 }}>
+            {isLogin ? "С возвращением" : "Создай аккаунт"}
+          </div>
           <div style={{ color: "var(--muted)", fontSize: 14, marginBottom: 24 }}>
-            Регистрация закрыта. Учётная запись создаётся при установке приложения.
+            {isLogin ? "Бот соскучился" : "Это займёт 20 секунд"}
           </div>
 
           {googleAuthEnabled && (
@@ -174,12 +230,21 @@ export default function AuthPage() {
                 <path fill="#FBBC05" d="M3.96 10.71A5.4 5.4 0 0 1 3.68 9c0-.6.1-1.17.28-1.71V4.96H.96A9 9 0 0 0 0 9c0 1.45.35 2.83.96 4.04l3-2.33z" />
                 <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58A9 9 0 0 0 9 0 9 9 0 0 0 .96 4.96l3 2.33C4.67 5.17 6.66 3.58 9 3.58z" />
               </svg>
-              войти через Google
+              продолжить с google
             </button>
           )}
 
           {googleAuthEnabled && (
-            <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "20px 0", color: "var(--muted)", fontSize: 12 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                margin: "20px 0",
+                color: "var(--muted)",
+                fontSize: 12,
+              }}
+            >
               <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
               или email
               <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
@@ -197,7 +262,7 @@ export default function AuthPage() {
                 autoComplete="email"
                 placeholder="email"
                 value={email}
-                onChange={(event) => setEmail(event.target.value)}
+                onChange={(e) => setEmail(e.target.value)}
                 style={{
                   width: "100%",
                   padding: "12px 16px 12px 44px",
@@ -218,13 +283,14 @@ export default function AuthPage() {
               <input
                 type={showPw ? "text" : "password"}
                 required
-                autoComplete="current-password"
-                placeholder="пароль"
+                minLength={isLogin ? undefined : 6}
+                autoComplete={isLogin ? "current-password" : "new-password"}
+                placeholder={isLogin ? "пароль" : "пароль (мин 6)"}
                 value={password}
-                onChange={(event) => setPassword(event.target.value)}
+                onChange={(e) => setPassword(e.target.value)}
                 style={{
                   width: "100%",
-                  padding: "12px 44px",
+                  padding: "12px 44px 12px 44px",
                   borderRadius: 14,
                   border: "1px solid var(--line)",
                   background: "#fff",
@@ -236,8 +302,7 @@ export default function AuthPage() {
               />
               <button
                 type="button"
-                onClick={() => setShowPw((value) => !value)}
-                aria-label={showPw ? "Скрыть пароль" : "Показать пароль"}
+                onClick={() => setShowPw((v) => !v)}
                 style={{
                   position: "absolute",
                   right: 16,
@@ -259,10 +324,11 @@ export default function AuthPage() {
               disabled={loading}
               style={{ width: "100%", justifyContent: "center" }}
             >
-              {loading ? "…" : "войти →"}
+              {loading ? "…" : isLogin ? "войти" : "зарегистрироваться"} →
             </Btn>
           </form>
 
+          {msg && <p style={{ marginTop: 18, fontSize: 13, color: "var(--ok)" }}>{msg}</p>}
           {err && <p style={{ marginTop: 18, fontSize: 13, color: "var(--err)" }}>{err}</p>}
         </div>
       </div>
