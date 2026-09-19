@@ -48,7 +48,9 @@ export async function apiFetch<T = unknown>(
         ? (data as { detail?: unknown; message?: unknown }).detail ??
           (data as { message?: unknown }).message
         : null;
-    const fallback = text.trim().slice(0, 300);
+    // Прокси и Next отдают ошибку HTML-страницей. Её нельзя пускать в message:
+    // баннер в UI показывает разметку целиком вместо человеческого текста.
+    const fallback = isJson ? text.trim().slice(0, 300) : "";
     const msg = detail || fallback || `HTTP ${res.status}`;
     throw new ApiError(
       typeof msg === "string" ? msg : JSON.stringify(msg),
