@@ -10,7 +10,7 @@ def _read(path: str) -> str:
 def test_env_defaults_keep_signup_and_real_apply_closed():
     env = _read(".env.example")
 
-    assert "DISABLE_SIGNUP=true" in env
+    assert "DISABLE_SIGNUP=false" in env
     assert "ALLOW_REAL_APPLY=false" in env
     assert "OTCLICK_USER_ID=" in env
     assert "CADDY_SITE_ADDRESS=:80" in env
@@ -29,7 +29,7 @@ def test_env_supports_generic_openai_compatible_provider():
 def test_compose_keeps_application_services_local_and_caddy_runtime_bindable():
     compose = _read("docker-compose.yml")
 
-    assert 'GOTRUE_DISABLE_SIGNUP: "${DISABLE_SIGNUP:-true}"' in compose
+    assert 'GOTRUE_DISABLE_SIGNUP: "${DISABLE_SIGNUP:-false}"' in compose
     assert '"127.0.0.1:54321:8000"' in compose
     assert '"127.0.0.1:8000:8000"' in compose
     assert '"127.0.0.1:3000:3000"' in compose
@@ -89,7 +89,7 @@ def test_installer_creates_one_user_via_admin_and_loads_candidate_context():
 
     assert "GOTRUE" not in installer  # auth configuration stays in compose, not shell mutation
     assert "auth/v1/admin/users" in installer
-    assert 'env_set DISABLE_SIGNUP true' in installer
+    assert 'env_set DISABLE_SIGNUP false' in installer
     assert "scripts/load_candidate_data.py" in installer
     assert "--data-dir data/candidate-local" in installer
     assert "multiple profiles exist" in installer

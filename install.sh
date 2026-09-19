@@ -469,7 +469,7 @@ ensure_env() {
     log "[3/8] preserving existing .env"
   fi
 
-  env_set DISABLE_SIGNUP true
+  env_set DISABLE_SIGNUP false
   env_set ALLOW_REAL_APPLY false
   configure_public_url
   configure_first_user
