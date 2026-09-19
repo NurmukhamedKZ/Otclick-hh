@@ -239,6 +239,24 @@ async def apply_one(
         await form_filler.report_dead_session(user_id, ex)
         await mark_invalid(user_id, f"web session dead on vacancy fetch: {ex}")
         return "token_dead"
+    except web.CaptchaRequired as ex:
+        logger.warning("apply: user=%s vacancy=%s captcha on vacancy fetch", user_id, vacancy_id)
+        await loop.run_in_executor(
+            None,
+            lambda: _record_application(
+                user_id=user_id,
+                resume_uuid=resume_uuid,
+                vacancy_id=vacancy_id,
+                status="captcha",
+                cover_letter=None,
+                error="captcha on vacancy fetch",
+            ),
+        )
+        try:
+            await captcha_service.create_request(user_id, ex.url)
+        except Exception:
+            logger.exception("apply: failed to create captcha_request")
+        return "captcha"
 
     employer_id = _extract_employer_id(vacancy)
     employer_name = (vacancy.get("employer") or {}).get("name")
@@ -436,10 +454,38 @@ async def apply_one(
     err_text = (error or "").lower()
     # Captcha must NOT fall through to "failed": the runner would keep applying
     # into a captcha wall while looking healthy, which is the fastest way to get
-    # the account flagged. ponytail: substring probe — the web captcha body was
-    # never captured in recon, tighten it once a real one is seen.
-    if "captcha" in err_text:
+    # the account flagged. The precise case — hh's own /account/captcha redirect
+    # on the pre-submit GET — is tagged exactly as "captcha_wall: <url>" by
+    # form_filler.CaptchaRequired. The substring fallback stays for a POST
+    # rejected directly (no preceding GET redirect) — never captured in recon,
+    # so there's no real URL to open for it; web_captcha falls back to a bare
+    # https://hh.ru/account/captcha in that case (see app/worker/runner.py).
+    if error and error.startswith("captcha_wall: "):
+        challenge_url = error[len("captcha_wall: "):]
         logger.warning("apply: user=%s vacancy=%s captcha on submit", user_id, vacancy_id)
+        await loop.run_in_executor(
+            None,
+            lambda: _record_application(
+                user_id=user_id,
+                resume_uuid=resume_uuid,
+                vacancy_id=vacancy_id,
+                status="captcha",
+                cover_letter=cover_letter or None,
+                error=error,
+                employer_id=employer_id,
+            ),
+        )
+        try:
+            await captcha_service.create_request(user_id, challenge_url)
+        except Exception:
+            logger.exception("apply: failed to create captcha_request")
+        return "captcha"
+    if "captcha" in err_text:
+        logger.warning(
+            "apply: user=%s vacancy=%s captcha on submit (no challenge URL — "
+            "POST rejected directly, not the pre-submit GET)",
+            user_id, vacancy_id,
+        )
         await loop.run_in_executor(
             None,
             lambda: _record_application(

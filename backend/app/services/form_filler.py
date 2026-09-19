@@ -41,6 +41,14 @@ class WebSessionExpired(Exception):
     """hh no longer accepts the stored web cookies — the user must reconnect."""
 
 
+class CaptchaRequired(Exception):
+    """hh redirected the web session to a captcha wall (/account/captcha)."""
+
+    def __init__(self, url: str):
+        super().__init__(url)
+        self.url = url
+
+
 def session_looks_dead(resp: requests.Response) -> bool:
     """True when hh answered a logged-out request (auth wall, not a real error)."""
     if resp.status_code in (401, 403):
@@ -109,6 +117,19 @@ async def load_web_session(user_id: str) -> requests.Session:
         )
     _sessions[user_id] = (time.monotonic(), session)
     return session
+
+
+async def load_web_cookies(user_id: str) -> list[dict]:
+    """Raw decrypted cookie list — for callers that need cookies outside a
+    requests.Session (Playwright's context.add_cookies wants this exact shape,
+    which is also exactly how they're stored: captured via context.cookies()
+    during OAuth login, JSON-serialized as-is). Raises ValueError if no
+    session is stored, same contract as load_web_session."""
+    loop = asyncio.get_running_loop()
+    enc = await loop.run_in_executor(None, _load_cookies_encrypted, user_id)
+    if not enc:
+        raise ValueError(f"no stored web session for user {user_id} — reconnect required")
+    return json.loads(decrypt_token(enc))
 
 
 def extract_xsrf_token(page_html: str) -> str:
@@ -441,6 +462,8 @@ def _submit_response(
     # parsed out of it.
     page_url = _response_url(vacancy_id) if answers else f"https://hh.ru/vacancy/{vacancy_id}"
     r = session.get(page_url, timeout=15)
+    if "/account/captcha" in (r.url or ""):
+        raise CaptchaRequired(r.url)
     if session_looks_dead(r):
         raise WebSessionExpired(f"hh rejected the web session ({r.status_code})")
     r.raise_for_status()
@@ -578,6 +601,8 @@ async def submit_response(
         resp = await loop.run_in_executor(
             None, _submit_response, session, vacancy_id, hh_resume_id, letter, answers
         )
+    except CaptchaRequired as ex:
+        return "failed", f"captcha_wall: {ex.url}"
     except WebSessionExpired as ex:
         await report_dead_session(user_id, ex)
         return "failed", f"web_session_expired: {ex}"

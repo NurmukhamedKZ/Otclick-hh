@@ -26,6 +26,7 @@ import requests
 
 from app.hh.page_json import find_state
 from app.services.form_filler import (
+    CaptchaRequired,
     WebSessionExpired,
     load_web_session,
     session_looks_dead,
@@ -111,6 +112,8 @@ def _get(session: requests.Session, user_id: str, url: str, **kw) -> requests.Re
             continue
 
         _last_request_at[user_id] = time.monotonic()
+        if "/account/captcha" in (resp.url or ""):
+            raise CaptchaRequired(resp.url)
         if session_looks_dead(resp):
             raise WebSessionExpired(f"hh rejected the web session ({resp.status_code})")
         if resp.status_code in (404, 410):

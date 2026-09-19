@@ -31,7 +31,7 @@ const PAGES = [
   { icon: <IMail size={15} />, name: "Чаты", desc: "переписка с рекрутёрами, ИИ отвечает сам" },
   { icon: <IDoc size={15} />, name: "Задания", desc: "задачи от агента, что требует твоего внимания" },
   { icon: <IBell size={15} />, name: "Уведомления", desc: "события воркера в реальном времени" },
-  { icon: <IUser size={15} />, name: "Аккаунт", desc: "подключение hh, подписка, настройки" },
+  { icon: <IUser size={15} />, name: "Аккаунт", desc: "подключение hh, настройки" },
 ];
 
 type StepKey = "connect" | "resume" | "filter" | "launch";

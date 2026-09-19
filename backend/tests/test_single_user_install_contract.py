@@ -92,7 +92,7 @@ def test_installer_creates_one_user_via_admin_and_loads_candidate_context():
     assert 'env_set DISABLE_SIGNUP false' in installer
     assert "scripts/load_candidate_data.py" in installer
     assert "--data-dir data/candidate-local" in installer
-    assert "multiple profiles exist" in installer
+    assert "multiple profiles exist" not in installer  # sign-up is open
 
 
 def test_installer_never_enables_real_apply():

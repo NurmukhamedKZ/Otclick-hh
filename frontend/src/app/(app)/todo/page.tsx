@@ -34,23 +34,18 @@ function FormDraftCard({
 
   return (
     <Card style={{ display: "grid", gap: 10, gridTemplateColumns: "minmax(0, 1fr)" }}>
-      <div style={{ fontWeight: 600, overflowWrap: "anywhere" }}>
+      <a
+        href={draft.vacancy_url ?? `https://hh.ru/vacancy/${draft.vacancy_id}`}
+        target="_blank"
+        rel="noreferrer"
+        style={{ fontWeight: 600, overflowWrap: "anywhere", color: "inherit", textDecoration: "underline" }}
+      >
         {draft.vacancy_title ?? `Вакансия ${draft.vacancy_id}`}
-      </div>
+      </a>
       {draft.employer_name && (
         <div style={{ fontSize: 13, color: "var(--muted)", overflowWrap: "anywhere" }}>
           {draft.employer_name}
         </div>
-      )}
-      {draft.vacancy_url && (
-        <a
-          href={draft.vacancy_url}
-          target="_blank"
-          rel="noreferrer"
-          style={{ fontSize: 13, color: "var(--coral)", textDecoration: "underline" }}
-        >
-          Открыть вакансию ↗
-        </a>
       )}
       <div style={{ display: "grid", gap: 12, paddingTop: 6 }}>
         {answers.map((a, i) => (

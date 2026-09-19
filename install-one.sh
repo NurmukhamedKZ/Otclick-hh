@@ -6,9 +6,9 @@ set -Eeuo pipefail
 # application changes do not redownload the full image bundle.
 REF="${OTCLICK_REF:-feature/persistent-vacancy-funnel}"
 INSTALL_DIR="${OTCLICK_DIR:-/opt/otclick-hh}"
-RAW_URL="https://raw.githubusercontent.com/gest0r1/Otclick-hh/${REF}/install.sh"
+RAW_URL="https://raw.githubusercontent.com/NurmukhamedKZ/Otclick-hh/${REF}/install.sh"
 if [[ -d "$INSTALL_DIR/.git" && "${OTCLICK_FULL_INSTALL:-0}" != "1" ]]; then
-  RAW_URL="https://raw.githubusercontent.com/gest0r1/Otclick-hh/${REF}/install-update.sh"
+  RAW_URL="https://raw.githubusercontent.com/NurmukhamedKZ/Otclick-hh/${REF}/install-update.sh"
 fi
 
 if [[ "${EUID}" -ne 0 ]]; then

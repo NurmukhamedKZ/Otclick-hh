@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { apiFetch } from "@/lib/api";
 import type { CaptchaRequest } from "@/lib/types";
 import { Btn, Card } from "@/components/otclick/ui";
-import { IClose, IExternal, IShield } from "@/components/otclick/icons";
+import { IClose, IShield } from "@/components/otclick/icons";
 
 const SCREENSHOT_BUCKET = "captcha-screenshots";
 
@@ -19,6 +19,7 @@ export default function CaptchaModal() {
   const [pending, setPending] = useState<CaptchaRequest | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [forcedOpen, setForcedOpen] = useState(false);
+  const [solution, setSolution] = useState("");
   const supabase = useMemo(() => createClient(), []);
 
   useEffect(() => {
@@ -119,9 +120,13 @@ export default function CaptchaModal() {
   }, [supabase]);
 
   async function handleSolve() {
-    if (!pending) return;
+    if (!pending || !solution.trim()) return;
     try {
-      await apiFetch(`/api/captcha/${pending.id}/solve`, { method: "POST" });
+      await apiFetch(`/api/captcha/${pending.id}/solve`, {
+        method: "POST",
+        body: JSON.stringify({ solution: solution.trim() }),
+      });
+      setSolution("");
     } catch {
       /* best-effort */
     }
@@ -132,6 +137,7 @@ export default function CaptchaModal() {
     setPending(null);
     setImageUrl(null);
     setForcedOpen(false);
+    setSolution("");
     if (!id) return;
     try {
       await apiFetch(`/api/captcha/${id}/dismiss`, { method: "POST" });
@@ -175,7 +181,7 @@ export default function CaptchaModal() {
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 18, fontWeight: 700 }}>hh просит решить капчу</div>
             <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 2 }}>
-              Бот поставлен на паузу. Реши капчу на hh — worker подхватит сам.
+              Бот поставлен на паузу. Введи текст с картинки — автоотклик продолжит сам.
             </div>
           </div>
           <button
@@ -230,30 +236,30 @@ export default function CaptchaModal() {
           </div>
         )}
 
+        <input
+          type="text"
+          value={solution}
+          onChange={(e) => setSolution(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") handleSolve();
+          }}
+          placeholder="Текст с картинки"
+          autoFocus
+          style={{
+            width: "100%",
+            padding: "10px 14px",
+            borderRadius: 12,
+            border: "1px solid var(--line)",
+            fontSize: 14,
+            marginBottom: 12,
+            background: "var(--bg-deep)",
+            color: "var(--ink)",
+          }}
+        />
+
         <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-          {pending.captcha_url && (
-            <a
-              href={pending.captcha_url}
-              target="_blank"
-              rel="noreferrer"
-              style={{
-                background: "var(--ink)",
-                color: "#fff",
-                padding: "10px 16px",
-                borderRadius: 999,
-                fontSize: 14,
-                fontWeight: 600,
-                textDecoration: "none",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-              }}
-            >
-              открыть на hh <IExternal size={13} />
-            </a>
-          )}
-          <Btn kind="ghost" onClick={handleSolve}>
-            я решил, проверить
+          <Btn kind="primary" onClick={handleSolve}>
+            отправить
           </Btn>
           <Btn kind="ghost" onClick={handleDismiss}>
             закрыть

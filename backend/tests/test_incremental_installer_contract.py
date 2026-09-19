@@ -220,10 +220,10 @@ def test_unified_product_surface_keeps_vacancy_funnel_and_removes_billing():
 
 def test_cover_letter_prompt_migration_follows_product_pipeline_migrations():
     migrations = ROOT / "infra/supabase/migrations"
-    for number in range(34, 42):
+    for number in range(35, 43):
         assert list(migrations.glob(f"{number:03d}_*.sql")), f"missing product migration {number:03d}"
-    assert not (migrations / "034_cover_letter_prompt_version.sql").exists()
-    assert (migrations / "042_cover_letter_prompt_version.sql").is_file()
+    assert not (migrations / "035_cover_letter_prompt_version.sql").exists()
+    assert (migrations / "043_cover_letter_prompt_version.sql").is_file()
 
 
 def test_install_state_v2_writer_reader_round_trip(tmp_path):

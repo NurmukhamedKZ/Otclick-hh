@@ -23,6 +23,10 @@ class DismissResponse(BaseModel):
     dismissed: bool
 
 
+class SolveRequest(BaseModel):
+    solution: str
+
+
 @router.get("/pending")
 async def pending(user_id: str = Depends(get_current_user)) -> list[dict]:
     return await captcha_service.get_pending(user_id)
@@ -30,11 +34,12 @@ async def pending(user_id: str = Depends(get_current_user)) -> list[dict]:
 
 @router.post("/{request_id}/solve", response_model=RecheckResponse)
 async def solve(
-    request_id: str, user_id: str = Depends(get_current_user)
+    request_id: str, body: SolveRequest, user_id: str = Depends(get_current_user)
 ) -> RecheckResponse:
-    # The runner (worker container) re-probes GET /me on its own poll cycle and
-    # resumes once hh lifts the captcha — this just clears the pending row.
-    await captcha_service.mark_solved(user_id)
+    # The worker (a separate process — no in-memory channel reaches it from
+    # here) polls captcha_requests.solution on its own cycle and submits it
+    # into the live browser holding the account's session.
+    await captcha_service.submit_solution(user_id, body.solution)
     return RecheckResponse(rechecking=True)
 
 
@@ -42,7 +47,8 @@ async def solve(
 async def dismiss(
     request_id: str, user_id: str = Depends(get_current_user)
 ) -> DismissResponse:
-    # Только убирает окно: воркер остаётся на паузе и сам продолжит, когда hh
-    # снимет капчу. Кнопка «закрыть» не должна выключать автоотклик целиком.
+    # Только убирает окно: воркер остаётся на паузе и сам продолжит работать
+    # над капчей (переоткрывая браузер по таймауту простоя). Кнопка «закрыть»
+    # не должна выключать автоотклик целиком.
     await captcha_service.mark_solved(user_id)
     return DismissResponse(dismissed=True)

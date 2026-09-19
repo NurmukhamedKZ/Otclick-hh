@@ -18,6 +18,7 @@ const TYPE_KIND: Record<string, ToastKind> = {
   form_approval: "info",
   cover_letter_written: "success",
   web_session_expired: "error",
+  recruiter_error: "error",
 };
 
 const TYPE_TITLE: Record<string, string> = {
@@ -33,6 +34,7 @@ const TYPE_TITLE: Record<string, string> = {
   form_approval: "Анкета ждёт подтверждения",
   cover_letter_written: "ИИ написал сопроводительное",
   web_session_expired: "Сессия hh истекла - переподключите аккаунт",
+  recruiter_error: "Ошибка ИИ-агента в чате с рекрутёром",
 };
 
 function formatBody(n: NotificationRow): string | undefined {
@@ -45,8 +47,38 @@ function formatBody(n: NotificationRow): string | undefined {
   }
 }
 
+function playBeep() {
+  try {
+    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.35);
+    osc.onended = () => ctx.close();
+  } catch {
+    // ignore — audio unsupported/blocked
+  }
+}
+
+function notifyBrowser(title: string, body: string | undefined) {
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  new Notification(title, { body, icon: "/favicon.ico", tag: title });
+}
+
 export default function RealtimeBridge() {
   const supabase = useMemo(() => createClient(), []);
+
+  useEffect(() => {
+    if (typeof Notification !== "undefined" && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,11 +97,14 @@ export default function RealtimeBridge() {
           (payload) => {
             const n = payload.new as NotificationRow;
             const title = TYPE_TITLE[n.type] ?? n.type;
+            const body = formatBody(n);
             pushToast({
               kind: TYPE_KIND[n.type] ?? "info",
               title,
-              body: formatBody(n),
+              body,
             });
+            playBeep();
+            notifyBrowser(title, body);
           },
         )
         .subscribe();

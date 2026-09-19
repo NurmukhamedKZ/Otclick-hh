@@ -10,6 +10,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _mock_notify():
+    from app.worker import recruiter_poll as rp
+
+    with patch.object(rp.notifications, "notify", new=AsyncMock()):
+        yield
+
+
 def _ref(**kw):
     base = {
         "nid": "n9", "chat_id": "c1", "applicant_id": "me", "vacancy_id": "v1",
@@ -183,6 +191,37 @@ async def test_poll_swallows_error_keeps_cursor():
     upsert = p[5]
     await _run(rp, agent, p)  # must not raise
     upsert.new.assert_not_awaited()  # error → cursor NOT advanced
+
+
+@pytest.mark.asyncio
+async def test_poll_error_notifies_dashboard_once_and_clears_on_recovery():
+    """A recruiter-agent crash (e.g. the gpt-5.6-luna reasoning_effort/tool-
+    calling 400) must surface on the dashboard, not just LangSmith — regression
+    for errors that were logged but never became a `notifications` row."""
+    from app.worker import recruiter_poll as rp
+
+    recent = [_ref(last_id="m5")]
+    agent = MagicMock()
+    agent.answer_recruiter = AsyncMock(side_effect=RuntimeError("boom"))
+    messages = [_msg("m5", "Здравствуйте", is_bot=False)]
+    p = _patches(rp, recent=recent, messages=messages, cursor="old")
+    await _run(rp, agent, p)
+    rp.notifications.notify.assert_awaited_once()
+    args = rp.notifications.notify.await_args.args
+    assert args[0] == "u1" and args[1] == "recruiter_error"
+
+    # a later successful poll re-arms the one-shot notification
+    rp.notifications.notify.reset_mock()
+    agent.answer_recruiter = AsyncMock()
+    p2 = _patches(rp, recent=recent, messages=messages, cursor="old")
+    await _run(rp, agent, p2)
+    rp.notifications.notify.assert_not_awaited()  # success, nothing to notify
+
+    # error again after recovery → notifies again (not suppressed forever)
+    agent.answer_recruiter = AsyncMock(side_effect=RuntimeError("boom again"))
+    p3 = _patches(rp, recent=recent, messages=messages, cursor="old")
+    await _run(rp, agent, p3)
+    rp.notifications.notify.assert_awaited_once()
 
 
 @pytest.mark.asyncio

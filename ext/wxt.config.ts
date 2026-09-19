@@ -24,6 +24,7 @@ export default defineConfig({
       "https://forms.yandex.kz/*",
       "https://forms.office.com/*",
       "http://localhost/*",
+      "https://api-production-af5e.up.railway.app/*",
     ],
     optional_host_permissions: ["<all_urls>"],
     action: {},

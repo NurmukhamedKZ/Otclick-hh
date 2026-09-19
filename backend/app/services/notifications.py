@@ -23,6 +23,7 @@ NotificationType = Literal[
     "form_approval",
     "cover_letter_written",
     "web_session_expired",
+    "recruiter_error",
 ]
 
 # Types that would otherwise fire on every poll cycle. Process-local: a worker

@@ -32,3 +32,6 @@ extension/
 # recon dumps (contain a logged-in hh page)
 backend/recon_oauth_out/
 backend/recon_web_out/
+
+# hh.ru recon dumps contain personal data (cookies, email, chat ids)
+backend/recon_out/

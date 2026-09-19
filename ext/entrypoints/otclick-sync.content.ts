@@ -8,7 +8,11 @@ import { debug } from "../lib/log";
 // externally_connectable, so this content script is the only handoff path.
 // The background dedupes against the stored token, so re-runs are cheap no-ops.
 export default defineContentScript({
-  matches: ["https://otclick.org/*", "http://localhost/*"],
+  matches: [
+    "https://otclick.org/*",
+    "http://localhost/*",
+    "https://frontend-one-sepia-34.vercel.app/*",
+  ],
   runAt: "document_idle",
   main() {
     function syncSession() {

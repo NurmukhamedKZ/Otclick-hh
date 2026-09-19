@@ -198,7 +198,7 @@ async def get_auth_code(
     raises RuntimeError.
     """
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=headless)
+        browser = await pw.chromium.launch(headless=headless, args=["--disable-dev-shm-usage"])
         try:
             device = pw.devices["Galaxy A55"]
             context = await browser.new_context(**device)
@@ -289,7 +289,7 @@ async def get_auth_code_via_email_code(
     Returns ``(None, cookies)``. OAuth is intentionally not part of this flow.
     """
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=headless)
+        browser = await pw.chromium.launch(headless=headless, args=["--disable-dev-shm-usage"])
         try:
             device = pw.devices["Galaxy A55"]
             context = await browser.new_context(**device)

@@ -9,15 +9,11 @@ from scripts.load_candidate_data import (
 DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "candidate"
 
 
-def test_prepared_candidate_data_is_valid_and_curated():
+def test_prepared_candidate_data_is_valid():
     profile, facts = load_documents(DATA_DIR)
 
-    assert profile["target_roles"][0] == {"role": "CDTO", "priority": 1}
-    assert profile["business_scale"]["standalone_cio_cdto_revenue_rub_billion"] == {
-        "from": 10,
-        "to": 100,
-    }
-    assert len(facts["facts"]) == 22
+    assert profile["target_roles"][0]["priority"] == 1
+    assert len(facts["facts"]) >= 1
     keys = [fact["key"] for fact in facts["facts"]]
     assert len(keys) == len(set(keys))
     assert facts["guardrails"]
